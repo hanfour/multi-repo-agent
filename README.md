@@ -414,7 +414,7 @@ To onboard a new team member:
 
 ## Roadmap
 
-- [ ] **Phase 3**: Sub-agent workflow with develop-commit-review-PR loop
+- [x] **Phase 3**: Sub-agent workflow with develop-commit-review-PR loop
 - [x] **Phase 4**: Docker container execution with test isolation
 - [ ] Open source release
 - [ ] Web dashboard for dependency graph visualization
