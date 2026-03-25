@@ -382,69 +382,122 @@ setup_all_databases() {
     return 1
   fi
 
-  local db_names=()
+  local instance_names=()
   while IFS= read -r name; do
     [[ -z "$name" ]] && continue
-    db_names+=("$name")
+    instance_names+=("$name")
   done < <(jq -r '.databases | keys[]' "$db_json_path")
 
-  if [[ ${#db_names[@]} -eq 0 ]]; then
+  if [[ ${#instance_names[@]} -eq 0 ]]; then
     log_warn "no databases defined in db.json" "db"
     return 0
   fi
 
-  for db_name in "${db_names[@]}"; do
-    local engine version port source password platform
-    engine=$(jq -r --arg n "$db_name" '.databases[$n].engine' "$db_json_path")
-    version=$(jq -r --arg n "$db_name" '.databases[$n].version' "$db_json_path")
-    port=$(jq -r --arg n "$db_name" '.databases[$n].port' "$db_json_path")
-    source=$(jq -r --arg n "$db_name" '.databases[$n].source // ""' "$db_json_path")
-    password=$(jq -r --arg n "$db_name" '.databases[$n].password // "mra_password"' "$db_json_path")
-    platform=$(jq -r --arg n "$db_name" '.databases[$n].platform // ""' "$db_json_path")
+  for instance_name in "${instance_names[@]}"; do
+    local engine version port password platform
+    engine=$(jq -r --arg n "$instance_name" '.databases[$n].engine' "$db_json_path")
+    version=$(jq -r --arg n "$instance_name" '.databases[$n].version' "$db_json_path")
+    port=$(jq -r --arg n "$instance_name" '.databases[$n].port' "$db_json_path")
+    password=$(jq -r --arg n "$instance_name" '.databases[$n].password // "mra_password"' "$db_json_path")
+    platform=$(jq -r --arg n "$instance_name" '.databases[$n].platform // ""' "$db_json_path")
 
-    log_progress "setting up database: $db_name ($engine:$version)" "db"
+    log_progress "setting up instance: $instance_name ($engine:$version)" "db"
 
-    # Start container
-    if ! start_db_container "$db_name" "$engine" "$version" "$port" "$password" "$platform"; then
-      log_error "failed to start container for $db_name" "db"
+    # Start container (use instance name, first schema as default DB)
+    local first_schema
+    first_schema=$(jq -r --arg n "$instance_name" '.databases[$n].schemas // {} | keys[0] // $n' "$db_json_path")
+
+    if ! start_db_container "$instance_name" "$engine" "$version" "$port" "$password" "$platform"; then
+      log_error "failed to start container for $instance_name" "db"
       continue
     fi
 
     # Wait for health
-    if ! _wait_for_db "$db_name" "$engine" "$port" "$password"; then
-      log_error "database $db_name did not become healthy" "db"
+    if ! _wait_for_db "$instance_name" "$engine" "$port" "$password"; then
+      log_error "instance $instance_name did not become healthy" "db"
       continue
     fi
 
-    # Import dump if source is set
-    if [[ -n "$source" && "$source" != "null" ]]; then
-      local resolved_source
-      resolved_source=$(_resolve_source "$source" "$workspace")
+    local container_name="mra-db-$instance_name"
 
-      if [[ ! -f "$resolved_source" ]]; then
-        log_warn "dump file not found: $resolved_source (skipping import)" "db"
-        continue
-      fi
+    # Check if this instance uses schemas (multi-db) or single-db format
+    local has_schemas
+    has_schemas=$(jq -r --arg n "$instance_name" '.databases[$n] | has("schemas")' "$db_json_path")
 
-      local decompressed
-      decompressed=$(decompress_dump "$resolved_source") || continue
+    if [[ "$has_schemas" == "true" ]]; then
+      # Multi-schema: iterate each schema, create DB, import dump
+      local schema_names=()
+      while IFS= read -r s; do
+        [[ -z "$s" ]] && continue
+        schema_names+=("$s")
+      done < <(jq -r --arg n "$instance_name" '.databases[$n].schemas | keys[]' "$db_json_path")
 
-      local container_name="mra-db-$db_name"
-      import_dump "$engine" "$container_name" "$db_name" "$decompressed" || true
+      for schema_name in "${schema_names[@]}"; do
+        local source
+        source=$(jq -r --arg n "$instance_name" --arg s "$schema_name" \
+          '.databases[$n].schemas[$s].source // ""' "$db_json_path")
 
-      # Clean up temp file if different from resolved_source
-      if [[ "$decompressed" != "$resolved_source" && -f "$decompressed" ]]; then
-        rm -f "$decompressed"
-      fi
+        # Create database if it doesn't exist
+        log_progress "creating database: $schema_name" "db"
+        case "$engine" in
+          mysql)
+            docker exec "$container_name" \
+              mysql -uroot -p"$password" -e "CREATE DATABASE IF NOT EXISTS \`$schema_name\`;" 2>/dev/null \
+              && log_success "$schema_name: created" "db" \
+              || log_warn "$schema_name: already exists or create failed" "db"
+            ;;
+          postgres|postgresql)
+            docker exec "$container_name" \
+              psql -U postgres -c "CREATE DATABASE \"$schema_name\";" 2>/dev/null \
+              && log_success "$schema_name: created" "db" \
+              || log_warn "$schema_name: already exists or create failed" "db"
+            ;;
+        esac
 
-      # Clean up downloaded file if it was a URL
-      if [[ "$source" == http://* || "$source" == https://* && -f "$resolved_source" ]]; then
-        rm -f "$resolved_source"
-      fi
+        # Import dump if source is set
+        _import_if_source "$engine" "$container_name" "$schema_name" "$source" "$password" "$workspace"
+      done
+    else
+      # Single-db format (backward compatible)
+      local source
+      source=$(jq -r --arg n "$instance_name" '.databases[$n].source // ""' "$db_json_path")
+      _import_if_source "$engine" "$container_name" "$instance_name" "$source" "$password" "$workspace"
     fi
 
-    log_success "database $db_name ready" "db"
+    log_success "instance $instance_name ready" "db"
   done
+}
+
+# Helper: import dump if source is set
+_import_if_source() {
+  local engine="$1" container_name="$2" db_name="$3" source="$4" password="$5" workspace="$6"
+
+  if [[ -z "$source" || "$source" == "null" ]]; then
+    return 0
+  fi
+
+  local resolved_source
+  resolved_source=$(_resolve_source "$source" "$workspace")
+
+  if [[ ! -f "$resolved_source" ]]; then
+    log_warn "dump file not found: $resolved_source (skipping import)" "db"
+    return 0
+  fi
+
+  local decompressed
+  decompressed=$(decompress_dump "$resolved_source") || return 0
+
+  import_dump "$engine" "$container_name" "$db_name" "$decompressed" "$password" || true
+
+  # Clean up temp file
+  if [[ "$decompressed" != "$resolved_source" && -f "$decompressed" ]]; then
+    rm -f "$decompressed"
+  fi
+
+  # Clean up downloaded file if it was a URL
+  if [[ "$source" == http://* || "$source" == https://* ]] && [[ -f "$resolved_source" ]]; then
+    rm -f "$resolved_source"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -453,7 +506,7 @@ setup_all_databases() {
 
 reimport_database() {
   local workspace="$1"
-  local db_name="$2"
+  local target="$2"  # can be instance name or schema name
   local db_json_path
   db_json_path=$(get_db_json_path "$workspace")
 
@@ -462,37 +515,58 @@ reimport_database() {
     return 1
   fi
 
-  local engine port source
-  engine=$(jq -r --arg n "$db_name" '.databases[$n].engine // ""' "$db_json_path")
-  port=$(jq -r --arg n "$db_name" '.databases[$n].port // ""' "$db_json_path")
-  source=$(jq -r --arg n "$db_name" '.databases[$n].source // ""' "$db_json_path")
+  # First check if target is a top-level instance with schemas
+  local has_instance
+  has_instance=$(jq -r --arg n "$target" '.databases[$n] // "null"' "$db_json_path")
 
-  if [[ -z "$engine" || "$engine" == "null" ]]; then
-    log_error "database '$db_name' not found in db.json" "db"
-    return 1
+  if [[ "$has_instance" != "null" ]]; then
+    # It's an instance name — reimport all its schemas
+    local engine password
+    engine=$(jq -r --arg n "$target" '.databases[$n].engine' "$db_json_path")
+    password=$(jq -r --arg n "$target" '.databases[$n].password // "mra_password"' "$db_json_path")
+    local container_name="mra-db-$target"
+
+    local has_schemas
+    has_schemas=$(jq -r --arg n "$target" '.databases[$n] | has("schemas")' "$db_json_path")
+
+    if [[ "$has_schemas" == "true" ]]; then
+      while IFS= read -r schema_name; do
+        [[ -z "$schema_name" ]] && continue
+        local source
+        source=$(jq -r --arg n "$target" --arg s "$schema_name" \
+          '.databases[$n].schemas[$s].source // ""' "$db_json_path")
+        _import_if_source "$engine" "$container_name" "$schema_name" "$source" "$password" "$workspace"
+      done < <(jq -r --arg n "$target" '.databases[$n].schemas | keys[]' "$db_json_path")
+    else
+      local source
+      source=$(jq -r --arg n "$target" '.databases[$n].source // ""' "$db_json_path")
+      _import_if_source "$engine" "$container_name" "$target" "$source" "$password" "$workspace"
+    fi
+    return $?
   fi
 
-  if [[ -z "$source" || "$source" == "null" ]]; then
-    log_error "no source defined for $db_name" "db"
+  # Otherwise search for target as a schema name inside any instance
+  local found=false
+  while IFS= read -r instance_name; do
+    [[ -z "$instance_name" ]] && continue
+    local schema_source
+    schema_source=$(jq -r --arg n "$instance_name" --arg s "$target" \
+      '.databases[$n].schemas[$s].source // "null"' "$db_json_path" 2>/dev/null)
+
+    if [[ "$schema_source" != "null" ]]; then
+      local engine password
+      engine=$(jq -r --arg n "$instance_name" '.databases[$n].engine' "$db_json_path")
+      password=$(jq -r --arg n "$instance_name" '.databases[$n].password // "mra_password"' "$db_json_path")
+      local container_name="mra-db-$instance_name"
+      _import_if_source "$engine" "$container_name" "$target" "$schema_source" "$password" "$workspace"
+      found=true
+      break
+    fi
+  done < <(jq -r '.databases | keys[]' "$db_json_path")
+
+  if [[ "$found" == "false" ]]; then
+    log_error "'$target' not found in db.json (not an instance or schema)" "db"
     return 1
-  fi
-
-  local resolved_source
-  resolved_source=$(_resolve_source "$source" "$workspace")
-
-  if [[ ! -f "$resolved_source" ]]; then
-    log_error "dump file not found: $resolved_source" "db"
-    return 1
-  fi
-
-  local decompressed
-  decompressed=$(decompress_dump "$resolved_source") || return 1
-
-  local container_name="mra-db-$db_name"
-  import_dump "$engine" "$container_name" "$db_name" "$decompressed"
-
-  if [[ "$decompressed" != "$resolved_source" && -f "$decompressed" ]]; then
-    rm -f "$decompressed"
   fi
 }
 
@@ -521,11 +595,11 @@ list_databases() {
     return 0
   fi
 
-  printf "\n%-20s %-12s %-8s %-8s %s\n" "NAME" "ENGINE" "VERSION" "PORT" "STATUS"
+  printf "\n%-16s %-10s %-8s %-6s %-10s %s\n" "INSTANCE" "ENGINE" "VERSION" "PORT" "STATUS" "SCHEMAS"
   printf "%s\n" "--------------------------------------------------------------------------------"
 
   for db_name in "${db_names[@]}"; do
-    local engine version port container_name status
+    local engine version port container_name status schemas_list
     engine=$(jq -r --arg n "$db_name" '.databases[$n].engine' "$db_json_path")
     version=$(jq -r --arg n "$db_name" '.databases[$n].version' "$db_json_path")
     port=$(jq -r --arg n "$db_name" '.databases[$n].port' "$db_json_path")
@@ -537,7 +611,16 @@ list_databases() {
       status="stopped"
     fi
 
-    printf "%-20s %-12s %-8s %-8s %s\n" "$db_name" "$engine" "$version" "$port" "$status"
+    # List schemas if multi-db, otherwise show instance name
+    local has_schemas
+    has_schemas=$(jq -r --arg n "$db_name" '.databases[$n] | has("schemas")' "$db_json_path")
+    if [[ "$has_schemas" == "true" ]]; then
+      schemas_list=$(jq -r --arg n "$db_name" '.databases[$n].schemas | keys | join(", ")' "$db_json_path")
+    else
+      schemas_list="$db_name"
+    fi
+
+    printf "%-16s %-10s %-8s %-6s %-10s %s\n" "$db_name" "$engine" "$version" "$port" "$status" "$schemas_list"
   done
 
   printf "\n"
