@@ -17,6 +17,7 @@ source "$MRA_DIR/lib/alias.sh"
 source "$MRA_DIR/lib/cleanup.sh"
 source "$MRA_DIR/lib/db.sh"
 source "$MRA_DIR/lib/doctor.sh"
+source "$MRA_DIR/lib/scan.sh"
 
 usage() {
   cat <<'USAGE'
@@ -98,9 +99,9 @@ main() {
 
     scan)
       shift
-      local scan_path="${1:-$(resolve_workspace)}"
-      log_progress "scanning workspace: $scan_path" "scan"
-      init_workspace "$scan_path" "$(jq -r '.gitOrg' "$scan_path/.collab/dep-graph.json")"
+      local workspace
+      workspace="${1:-$(resolve_workspace)}"
+      handle_scan "$workspace"
       ;;
 
     deps)
