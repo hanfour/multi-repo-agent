@@ -131,6 +131,27 @@ Output:
 [doctor] 15 passed, 2 warnings, 0 errors
 ```
 
+### `mra ask <project> "<question>"`
+
+Query a project's codebase using Claude. Non-interactive by default (returns text answer). Add `--interactive` for a full session with follow-ups.
+
+```bash
+mra ask erp "列出所有 order 相關的 API endpoint"
+mra ask erp --with-deps "erp 和 partner-api-gateway 之間的 API 依賴"
+mra ask erp --interactive "分析 orders controller 的設計模式"
+```
+
+### `mra export [project]`
+
+Generate static context files per project for external tools (e.g., reqbot-slack). Includes routes, schema, dependencies, env vars, and file structure.
+
+```bash
+mra export erp               # export single project
+mra export                   # export all projects
+```
+
+Output: `<workspace>/.collab/exports/<project>-context.md`
+
 ### `mra config <key> <value>`
 
 Manage settings.
@@ -282,6 +303,41 @@ Host (macOS/Linux)
 
 Claude runs on the host (preserving all plugins, MCP servers, and hooks). Docker containers are used only for executing environment-specific commands (tests, builds, linting).
 
+## Integration: reqbot-slack
+
+mra integrates with [reqbot-slack](reqbot-slack/) to provide technical context during requirement intake conversations.
+
+### How it works
+
+1. `mra export` generates static context files per project
+2. reqbot-slack reads these files when building prompts for Claude
+3. When a user mentions "ERP 訂單" in Slack, reqbot detects the relevant project and injects its technical context
+4. reqbot can also call `mra ask` for on-demand technical queries
+
+### Setup
+
+```bash
+# In reqbot-slack .env:
+MRA_WORKSPACE_PATH=/Users/you/OneAD
+# MRA_BIN_PATH=/Users/you/multi-repo-agent/bin/mra.sh  (optional, auto-detected)
+```
+
+### Available functions (from mra-client.ts)
+
+```typescript
+import { askMra, readProjectContext, getProjectDeps } from "./claude/mra-client.js";
+
+// Query codebase (calls mra ask)
+const result = await askMra("erp", "列出 order 相關的 API");
+
+// Read pre-exported context
+const context = readProjectContext("erp");  // 17KB of routes, schema, deps
+
+// Get dependency info
+const deps = getProjectDeps("erp");
+// { deps: ["mysql", "redis"], consumedBy: ["partner-api-gateway"] }
+```
+
 ## Project Structure
 
 ```
@@ -292,8 +348,10 @@ Claude runs on the host (preserving all plugins, MCP servers, and hooks). Docker
 |   +-- mra.sh              # Main CLI entry point
 +-- lib/
 |   +-- alias.sh            # Workspace alias management
+|   +-- ask.sh              # Codebase query (mra ask)
 |   +-- cleanup.sh          # Orphan container/log cleanup
 |   +-- colors.sh           # Color output ([tag] format)
+|   +-- export.sh           # Project context exporter
 |   +-- config.sh           # Configuration read/write
 |   +-- db.sh               # Database management
 |   +-- deps.sh             # Dependency graph reader
