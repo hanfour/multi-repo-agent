@@ -19,6 +19,7 @@ source "$MRA_DIR/lib/cleanup.sh"
 source "$MRA_DIR/lib/db.sh"
 source "$MRA_DIR/lib/doctor.sh"
 source "$MRA_DIR/lib/scan.sh"
+source "$MRA_DIR/lib/ask.sh"
 
 usage() {
   cat <<'USAGE'
@@ -33,6 +34,7 @@ Commands:
   clean [--logs-older-than Nd]  Clean orphan containers and old logs
   db [setup|status|import]      Manage databases
   doctor [project]              Verify environment health
+  ask <project> "<question>"   Query codebase via Claude
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -222,6 +224,13 @@ main() {
       local workspace
       workspace=$(resolve_workspace)
       run_doctor "$workspace" "${1:-}"
+      ;;
+
+    ask)
+      shift
+      local workspace
+      workspace=$(resolve_workspace)
+      ask_project "$workspace" "$@"
       ;;
 
     *)
