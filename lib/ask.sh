@@ -110,9 +110,30 @@ PROMPT
 
   log_progress "querying: $project_list" "ask"
 
-  # Run claude in non-interactive mode (< /dev/null prevents stdin wait)
-  claude -p "$full_prompt" "${claude_args[@]}" < /dev/null 2>/dev/null || {
+  # Run claude in non-interactive mode with JSON output for reliable capture
+  local raw_output
+  raw_output=$(claude -p "$full_prompt" "${claude_args[@]}" --output-format json < /dev/null 2>/dev/null) || {
     log_error "claude query failed" "ask"
     return 1
   }
+
+  # Extract result from JSON, fallback to raw output
+  if echo "$raw_output" | jq -e '.result' &>/dev/null; then
+    local result
+    result=$(echo "$raw_output" | jq -r '.result')
+    if [[ -n "$result" && "$result" != "null" ]]; then
+      echo "$result"
+    else
+      # result is empty but tokens were generated — try cost info
+      local tokens
+      tokens=$(echo "$raw_output" | jq -r '.usage.output_tokens // 0')
+      if [[ "$tokens" -gt 0 ]]; then
+        log_warn "claude generated $tokens tokens but result was empty" "ask"
+        log_info "try running interactively: claude --add-dir $workspace/${projects[0]}" "ask"
+      fi
+    fi
+  else
+    # Not JSON, print as-is
+    echo "$raw_output"
+  fi
 }
