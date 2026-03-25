@@ -1,0 +1,10 @@
+{
+  "autoScan": true,
+  "depthDefault": 1,
+  "aliases": {},
+  "subAgentWorkflow": {
+    "reviewLoopMax": 3,
+    "autoCommit": true,
+    "autoPR": true
+  }
+}
