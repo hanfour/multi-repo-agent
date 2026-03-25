@@ -21,6 +21,10 @@ source "$MRA_DIR/lib/doctor.sh"
 source "$MRA_DIR/lib/scan.sh"
 source "$MRA_DIR/lib/ask.sh"
 source "$MRA_DIR/lib/export.sh"
+source "$MRA_DIR/lib/docker-exec.sh"
+source "$MRA_DIR/lib/test-runner.sh"
+source "$MRA_DIR/lib/change-detector.sh"
+source "$MRA_DIR/lib/integration-test.sh"
 
 usage() {
   cat <<'USAGE'
@@ -37,6 +41,7 @@ Commands:
   doctor [project]              Verify environment health
   ask <project> "<question>"   Query codebase via Claude
   export [project]              Export project context files
+  test <project> [--integration|--mock]  Run tests in Docker
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -244,6 +249,29 @@ main() {
       else
         export_all_projects "$workspace"
       fi
+      ;;
+
+    test)
+      shift
+      local workspace project test_mode="auto"
+      workspace=$(resolve_workspace)
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --integration) test_mode="integration"; shift ;;
+          --mock) test_mode="mock"; shift ;;
+          -*) log_error "unknown option: $1" "test"; exit 1 ;;
+          *) project="$1"; shift ;;
+        esac
+      done
+      if [[ -z "${project:-}" ]]; then
+        log_error "usage: mra test <project> [--integration|--mock]" "test"
+        exit 1
+      fi
+      case "$test_mode" in
+        integration) run_cross_repo_tests "$workspace" "$project" ;;
+        mock) run_project_tests "$workspace" "$project" ;;
+        auto) run_cross_repo_tests "$workspace" "$project" ;;
+      esac
       ;;
 
     *)
