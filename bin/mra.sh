@@ -260,20 +260,16 @@ main() {
       # Resolve deps
       if [[ "$with_deps" == "true" ]]; then
         local resolved_depth="${depth:-$(config_get depthDefault)}"
-        local all_projects=()
-        for p in "${projects[@]}"; do
-          while IFS= read -r dep; do
-            [[ -z "$dep" ]] && continue
-            all_projects+=("$dep")
-          done < <(resolve_with_deps "$p" "$resolved_depth" "$graph_file")
-        done
-        # Deduplicate
-        local unique_projects
-        unique_projects=$(printf '%s\n' "${all_projects[@]}" | sort -u)
+        local resolved_projects
+        resolved_projects=$(
+          for p in "${projects[@]}"; do
+            resolve_with_deps "$p" "$resolved_depth" "$graph_file"
+          done | sort -u
+        )
         projects=()
         while IFS= read -r p; do
           [[ -n "$p" ]] && projects+=("$p")
-        done <<< "$unique_projects"
+        done <<< "$resolved_projects"
       fi
 
       launch_claude "$workspace" "$graph_file" "${projects[@]}"
