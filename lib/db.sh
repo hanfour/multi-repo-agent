@@ -115,6 +115,7 @@ start_db_container() {
   local version="$3"
   local port="$4"
   local password="${5:-mra_password}"
+  local platform="${6:-}"
 
   local container_name="mra-db-$db_name"
 
@@ -132,9 +133,16 @@ start_db_container() {
 
   log_progress "starting $engine:$version container for $db_name on port $port" "db"
 
+  # Build platform flag if specified
+  local platform_flag=()
+  if [[ -n "$platform" ]]; then
+    platform_flag=(--platform "$platform")
+  fi
+
   case "$engine" in
     mysql)
       docker run -d \
+        "${platform_flag[@]}" \
         --name "$container_name" \
         -e MYSQL_ROOT_PASSWORD="$password" \
         -e MYSQL_DATABASE="$db_name" \
@@ -143,6 +151,7 @@ start_db_container() {
       ;;
     postgres|postgresql)
       docker run -d \
+        "${platform_flag[@]}" \
         --name "$container_name" \
         -e POSTGRES_PASSWORD="$password" \
         -e POSTGRES_DB="$db_name" \
@@ -217,15 +226,15 @@ _wait_for_db() {
 
   log_progress "waiting for $db_name to be ready…" "db"
   local elapsed=0
-  while [[ $elapsed -lt 30 ]]; do
+  while [[ $elapsed -lt 60 ]]; do
     if check_db_health "$db_name" "$engine" "$port" "$password" &>/dev/null; then
-      log_success "$db_name: ready" "db"
+      log_success "$db_name: ready ($elapsed seconds)" "db"
       return 0
     fi
-    sleep 2
-    ((elapsed += 2))
+    sleep 3
+    ((elapsed += 3))
   done
-  log_error "$db_name: did not become ready within 30 seconds" "db"
+  log_error "$db_name: did not become ready within 60 seconds" "db"
   return 1
 }
 
@@ -385,22 +394,24 @@ setup_all_databases() {
   fi
 
   for db_name in "${db_names[@]}"; do
-    local engine version port source
+    local engine version port source password platform
     engine=$(jq -r --arg n "$db_name" '.databases[$n].engine' "$db_json_path")
     version=$(jq -r --arg n "$db_name" '.databases[$n].version' "$db_json_path")
     port=$(jq -r --arg n "$db_name" '.databases[$n].port' "$db_json_path")
     source=$(jq -r --arg n "$db_name" '.databases[$n].source // ""' "$db_json_path")
+    password=$(jq -r --arg n "$db_name" '.databases[$n].password // "mra_password"' "$db_json_path")
+    platform=$(jq -r --arg n "$db_name" '.databases[$n].platform // ""' "$db_json_path")
 
     log_progress "setting up database: $db_name ($engine:$version)" "db"
 
     # Start container
-    if ! start_db_container "$db_name" "$engine" "$version" "$port"; then
+    if ! start_db_container "$db_name" "$engine" "$version" "$port" "$password" "$platform"; then
       log_error "failed to start container for $db_name" "db"
       continue
     fi
 
     # Wait for health
-    if ! _wait_for_db "$db_name" "$engine" "$port"; then
+    if ! _wait_for_db "$db_name" "$engine" "$port" "$password"; then
       log_error "database $db_name did not become healthy" "db"
       continue
     fi
