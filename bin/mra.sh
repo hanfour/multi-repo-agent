@@ -20,6 +20,7 @@ source "$MRA_DIR/lib/db.sh"
 source "$MRA_DIR/lib/doctor.sh"
 source "$MRA_DIR/lib/scan.sh"
 source "$MRA_DIR/lib/ask.sh"
+source "$MRA_DIR/lib/export.sh"
 
 usage() {
   cat <<'USAGE'
@@ -35,6 +36,7 @@ Commands:
   db [setup|status|import]      Manage databases
   doctor [project]              Verify environment health
   ask <project> "<question>"   Query codebase via Claude
+  export [project]              Export project context files
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -231,6 +233,17 @@ main() {
       local workspace
       workspace=$(resolve_workspace)
       ask_project "$workspace" "$@"
+      ;;
+
+    export)
+      shift
+      local workspace
+      workspace=$(resolve_workspace)
+      if [[ -n "${1:-}" ]]; then
+        export_project "$workspace" "$1"
+      else
+        export_all_projects "$workspace"
+      fi
       ;;
 
     *)
