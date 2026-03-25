@@ -12,16 +12,21 @@ config_set() {
 }
 config_get_alias() {
   local name="$1" config_file="${2:-$MRA_CONFIG}"
-  jq -r ".aliases.\"$name\" // \"null\"" "$config_file"
+  jq -r --arg name "$name" '.aliases[$name] // "null"' "$config_file"
 }
 config_set_alias() {
   local name="$1" workspace="$2" git_org="$3" config_file="${4:-$MRA_CONFIG}"
   local tmp; tmp=$(mktemp)
-  jq ".aliases.\"$name\" = {\"workspace\": \"$workspace\", \"gitOrg\": \"$git_org\"}" \
+  jq --arg name "$name" --arg ws "$workspace" --arg org "$git_org" \
+    '.aliases[$name] = {"workspace": $ws, "gitOrg": $org}' \
     "$config_file" > "$tmp" && mv "$tmp" "$config_file"
 }
 config_handle() {
   local key="$1" value="$2"
+  if [[ $# -lt 2 ]]; then
+    log_error "usage: mra config <key> <value>" "config"
+    return 1
+  fi
   case "$key" in
     auto-scan)
       if [[ "$value" == "on" ]]; then config_set "autoScan" "true"; log_success "autoScan enabled" "config"

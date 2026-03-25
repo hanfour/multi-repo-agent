@@ -77,7 +77,9 @@ main() {
       local path="" git_org=""
       while [[ $# -gt 0 ]]; do
         case "$1" in
-          --git-org) git_org="$2"; shift 2 ;;
+          --git-org)
+            if [[ $# -lt 2 ]]; then log_error "--git-org requires a value" "mra"; exit 1; fi
+            git_org="$2"; shift 2 ;;
           *) path="$1"; shift ;;
         esac
       done
@@ -126,6 +128,7 @@ main() {
       while [[ $# -gt 0 ]]; do
         case "$1" in
           --logs-older-than)
+            if [[ $# -lt 2 ]]; then log_error "--logs-older-than requires a value" "mra"; exit 1; fi
             logs_age="${2%d}"  # strip trailing 'd'
             shift 2
             ;;
@@ -178,7 +181,9 @@ main() {
       while [[ $# -gt 0 ]]; do
         case "$1" in
           --with-deps) with_deps=true; shift ;;
-          --depth) depth="$2"; shift 2 ;;
+          --depth)
+            if [[ $# -lt 2 ]]; then log_error "--depth requires a value" "mra"; exit 1; fi
+            depth="$2"; shift 2 ;;
           --no-sync) no_sync=true; shift ;;
           -*) log_error "unknown option: $1" "mra"; exit 1 ;;
           *) projects+=("$1"); shift ;;

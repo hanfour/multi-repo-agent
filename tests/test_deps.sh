@@ -32,10 +32,16 @@ cat > "$TEST_DIR/.collab/dep-graph.json" <<'EOF'
 }
 EOF
 
-# Test get_project_deps
+# Test get_project_deps (infra deps should be excluded)
 result=$(get_project_deps "api" "$TEST_DIR/.collab/dep-graph.json")
-if [[ "$result" != *"mysql"* ]]; then
-  echo "FAIL: api deps should include mysql, got $result"; ((errors++))
+if [[ "$result" == *"mysql"* ]]; then
+  echo "FAIL: api deps should NOT include infra dep mysql, got $result"; ((errors++))
+fi
+
+# Test get_project_deps includes non-infra deps
+result=$(get_project_deps "frontend" "$TEST_DIR/.collab/dep-graph.json")
+if [[ "$result" != *"api"* ]]; then
+  echo "FAIL: frontend deps should include api, got $result"; ((errors++))
 fi
 
 # Test get_project_consumers

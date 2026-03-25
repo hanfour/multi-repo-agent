@@ -18,10 +18,10 @@ list_all_projects() {
 
 get_project_deps() {
   local project="$1" graph_file="$2"
-  # Return all deps (including infra like mysql, redis)
   jq -r --arg p "$project" '
     .projects[$p].deps // {} |
     to_entries[] |
+    select(.key != "infra") |
     .value[]
   ' "$graph_file" 2>/dev/null
 }

@@ -4,6 +4,11 @@
 handle_alias() {
   local name="$1" workspace="$2" git_org="${3:-}"
 
+  if [[ ! "$name" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
+    log_error "invalid alias name: '$name' (use alphanumeric, underscore, hyphen)" "alias"
+    return 1
+  fi
+
   # Resolve workspace to absolute path
   if [[ -d "$workspace" ]]; then
     workspace=$(cd "$workspace" && pwd)
@@ -35,6 +40,7 @@ handle_alias() {
   # Remove old alias if exists
   if grep -q "# mra-alias:$name start" "$shell_rc" 2>/dev/null; then
     sed -i.bak "/# mra-alias:$name start/,/# mra-alias:$name end/d" "$shell_rc"
+    rm -f "${shell_rc}.bak"
   fi
 
   cat >> "$shell_rc" <<SHELL

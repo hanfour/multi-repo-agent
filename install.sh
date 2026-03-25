@@ -23,6 +23,7 @@ if grep -q "# multi-repo-agent" "$SHELL_RC" 2>/dev/null; then
   log_warn "already installed in $SHELL_RC, updating" "install"
   # Remove old installation
   sed -i.bak '/# multi-repo-agent start/,/# multi-repo-agent end/d' "$SHELL_RC"
+  rm -f "${SHELL_RC}.bak"
 fi
 
 # Add mra function to shell config
