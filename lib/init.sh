@@ -41,6 +41,21 @@ GITIGNORE
     fi
   fi
 
+  # DB setup: existing db.json → use it, otherwise → interactive
+  if db_json_exists "$workspace"; then
+    log_success "db.json found, setting up databases" "init"
+    setup_all_databases "$workspace"
+  else
+    if command -v docker &>/dev/null; then
+      interactive_db_setup "$workspace"
+      if db_json_exists "$workspace"; then
+        setup_all_databases "$workspace"
+      fi
+    else
+      log_warn "docker not available, skipping database setup" "init"
+    fi
+  fi
+
   # Scan git repos and build dep-graph
   build_dep_graph "$workspace" "$workspace_name" "$git_org"
 

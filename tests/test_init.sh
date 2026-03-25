@@ -5,8 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/lib/colors.sh"
 source "$SCRIPT_DIR/lib/config.sh"
 source "$SCRIPT_DIR/lib/detect-type.sh"
+source "$SCRIPT_DIR/lib/deps.sh"
 source "$SCRIPT_DIR/lib/sync.sh"
 source "$SCRIPT_DIR/lib/repos.sh"
+source "$SCRIPT_DIR/lib/db.sh"
 source "$SCRIPT_DIR/lib/init.sh"
 
 errors=0

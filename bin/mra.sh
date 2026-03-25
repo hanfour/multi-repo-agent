@@ -15,6 +15,8 @@ source "$MRA_DIR/lib/init.sh"
 source "$MRA_DIR/lib/launch.sh"
 source "$MRA_DIR/lib/alias.sh"
 source "$MRA_DIR/lib/cleanup.sh"
+source "$MRA_DIR/lib/db.sh"
+source "$MRA_DIR/lib/doctor.sh"
 
 usage() {
   cat <<'USAGE'
@@ -27,6 +29,8 @@ Commands:
   config <key> <value>          Set configuration
   alias <name> <path>           Create workspace alias
   clean [--logs-older-than Nd]  Clean orphan containers and old logs
+  db [setup|status|import]      Manage databases
+  doctor [project]              Verify environment health
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -174,6 +178,48 @@ main() {
       done < <(list_all_projects "$graph_file")
 
       launch_claude "$workspace" "$graph_file" "${projects[@]}"
+      ;;
+
+    db)
+      shift
+      local workspace
+      workspace=$(resolve_workspace)
+      local subcmd="${1:-status}"
+      shift 2>/dev/null || true
+      case "$subcmd" in
+        setup)
+          if db_json_exists "$workspace"; then
+            setup_all_databases "$workspace"
+          else
+            interactive_db_setup "$workspace"
+            if db_json_exists "$workspace"; then
+              setup_all_databases "$workspace"
+            fi
+          fi
+          ;;
+        status)
+          list_databases "$workspace"
+          ;;
+        import)
+          local db_name="${1:-}"
+          if [[ -z "$db_name" ]]; then
+            log_error "usage: mra db import <db_name>" "db"
+            exit 1
+          fi
+          reimport_database "$workspace" "$db_name"
+          ;;
+        *)
+          log_error "unknown db command: $subcmd (use: setup, status, import)" "db"
+          exit 1
+          ;;
+      esac
+      ;;
+
+    doctor)
+      shift
+      local workspace
+      workspace=$(resolve_workspace)
+      run_doctor "$workspace" "${1:-}"
       ;;
 
     *)
