@@ -172,6 +172,22 @@ mra alias onead ~/OneAD
 onead erp --with-deps
 ```
 
+### `mra test <project> [options]`
+
+Run tests in Docker with automatic environment isolation.
+
+```bash
+mra test erp                  # auto-detect: API change → integration, otherwise → mock
+mra test erp --integration    # force integration tests (start containers, test consumers)
+mra test erp --mock           # force unit/mock tests only
+```
+
+How it works:
+1. Detects changed files via `git diff`
+2. Classifies changes: API (high) vs internal (low) using detection matrix
+3. For API changes: starts provider container, runs consumer integration tests
+4. Always runs the project's own tests in Docker with isolated DB
+
 ### `mra clean [--logs-older-than Nd]`
 
 Clean up orphan Docker containers and old log files.
@@ -363,6 +379,10 @@ const deps = getProjectDeps("erp");
 |   +-- repos.sh            # GitHub org repo discovery
 |   +-- scan.sh             # Scanner orchestrator
 |   +-- sync.sh             # Git pull/clone
+|   +-- change-detector.sh     # API change detection matrix
+|   +-- docker-exec.sh         # Docker execution helpers
+|   +-- integration-test.sh    # Cross-repo integration testing
+|   +-- test-runner.sh         # Test execution with isolation
 +-- scanners/
 |   +-- api-calls.sh        # API host env var scanner
 |   +-- docker-compose.sh   # Docker Compose scanner
@@ -395,7 +415,7 @@ To onboard a new team member:
 ## Roadmap
 
 - [ ] **Phase 3**: Sub-agent workflow with develop-commit-review-PR loop
-- [ ] **Phase 4**: Docker container execution integration
+- [x] **Phase 4**: Docker container execution with test isolation
 - [ ] Open source release
 - [ ] Web dashboard for dependency graph visualization
 - [ ] Support for `docker exec` into running containers

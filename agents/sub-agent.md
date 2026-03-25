@@ -153,6 +153,37 @@ Attempted:
   - <what was tried>
 ```
 
+## Verifying Changes with Docker
+
+After making changes to a project, always verify them using `mra test` rather than running tests directly on the host. This ensures Docker isolation and catches environment-specific failures.
+
+### Running Tests
+
+```bash
+mra test <project>
+```
+
+This single command:
+1. Detects whether your changes touch API surfaces (serializers, routes, controllers, schemas)
+2. If API change detected: starts provider container, runs consumer integration tests, then tears down
+3. Always runs the project's own test suite in Docker with an isolated database
+
+### Workflow
+
+```
+make changes
+  → mra test <project>
+    → if PASS: commit and report DONE
+    → if FAIL: read error output, fix implementation, re-run mra test
+```
+
+Do NOT:
+- Run `bundle exec rspec`, `npm test`, or `go test` directly on the host
+- Skip testing before reporting DONE
+- Assume tests pass because the code looks correct
+
+Always use `mra test <project>` for Docker isolation. Report DONE only after `mra test` returns exit code 0.
+
 ## Rules
 
 1. NEVER modify files outside the assigned project directory.

@@ -352,6 +352,53 @@ PRs created:
 All tests passing. Ready for human review.
 ```
 
+## Docker Execution & Testing
+
+### Running Tests
+
+Use the `mra test` command to run tests for any project. It auto-detects whether integration or mock testing is needed based on the changes in the current branch:
+
+```bash
+mra test <project>            # auto-detect: API change → integration, otherwise → mock
+mra test <project> --integration  # force integration tests (start containers, test consumers)
+mra test <project> --mock         # force unit/mock tests only
+```
+
+### Running Specific Commands in Docker
+
+To run an arbitrary command inside a project's container, use the Bash tool with the workflow from `lib/docker-exec.sh`:
+
+1. Resolve the compose config: `resolve_compose_config <workspace> <project>` returns `<compose-file>|<service-name>`
+2. Run the command:
+   ```bash
+   docker compose -f <compose-file> run --rm \
+     -e MYSQL_DATABASE=<project>_mra_test \
+     -e RAILS_ENV=test \
+     <service-name> bash -c "<command>"
+   ```
+
+The DB name override (`<project>_mra_test`) ensures test isolation — it prevents runs from polluting the shared development database.
+
+### Change Detection Flow
+
+When `mra test <project>` runs, it calls `is_api_change` from `lib/change-detector.sh`:
+
+1. `is_api_change <project-dir> <project-type>` — diffs changed files against the default branch
+2. Returns `high|<reasons>` or `low` based on the detection matrix (serializers, routes, controllers, schemas, OpenAPI specs, etc.)
+3. If **high**: triggers `run_integration_test` for every project in `consumedBy` — starts the provider container, connects it to the `mra-test-net` Docker network, and runs the consumer's test suite against it
+4. If **low**: skips consumer testing — mock tests are sufficient
+5. Always runs the project's own test suite in Docker with an isolated DB (`run_project_tests`)
+
+### Example
+
+After modifying erp's order serializer, run `mra test erp` which will:
+
+1. Detect API change (`app/serializers/` changed → high confidence)
+2. Start the `erp` container via `docker compose up -d`
+3. Run `partner-api-gateway`'s test suite against the live erp container (integration test)
+4. Tear down the erp service container
+5. Run erp's own `bundle exec rspec` in Docker with `DB_NAME=gspadmin_test_mra_erp`
+
 ## PM Agent Integration
 
 The PM agent (`agents/pm-agent.md`) handles product-level analysis that sits above the development workflow. It produces requirement cards, task plans, specs, and completion reports. It does NOT write code.
