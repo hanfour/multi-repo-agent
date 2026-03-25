@@ -29,6 +29,7 @@ On startup:
    - `sub-agent.md` - Development sub-agent for single-project tasks
    - `code-reviewer.md` - Code review agent for diff review
    - `pr-reviewer.md` - PR review agent for pull request review
+   - `pm-agent.md` - PM agent for requirement analysis, task planning, and acceptance validation
 
 ## Task Planning
 
@@ -350,3 +351,74 @@ PRs created:
 
 All tests passing. Ready for human review.
 ```
+
+## PM Agent Integration
+
+The PM agent (`agents/pm-agent.md`) handles product-level analysis that sits above the development workflow. It produces requirement cards, task plans, specs, and completion reports. It does NOT write code.
+
+### When to Dispatch PM Agent
+
+Dispatch the PM agent via the Agent tool when:
+
+1. **Vague requirements**: The user describes a problem or feature request without clear technical scope. Example: "ERP 的預算報表需要加接單業務欄位" or "OYM 的收益數據好像不對".
+2. **Impact analysis**: The user asks "which systems are affected if we change X?" or needs to understand cross-project implications before committing to work.
+3. **Documentation requests**: The user wants a PRD, spec, or changelog generated from existing code changes or a set of PRs.
+4. **Acceptance validation**: Development is complete and the user wants to verify all requirements are met before merging.
+
+### How to Provide Context to PM Agent
+
+When dispatching the PM agent, include these context paths so it can read ontology and dependency information:
+
+```
+Mode: Full / Analyze / Document / Review
+Workspace: <workspace-root>
+Ontology:
+  - <workspace>/pm-workspace/ontology/onead.yaml
+  - <workspace>/pm-workspace/ontology/links.yaml
+  - <workspace>/pm-workspace/ontology/departments.yaml
+  - <workspace>/pm-workspace/ontology/systems/*.yaml
+Dep-Graph: <workspace>/.collab/dep-graph.json
+User Request: <the user's original request, verbatim>
+Relevant Projects: <list of projects that might be involved, from your initial assessment>
+
+<Include the full contents of agents/pm-agent.md here as instructions>
+```
+
+If the user has already identified specific systems or modules, include that context to skip the PM agent's identification phase.
+
+### How PM Agent Output Feeds Into Development
+
+The PM agent's output drives the orchestrator's development workflow:
+
+1. **Requirement Card** -> The orchestrator uses the "任務分解" section to plan sub-agent dispatches. Each task maps to one sub-agent dispatch with a specific project, branch, and acceptance criteria.
+
+2. **Task Plan (JSON)** -> The orchestrator reads the `tasks` array and dispatches sub-agents in tier order:
+   - Tier 1 tasks can be dispatched in parallel (if using parallel mode).
+   - Tier 2 tasks wait for their Tier 1 dependencies to complete.
+   - Each task's `acceptance_criteria` becomes the sub-agent's success criteria.
+
+3. **Spec** -> When tasks involve API changes, the orchestrator passes the API contract from the spec to both the provider sub-agent (implement it) and the consumer sub-agent (consume it).
+
+4. **Completion Report** -> After all PRs are created and reviewed, dispatch the PM agent in Review mode with the list of PRs. It will validate against the original requirement card and produce a completion report.
+
+### Example: PM-Driven Workflow
+
+User: "OYM 收益報表的經銷商名稱顯示不正確"
+
+1. **Dispatch PM agent** (Analyze mode):
+   ```
+   Mode: Analyze
+   Workspace: /path/to/workspace
+   User Request: OYM 收益報表的經銷商名稱顯示不正確
+   Relevant Projects: oym, erp
+   ```
+
+2. **PM agent returns** requirement card REQ-2026-0042 with task decomposition:
+   - Task 1: [erp] Fix Agency name sync logic (Tier 1, M)
+   - Task 2: [oym] Update revenue report to use corrected agency name (Tier 2, S)
+
+3. **Orchestrator executes** the standard develop-review-PR cycle:
+   - Dispatch sub-agent for erp task -> code review -> PR
+   - Dispatch sub-agent for oym task -> code review -> PR
+
+4. **Dispatch PM agent** (Review mode) with both PRs for acceptance validation.
