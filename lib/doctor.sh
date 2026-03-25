@@ -77,11 +77,11 @@ doctor_databases() {
   fi
 
   for db_name in "${db_names[@]}"; do
-    local engine version port source container_name
+    local engine version port password container_name
     engine=$(jq -r --arg n "$db_name" '.databases[$n].engine' "$db_json_path")
     version=$(jq -r --arg n "$db_name" '.databases[$n].version // "latest"' "$db_json_path")
     port=$(jq -r --arg n "$db_name" '.databases[$n].port' "$db_json_path")
-    source=$(jq -r --arg n "$db_name" '.databases[$n].source // ""' "$db_json_path")
+    password=$(jq -r --arg n "$db_name" '.databases[$n].password // "mra_password"' "$db_json_path")
     container_name="mra-db-$db_name"
 
     # --- Container running? ---
@@ -95,18 +95,18 @@ doctor_databases() {
       continue
     fi
 
-    # --- Connectable? ---
+    # --- Connectable? (test connection only, no specific DB) ---
     local connectable=false
     case "$engine" in
       mysql)
         if docker exec "$container_name" \
-            mysql -uroot -pmra_password -e "SELECT 1" "$db_name" &>/dev/null; then
+            mysql -uroot -p"$password" -e "SELECT 1" &>/dev/null; then
           connectable=true
         fi
         ;;
       postgres|postgresql)
         if docker exec "$container_name" \
-            psql -U postgres -c "SELECT 1" "$db_name" &>/dev/null; then
+            psql -U postgres -c "SELECT 1" &>/dev/null; then
           connectable=true
         fi
         ;;
@@ -121,48 +121,117 @@ doctor_databases() {
       continue
     fi
 
-    # --- Tables exist? ---
-    local table_count=0
-    case "$engine" in
-      mysql)
-        table_count=$(docker exec "$container_name" \
-          mysql -uroot -pmra_password -N -B -e "SHOW TABLES;" "$db_name" 2>/dev/null \
-          | wc -l | tr -d ' ' || echo "0")
-        ;;
-      postgres|postgresql)
-        table_count=$(docker exec "$container_name" \
-          psql -U postgres -t -c "\dt" "$db_name" 2>/dev/null \
-          | grep -c '|' || echo "0")
-        ;;
-    esac
+    # --- Determine if instance uses multi-schema format ---
+    local has_schemas
+    has_schemas=$(jq -r --arg n "$db_name" '.databases[$n].schemas // empty | length' "$db_json_path" 2>/dev/null || echo "0")
 
-    if [[ "$table_count" -gt 0 ]]; then
-      log_success "$db_name: $table_count tables" "check" >&2
-      ((pass++))
-    else
-      log_warn "$db_name: 0 tables (dump not imported?)" "check" >&2
-      ((warn++))
-    fi
+    if [[ -n "$has_schemas" && "$has_schemas" != "0" ]]; then
+      # Multi-schema format: iterate each schema
+      local schema_names=()
+      while IFS= read -r schema; do
+        [[ -z "$schema" ]] && continue
+        schema_names+=("$schema")
+      done < <(jq -r --arg n "$db_name" '.databases[$n].schemas | keys[]' "$db_json_path")
 
-    # --- Dump file exists? ---
-    if [[ -n "$source" && "$source" != "null" ]]; then
-      if [[ "$source" == http://* || "$source" == https://* ]]; then
-        log_info "$db_name: source is a URL ($source)" "check" >&2
-        ((pass++))
-      else
-        local resolved_source
-        if [[ "$source" != /* ]]; then
-          resolved_source="$workspace/$source"
-        else
-          resolved_source="$source"
-        fi
+      for schema_name in "${schema_names[@]}"; do
+        local schema_source
+        schema_source=$(jq -r --arg n "$db_name" --arg s "$schema_name" \
+          '.databases[$n].schemas[$s].source // ""' "$db_json_path")
 
-        if [[ -f "$resolved_source" ]]; then
-          log_success "$db_name: dump file exists" "check" >&2
+        # --- Tables exist in this schema? ---
+        local table_count=0
+        case "$engine" in
+          mysql)
+            table_count=$(docker exec "$container_name" \
+              mysql -uroot -p"$password" -N -B -e "SHOW TABLES;" "$schema_name" 2>/dev/null \
+              | wc -l | tr -d ' ' || echo "0")
+            ;;
+          postgres|postgresql)
+            table_count=$(docker exec "$container_name" \
+              psql -U postgres -t -c "\dt" "$schema_name" 2>/dev/null \
+              | grep -c '|' || echo "0")
+            ;;
+        esac
+
+        if [[ "$table_count" -gt 0 ]]; then
+          log_success "$db_name/$schema_name: $table_count tables" "check" >&2
           ((pass++))
         else
-          log_warn "$db_name: dump file not found ($resolved_source)" "check" >&2
+          log_warn "$db_name/$schema_name: 0 tables (dump not imported?)" "check" >&2
           ((warn++))
+        fi
+
+        # --- Dump file exists for this schema? ---
+        if [[ -n "$schema_source" && "$schema_source" != "null" ]]; then
+          if [[ "$schema_source" == http://* || "$schema_source" == https://* ]]; then
+            log_info "$db_name/$schema_name: source is a URL ($schema_source)" "check" >&2
+            ((pass++))
+          else
+            local resolved_source
+            if [[ "$schema_source" != /* ]]; then
+              resolved_source="$workspace/$schema_source"
+            else
+              resolved_source="$schema_source"
+            fi
+
+            if [[ -f "$resolved_source" ]]; then
+              log_success "$db_name/$schema_name: dump file exists" "check" >&2
+              ((pass++))
+            else
+              log_warn "$db_name/$schema_name: dump file not found ($resolved_source)" "check" >&2
+              ((warn++))
+            fi
+          fi
+        fi
+      done
+    else
+      # Backward-compatible single-DB format: check instance as single DB
+      local source
+      source=$(jq -r --arg n "$db_name" '.databases[$n].source // ""' "$db_json_path")
+
+      # --- Tables exist? ---
+      local table_count=0
+      case "$engine" in
+        mysql)
+          table_count=$(docker exec "$container_name" \
+            mysql -uroot -p"$password" -N -B -e "SHOW TABLES;" "$db_name" 2>/dev/null \
+            | wc -l | tr -d ' ' || echo "0")
+          ;;
+        postgres|postgresql)
+          table_count=$(docker exec "$container_name" \
+            psql -U postgres -t -c "\dt" "$db_name" 2>/dev/null \
+            | grep -c '|' || echo "0")
+          ;;
+      esac
+
+      if [[ "$table_count" -gt 0 ]]; then
+        log_success "$db_name: $table_count tables" "check" >&2
+        ((pass++))
+      else
+        log_warn "$db_name: 0 tables (dump not imported?)" "check" >&2
+        ((warn++))
+      fi
+
+      # --- Dump file exists? ---
+      if [[ -n "$source" && "$source" != "null" ]]; then
+        if [[ "$source" == http://* || "$source" == https://* ]]; then
+          log_info "$db_name: source is a URL ($source)" "check" >&2
+          ((pass++))
+        else
+          local resolved_source
+          if [[ "$source" != /* ]]; then
+            resolved_source="$workspace/$source"
+          else
+            resolved_source="$source"
+          fi
+
+          if [[ -f "$resolved_source" ]]; then
+            log_success "$db_name: dump file exists" "check" >&2
+            ((pass++))
+          else
+            log_warn "$db_name: dump file not found ($resolved_source)" "check" >&2
+            ((warn++))
+          fi
         fi
       fi
     fi
