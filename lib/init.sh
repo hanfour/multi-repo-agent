@@ -21,7 +21,39 @@ manual-deps.json
 logs/
 GITIGNORE
 
-  # Scan git repos and build initial dep-graph
+  # repos.json flow: existing file → use it, otherwise → interactive setup
+  if repos_json_exists "$workspace"; then
+    log_success "repos.json found, using existing configuration" "init"
+    # Clone/pull repos based on repos.json
+    sync_from_repos_json "$workspace" "$git_org"
+  else
+    # Try interactive setup via gh CLI
+    if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
+      if interactive_repo_setup "$workspace" "$git_org"; then
+        # Clone repos based on newly created repos.json
+        sync_from_repos_json "$workspace" "$git_org"
+      else
+        log_warn "repo discovery failed, continuing with local repos only" "init"
+      fi
+    else
+      log_warn "gh CLI not available, skipping repo discovery" "init"
+      log_info "you can manually create .collab/repos.json or run mra init again after: gh auth login" "init"
+    fi
+  fi
+
+  # Scan git repos and build dep-graph
+  build_dep_graph "$workspace" "$workspace_name" "$git_org"
+
+  # Create default alias
+  config_set_alias "$workspace_name" "$workspace" "$git_org"
+  log_success "alias '$workspace_name' created" "init"
+
+  log_success "workspace initialized: $workspace" "init"
+}
+
+build_dep_graph() {
+  local workspace="$1" workspace_name="$2" git_org="$3"
+
   local projects_json="{}"
   for dir in "$workspace"/*/; do
     [[ ! -d "$dir" ]] && continue
@@ -54,10 +86,4 @@ GITIGNORE
     > "$workspace/.collab/dep-graph.json"
 
   log_success "dep-graph.json created with $(echo "$projects_json" | jq 'length') projects" "init"
-
-  # Create default alias
-  config_set_alias "$workspace_name" "$workspace" "$git_org"
-  log_success "alias '$workspace_name' created" "init"
-
-  log_success "workspace initialized: $workspace" "init"
 }

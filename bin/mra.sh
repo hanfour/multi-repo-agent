@@ -10,6 +10,7 @@ source "$MRA_DIR/lib/preflight.sh"
 source "$MRA_DIR/lib/detect-type.sh"
 source "$MRA_DIR/lib/sync.sh"
 source "$MRA_DIR/lib/deps.sh"
+source "$MRA_DIR/lib/repos.sh"
 source "$MRA_DIR/lib/init.sh"
 source "$MRA_DIR/lib/launch.sh"
 source "$MRA_DIR/lib/alias.sh"
@@ -163,7 +164,7 @@ main() {
       if [[ "$no_sync" == "false" ]]; then
         local git_org
         git_org=$(jq -r '.gitOrg' "$graph_file")
-        sync_workspace "$workspace" "$git_org"
+        sync_from_repos_json "$workspace" "$git_org"
       fi
 
       # Get all projects
@@ -206,7 +207,7 @@ main() {
       if [[ "$no_sync" == "false" ]]; then
         local git_org
         git_org=$(jq -r '.gitOrg' "$graph_file")
-        sync_workspace "$workspace" "$git_org"
+        sync_from_repos_json "$workspace" "$git_org"
       fi
 
       # Resolve deps
