@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mra": {
+      "command": "node",
+      "args": ["/Users/you/multi-repo-agent/mcp-server/dist/index.js"],
+      "env": {}
+    }
+  }
+}

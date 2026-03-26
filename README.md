@@ -483,6 +483,39 @@ To onboard a new team member:
 4. Share database dump files (or provide a download URL in `db.json`)
 5. Run `mra init <workspace> --git-org <url>` - it will use the existing config files
 
+## MCP Server
+
+mra includes an MCP (Model Context Protocol) server that exposes all commands as tools for AI agents.
+
+### Setup
+
+```bash
+cd ~/multi-repo-agent/mcp-server
+npm install && npm run build
+```
+
+### Add to Claude Code
+
+```bash
+claude mcp add mra node ~/multi-repo-agent/mcp-server/dist/index.js
+```
+
+### Available MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `mra_status` | Workspace status overview |
+| `mra_deps` | Dependency graph |
+| `mra_ask` | AI codebase query |
+| `mra_export` | Export project context |
+| `mra_diff` | Cross-repo diff summary |
+| `mra_doctor` | Environment health check |
+| `mra_graph` | Dependency visualization |
+| `mra_scan` | Re-scan dependencies |
+| `mra_test` | Run tests in Docker |
+
+All tools require a `workspace` parameter pointing to the workspace root.
+
 ## Roadmap
 
 - [x] **Phase 3**: Sub-agent workflow with develop-commit-review-PR loop
@@ -493,6 +526,7 @@ To onboard a new team member:
 - [x] **Mid-term**: Custom workspace scanner plugins (`<workspace>/.collab/scanners/`)
 - [x] **Mid-term**: Claude API usage tracking (`mra cost`)
 - [x] **Mid-term**: Config file templates (`mra template`)
+- [x] **Long-term**: MCP server exposing all mra commands as tools
 - [ ] Open source release
 - [ ] Web dashboard for dependency graph visualization
 - [ ] Support for `docker exec` into running containers
