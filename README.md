@@ -76,7 +76,7 @@ mra erp --with-deps
 ## Installation
 
 ```bash
-git clone https://github.com/your-org/multi-repo-agent.git ~/multi-repo-agent
+git clone https://github.com/hanfour/multi-repo-agent.git ~/multi-repo-agent
 cd ~/multi-repo-agent
 bash install.sh
 source ~/.zshrc

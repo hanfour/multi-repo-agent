@@ -1,12 +1,7 @@
 {
   "autoScan": true,
   "depthDefault": 1,
-  "aliases": {
-    "OneAD": {
-      "workspace": "/Users/hanfourhuang/OneAD",
-      "gitOrg": "git@github.com:onead"
-    }
-  },
+  "aliases": {},
   "subAgentWorkflow": {
     "reviewLoopMax": 3,
     "autoCommit": true,
