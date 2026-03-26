@@ -54,7 +54,7 @@ mra init ~/my-workspace --git-org git@github.com:my-org
 mra doctor
 
 # 4. Launch Claude with a project and its dependencies
-mra erp --with-deps
+mra my-api --with-deps
 ```
 
 ---
@@ -136,7 +136,7 @@ db.json format (supports multi-schema per instance):
       "schemas": {
         "myapp_db": {
           "source": "./dumps/myapp_db.sql.bz2",
-          "usedBy": ["erp", "backend-api", "api-gateway"]
+          "usedBy": ["my-api", "backend-api", "gateway"]
         }
       }
     }
@@ -168,7 +168,7 @@ Expected output:
 [check] mysql: connectable
 [check] mysql/myapp_db: 469 tables
 [doctor] === Project Checks ===
-[check] erp: directory exists
+[check] my-api: directory exists
 ...
 [doctor] === Summary ===
 [doctor] 22 passed, 0 warnings, 0 errors
@@ -195,15 +195,15 @@ mra dashboard     # interactive TUI with auto-refresh (press q to quit)
 ### Cross-project task: Launch the orchestrator
 
 ```bash
-# Launch Claude with erp + all its dependencies
-mra erp --with-deps
+# Launch Claude with my-api + all its dependencies
+mra my-api --with-deps
 
 # Or use the workspace alias
-my-org erp --with-deps
+my-org my-api --with-deps
 
-# Claude starts with access to erp and api-consumer
+# Claude starts with access to my-api and api-consumer
 # Give it a task:
-# > "修改 erp 的訂單 API，把 data 改成 items，同步更新 api-consumer"
+# > "Modify my-api's order API to return items instead of data, sync update api-consumer"
 ```
 
 The orchestrator will:
@@ -216,17 +216,17 @@ The orchestrator will:
 ### Quick technical queries (no interactive session)
 
 ```bash
-mra ask erp "列出所有 order 相關的 API endpoint"
-mra ask backend-api "JWT 驗證怎麼做的？"
-mra ask erp --with-deps "erp 和 api-consumer 之間的 API 依賴"
+mra ask my-api "list all order-related API endpoints"
+mra ask backend-api "how does JWT authentication work?"
+mra ask my-api --with-deps "my-api 和 api-consumer 之間的 API 依賴"
 ```
 
 ### Run tests
 
 ```bash
-mra test erp                  # auto-detect: API change -> integration, otherwise -> mock
-mra test erp --integration    # force full integration test
-mra test erp --mock           # force mock/unit test only
+mra test my-api                  # auto-detect: API change -> integration, otherwise -> mock
+mra test my-api --integration    # force full integration test
+mra test my-api --mock           # force mock/unit test only
 ```
 
 ### Code quality
@@ -247,8 +247,8 @@ mra graph --mermaid            # visualize dependency changes
 ### Something broke? Rollback
 
 ```bash
-mra rollback erp                     # rollback to latest snapshot
-mra rollback erp "initial-setup"     # rollback to specific snapshot
+mra rollback my-api                     # rollback to latest snapshot
+mra rollback my-api "initial-setup"     # rollback to specific snapshot
 mra rollback --all                   # rollback everything
 ```
 
@@ -419,7 +419,7 @@ All configuration lives in `<workspace>/.collab/`:
 ```json
 {
   "repos": [
-    { "name": "erp", "clone": true, "branch": "main", "description": "ERP backend" },
+    { "name": "my-api", "clone": true, "branch": "main", "description": "ERP backend" },
     { "name": "frontend-app", "clone": true, "branch": "main", "description": "ODM frontend" },
     { "name": "old-service", "clone": false, "branch": "main", "description": "Deprecated" }
   ]
@@ -438,7 +438,7 @@ All configuration lives in `<workspace>/.collab/`:
       "port": 3306,
       "password": "123456",
       "schemas": {
-        "myapp_db": { "source": "./dumps/myapp_db.sql.bz2", "usedBy": ["erp", "backend-api"] },
+        "myapp_db": { "source": "./dumps/myapp_db.sql.bz2", "usedBy": ["my-api", "backend-api"] },
         "secondary_db": { "source": "./dumps/secondary_db.sql.bz2", "usedBy": ["secondary_db"] }
       }
     }
@@ -454,8 +454,8 @@ Supported engines: `mysql`, `postgres`
 
 ```json
 [
-  { "source": "frontend-app", "target": "erp", "type": "api" },
-  { "source": "bss-ui", "target": "backend-api", "type": "api" }
+  { "source": "frontend-app", "target": "my-api", "type": "api" },
+  { "source": "dashboard-ui", "target": "backend-api", "type": "api" }
 ]
 ```
 
@@ -567,9 +567,9 @@ MRA_WORKSPACE_PATH=/Users/you/my-workspace
 ```typescript
 import { askMra, readProjectContext, getProjectDeps } from "./claude/mra-client.js";
 
-const result = await askMra("erp", "列出 order 相關的 API");
-const context = readProjectContext("erp");  // 17KB routes, schema, deps
-const deps = getProjectDeps("erp");         // { deps: [...], consumedBy: [...] }
+const result = await askMra("my-api", "list order-related APIs");
+const context = readProjectContext("my-api");  // 17KB routes, schema, deps
+const deps = getProjectDeps("my-api");         // { deps: [...], consumedBy: [...] }
 ```
 
 ### MCP Server
@@ -584,14 +584,14 @@ claude mcp add mra node ~/multi-repo-agent/mcp-server/dist/index.js
 ### GitHub Actions
 
 ```bash
-mra ci erp    # generates .github/workflows/mra-test.yml
+mra ci my-api    # generates .github/workflows/mra-test.yml
 ```
 
 ### Federation (Cross-Team)
 
 ```bash
-mra federation publish erp                    # publish API contract
-mra federation subscribe https://url/erp.json # subscribe
+mra federation publish my-api                    # publish API contract
+mra federation subscribe https://url/my-api.json # subscribe
 mra federation verify                         # check compatibility
 ```
 
