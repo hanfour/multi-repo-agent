@@ -25,6 +25,10 @@ source "$MRA_DIR/lib/docker-exec.sh"
 source "$MRA_DIR/lib/test-runner.sh"
 source "$MRA_DIR/lib/change-detector.sh"
 source "$MRA_DIR/lib/integration-test.sh"
+source "$MRA_DIR/lib/status.sh"
+source "$MRA_DIR/lib/log-viewer.sh"
+source "$MRA_DIR/lib/diff-summary.sh"
+source "$MRA_DIR/lib/open-ide.sh"
 
 usage() {
   cat <<'USAGE'
@@ -42,6 +46,10 @@ Commands:
   ask <project> "<question>"   Query codebase via Claude
   export [project]              Export project context files
   test <project> [--integration|--mock]  Run tests in Docker
+  status                        Show workspace status overview
+  log [project]                 View operation history
+  diff                          Show cross-repo diff summary
+  open <project> [--with-deps]  Open project in IDE
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -272,6 +280,34 @@ main() {
         mock) run_project_tests "$workspace" "$project" ;;
         auto) run_cross_repo_tests "$workspace" "$project" ;;
       esac
+      ;;
+
+    status)
+      shift
+      local workspace
+      workspace=$(resolve_workspace)
+      show_status "$workspace"
+      ;;
+
+    log)
+      shift
+      local workspace
+      workspace=$(resolve_workspace)
+      show_logs "$workspace" "${1:-}"
+      ;;
+
+    diff)
+      shift
+      local workspace
+      workspace=$(resolve_workspace)
+      show_diff_summary "$workspace"
+      ;;
+
+    open)
+      shift
+      local workspace
+      workspace=$(resolve_workspace)
+      open_project "$workspace" "$@"
       ;;
 
     *)
