@@ -570,6 +570,43 @@ Keyboard shortcuts:
 - `d` — run doctor
 - `e` — export all projects
 
+## Notifications
+
+Send webhook notifications for key events (scan, test, review, escalation).
+
+### Setup
+
+```bash
+mra notify setup    # creates .collab/notify.json template
+# Edit notify.json: add webhook URLs, set enabled: true
+```
+
+### Configuration (.collab/notify.json)
+
+```json
+{
+  "webhooks": [
+    {
+      "name": "slack-dev",
+      "type": "slack",
+      "url": "https://hooks.slack.com/services/...",
+      "enabled": true,
+      "minLevel": "warn"
+    }
+  ]
+}
+```
+
+Supported types: `slack`, `discord`, `generic` (POST JSON).
+Levels: `info`, `warn`, `error`, `critical`.
+
+### Check status
+
+```bash
+mra notify status   # show configured webhooks
+mra notify test     # send a test notification
+```
+
 ## Federation (Multi-Workspace)
 
 Share API contracts across workspaces for cross-team contract testing.
@@ -655,6 +692,7 @@ Rollback stashes uncommitted changes before resetting. Snapshots capture git com
 - [x] **Long-term**: Snapshot & rollback mechanism (`mra snapshot`, `mra rollback`)
 - [x] **Long-term**: Terminal UI dashboard (`mra dashboard`) — projects, deps, DB, changes
 - [x] **Long-term**: Multi-workspace federation (`mra federation`) — publish/subscribe/verify API contracts
+- [x] **Long-term**: Notifications (`mra notify`) — Slack/Discord/generic webhooks for scan, test, review, escalation events
 - [ ] Open source release
 - [ ] Web dashboard for dependency graph visualization
 - [ ] Support for `docker exec` into running containers

@@ -38,6 +38,7 @@ source "$MRA_DIR/lib/ci.sh"
 source "$MRA_DIR/lib/snapshot.sh"
 source "$MRA_DIR/lib/dashboard.sh"
 source "$MRA_DIR/lib/federation.sh"
+source "$MRA_DIR/lib/notify.sh"
 
 usage() {
   cat <<'USAGE'
@@ -71,6 +72,7 @@ Commands:
   rollback --all [name]        Rollback all projects
   dashboard                    Interactive terminal dashboard
   federation <subcommand>       Multi-workspace contract management
+  notify [setup|status|test]    Manage notifications
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -459,6 +461,18 @@ main() {
           log_error "unknown federation command: $subcmd (use: publish, subscribe, verify, list, fetch)" "federation"
           exit 1
           ;;
+      esac
+      ;;
+
+    notify)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      local subcmd="${1:-status}"; shift 2>/dev/null || true
+      case "$subcmd" in
+        setup) setup_notifications "$workspace" ;;
+        status) show_notify_status "$workspace" ;;
+        test) test_notification "$workspace" ;;
+        *) log_error "usage: mra notify [setup|status|test]" "notify"; exit 1 ;;
       esac
       ;;
 
