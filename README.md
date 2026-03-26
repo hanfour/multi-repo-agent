@@ -516,6 +516,45 @@ claude mcp add mra node ~/multi-repo-agent/mcp-server/dist/index.js
 
 All tools require a `workspace` parameter pointing to the workspace root.
 
+## GitHub Actions
+
+mra provides GitHub Actions for CI/CD integration.
+
+### Quick Setup
+
+Generate a workflow for your project:
+
+```bash
+mra ci erp
+# Creates erp/.github/workflows/mra-test.yml
+```
+
+### How It Works
+
+1. On PR, the workflow runs `change-detector` to classify changes
+2. API changes (high confidence) trigger integration test warnings
+3. Tests run based on detected project type (rspec, jest, go test, etc.)
+4. Cross-repo impact is reported in PR annotations
+
+### Custom Actions
+
+Available in `actions/`:
+- `mra-setup` — Install mra and dependencies in CI
+- `mra-test` — Run tests with change detection
+
+### Reusable Workflow
+
+Call from your repo's workflow:
+
+```yaml
+jobs:
+  test:
+    uses: your-org/multi-repo-agent/.github/workflows/mra-test.yml@main
+    with:
+      project: erp
+      git-org: git@github.com:onead
+```
+
 ## Roadmap
 
 - [x] **Phase 3**: Sub-agent workflow with develop-commit-review-PR loop
@@ -527,6 +566,7 @@ All tools require a `workspace` parameter pointing to the workspace root.
 - [x] **Mid-term**: Claude API usage tracking (`mra cost`)
 - [x] **Mid-term**: Config file templates (`mra template`)
 - [x] **Long-term**: MCP server exposing all mra commands as tools
+- [x] **Long-term**: GitHub Actions integration with change detection and `mra ci` command
 - [ ] Open source release
 - [ ] Web dashboard for dependency graph visualization
 - [ ] Support for `docker exec` into running containers

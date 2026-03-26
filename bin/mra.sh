@@ -34,6 +34,7 @@ source "$MRA_DIR/lib/setup-project.sh"
 source "$MRA_DIR/lib/graph.sh"
 source "$MRA_DIR/lib/cost.sh"
 source "$MRA_DIR/lib/template.sh"
+source "$MRA_DIR/lib/ci.sh"
 
 usage() {
   cat <<'USAGE'
@@ -60,6 +61,7 @@ Commands:
   graph [--mermaid|--dot]       Visualize dependency graph
   cost [--reset]                Show Claude API usage
   template [repos|db|deps|all]  Generate config templates
+  ci <project>                 Generate GitHub Actions workflow
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -369,6 +371,15 @@ main() {
       shift
       local workspace; workspace=$(resolve_workspace)
       generate_template "$workspace" "${1:-all}"
+      ;;
+
+    ci)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      if [[ -z "${1:-}" ]]; then
+        log_error "usage: mra ci <project>" "ci"; exit 1
+      fi
+      generate_ci_workflow "$workspace" "$1"
       ;;
 
     *)

@@ -1,0 +1,82 @@
+# .github/workflows/mra-test.yml
+# Copy this to your repo and customize the project name and git-org
+name: MRA Test
+
+on:
+  pull_request:
+    branches: [main, master, development]
+  push:
+    branches: [main, master, development]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for change detection
+
+      - name: Checkout multi-repo-agent
+        uses: actions/checkout@v4
+        with:
+          repository: YOUR_ORG/multi-repo-agent
+          path: .mra
+
+      - name: Setup MRA
+        run: |
+          # Install jq
+          sudo apt-get update && sudo apt-get install -y jq
+
+          # Create workspace structure
+          mkdir -p ../.collab
+
+          # Copy dep-graph if exists in repo
+          if [[ -f .collab/dep-graph.json ]]; then
+            cp .collab/dep-graph.json ../.collab/
+          fi
+
+      - name: Detect changes
+        id: detect
+        run: |
+          source .mra/lib/colors.sh
+          source .mra/lib/sync.sh
+          source .mra/lib/change-detector.sh
+          source .mra/lib/detect-type.sh
+
+          PROJECT_TYPE=$(detect_project_type .)
+          echo "type=$PROJECT_TYPE" >> "$GITHUB_OUTPUT"
+
+          RESULT=$(is_api_change "." "$PROJECT_TYPE")
+          LEVEL="${RESULT%%|*}"
+          echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
+          echo "Change level: $LEVEL"
+
+      - name: Run tests
+        run: |
+          PROJECT_NAME=$(basename "${{ github.repository }}")
+          echo "Testing $PROJECT_NAME (type: ${{ steps.detect.outputs.type }}, change: ${{ steps.detect.outputs.level }})"
+
+          # Run project-specific tests based on type
+          case "${{ steps.detect.outputs.type }}" in
+            rails-api)
+              bundle install --jobs 4 --retry 3
+              bundle exec rspec
+              ;;
+            node-frontend|node-backend|nextjs)
+              npm ci || pnpm install --frozen-lockfile
+              npm test || pnpm test
+              ;;
+            go-service)
+              go test ./...
+              ;;
+            python-service)
+              pip install -r requirements.txt
+              pytest
+              ;;
+          esac
+
+      - name: Report change level
+        if: steps.detect.outputs.level == 'high'
+        run: |
+          echo "::warning::API change detected — consider running integration tests on dependent projects"

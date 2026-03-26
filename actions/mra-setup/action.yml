@@ -1,0 +1,52 @@
+name: 'MRA Setup'
+description: 'Install multi-repo-agent and dependencies'
+inputs:
+  workspace:
+    description: 'Workspace root path'
+    required: true
+  mra-path:
+    description: 'Path to multi-repo-agent installation'
+    required: false
+    default: '${{ github.workspace }}/.mra'
+  git-org:
+    description: 'Git org URL (e.g., git@github.com:onead)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install jq
+      shell: bash
+      run: |
+        if ! command -v jq &>/dev/null; then
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update && sudo apt-get install -y jq
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install jq
+          fi
+        fi
+        echo "jq $(jq --version) installed"
+
+    - name: Clone multi-repo-agent
+      shell: bash
+      run: |
+        if [[ ! -d "${{ inputs.mra-path }}" ]]; then
+          git clone https://github.com/${{ github.repository_owner }}/multi-repo-agent.git "${{ inputs.mra-path }}" 2>/dev/null || \
+          cp -r "$(dirname "${{ github.workspace }}")/multi-repo-agent" "${{ inputs.mra-path }}" 2>/dev/null || \
+          echo "WARNING: multi-repo-agent not found, using local copy"
+        fi
+
+    - name: Setup mra function
+      shell: bash
+      run: |
+        echo 'mra() { bash "${{ inputs.mra-path }}/bin/mra.sh" "$@"; }' >> "$HOME/.bashrc"
+        echo "MRA_WORKSPACE=${{ inputs.workspace }}" >> "$GITHUB_ENV"
+        echo "${{ inputs.mra-path }}/bin" >> "$GITHUB_PATH"
+
+    - name: Initialize workspace (if not already)
+      shell: bash
+      run: |
+        export MRA_WORKSPACE="${{ inputs.workspace }}"
+        if [[ ! -f "${{ inputs.workspace }}/.collab/dep-graph.json" ]]; then
+          bash "${{ inputs.mra-path }}/bin/mra.sh" init "${{ inputs.workspace }}" --git-org "${{ inputs.git-org }}" || true
+        fi

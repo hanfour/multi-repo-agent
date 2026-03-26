@@ -1,0 +1,62 @@
+name: MRA Cross-Repo Test
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: 'Project name to test'
+        required: true
+        type: string
+      workspace-path:
+        description: 'Workspace root'
+        required: false
+        type: string
+        default: '${{ github.workspace }}/..'
+      git-org:
+        description: 'Git org SSH URL'
+        required: true
+        type: string
+      test-mode:
+        description: 'Test mode: auto, integration, mock'
+        required: false
+        type: string
+        default: 'auto'
+
+jobs:
+  mra-test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: mra_password
+          MYSQL_DATABASE: test_db
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MRA
+        uses: ./actions/mra-setup
+        with:
+          workspace: ${{ inputs.workspace-path }}
+          git-org: ${{ inputs.git-org }}
+
+      - name: Run MRA Test
+        uses: ./actions/mra-test
+        with:
+          workspace: ${{ inputs.workspace-path }}
+          project: ${{ inputs.project }}
+          mode: ${{ inputs.test-mode }}
