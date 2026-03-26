@@ -2,6 +2,32 @@
 
 Cross-repository collaboration tool for Claude Code. Orchestrate AI-assisted development across multiple Git repos with automatic dependency detection, Docker-based environments, and structured review workflows.
 
+**v2.0.0** | 44 commits | 91 files | 20 test suites | 24 CLI commands | 9 MCP tools | 5 AI agents
+
+---
+
+## Table of Contents
+
+- [Problem](#problem)
+- [Quick Start](#quick-start)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Tutorial: First-Time Setup](#tutorial-first-time-setup)
+- [Tutorial: Daily Development](#tutorial-daily-development)
+- [Tutorial: Onboarding a Teammate](#tutorial-onboarding-a-teammate)
+- [Command Reference](#command-reference)
+- [Configuration Files](#configuration-files)
+- [AI Agent Team](#ai-agent-team)
+- [Dependency Scanners](#dependency-scanners)
+- [Architecture](#architecture)
+- [Integrations](#integrations)
+- [Testing](#testing)
+- [Project Structure](#project-structure)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+---
+
 ## Problem
 
 In multi-repo architectures, changing an API in repo A often requires updating the frontend in repo B. Claude Code sessions are scoped to a single directory, making cross-repo coordination manual and error-prone.
@@ -11,21 +37,27 @@ In multi-repo architectures, changing an API in repo A often requires updating t
 - Automatically detecting cross-repo dependencies (API calls, shared databases, Docker services)
 - Managing Docker environments for consistent testing across different tech stacks
 - Providing an orchestrator prompt that guides Claude through cross-repo changes
+- Including a PM agent for requirement analysis and task decomposition
+
+---
 
 ## Quick Start
 
 ```bash
 # 1. Install
-cd ~/multi-repo-agent
-bash install.sh
-source ~/.zshrc
+cd ~/multi-repo-agent && bash install.sh && source ~/.zshrc
 
-# 2. Initialize a workspace
+# 2. Initialize workspace (interactive repo selection + DB setup)
 mra init ~/my-workspace --git-org git@github.com:my-org
 
-# 3. Launch Claude with a project and its dependencies
+# 3. Check environment health
+mra doctor
+
+# 4. Launch Claude with a project and its dependencies
 mra erp --with-deps
 ```
+
+---
 
 ## Requirements
 
@@ -37,6 +69,9 @@ mra erp --with-deps
 | `gh` | GitHub CLI (repo discovery, PRs) | `brew install gh` then `gh auth login` |
 | `yq` | YAML parsing (optional) | `brew install yq` |
 | `claude` | Claude Code CLI | [claude.ai/code](https://claude.ai/code) |
+| `fswatch` | File watcher (optional, for `mra watch`) | `brew install fswatch` |
+
+---
 
 ## Installation
 
@@ -49,283 +84,45 @@ source ~/.zshrc
 
 This adds the `mra` shell function to your `.zshrc` (or `.bashrc`).
 
-## Commands
+---
 
-### `mra init <path> --git-org <url>`
+## Tutorial: First-Time Setup
 
-Initialize a workspace. On first run:
-1. Runs pre-flight checks (docker, gh, jq, git)
-2. If `.collab/repos.json` exists, uses it. Otherwise, fetches the repo list from GitHub and interactively asks which repos to clone
-3. Clones selected repos
-4. If `.collab/db.json` exists, sets up databases. Otherwise, scans docker-compose files and interactively configures databases
-5. Runs all scanners to detect cross-repo dependencies
-6. Creates a workspace alias
+### Step 1: Switch GitHub account (if using org private repos)
+
+```bash
+gh auth login
+# Select the account with access to your org's private repos
+```
+
+### Step 2: Initialize workspace
 
 ```bash
 mra init ~/OneAD --git-org git@github.com:onead
 ```
 
-### `mra <project...> [options]`
+This will:
+1. Run pre-flight checks (docker, gh, jq, git)
+2. Fetch all repos from the GitHub org
+3. Ask you which repos to clone (Y/n for each)
+4. Clone selected repos
+5. Scan docker-compose files for database configuration
+6. Ask about database setup (engine, dump files)
+7. Detect cross-repo dependencies
+8. Create a workspace alias (`onead`)
 
-Launch Claude with access to specified projects.
-
-```bash
-mra erp odm-ui              # specific projects
-mra erp --with-deps          # include upstream/downstream dependencies
-mra erp --with-deps --depth 2  # traverse 2 levels of dependencies
-mra --all                    # all projects in the workspace
-mra erp --no-sync            # skip git pull before launching
-```
-
-### `mra scan [path]`
-
-Run dependency scanners and update `dep-graph.json`. By default, performs a diff scan (only re-scans projects with new commits). Use after pulling new code.
+### Step 3: Prepare database dumps
 
 ```bash
-mra scan                     # scan current workspace
-mra scan ~/other-workspace   # scan a specific workspace
+# Place SQL dump files in the workspace
+mkdir -p ~/OneAD/dumps
+cp /path/to/gspadmin.sql.bz2 ~/OneAD/dumps/
+
+# Edit db.json to point to your dump files
+# ~/OneAD/.collab/db.json is created during init
 ```
 
-### `mra deps [project]`
-
-Display the dependency graph.
-
-```bash
-mra deps                     # show all dependencies
-mra deps erp                 # show erp's dependencies only
-```
-
-### `mra status`
-
-Show workspace overview: all projects with branch, uncommitted changes, type, and database status.
-
-```bash
-mra status
-```
-
-### `mra diff`
-
-Show cross-repo diff summary: which projects have uncommitted or unpushed changes.
-
-```bash
-mra diff
-```
-
-### `mra log [project]`
-
-View operation history from `.collab/logs/`.
-
-```bash
-mra log                      # show all recent logs
-mra log erp                  # show only erp logs
-```
-
-### `mra open <project> [--with-deps]`
-
-Open project in IDE (auto-detects VS Code or Cursor).
-
-```bash
-mra open erp                 # open erp in IDE
-mra open erp --with-deps     # open erp + its dependencies
-```
-
-### `mra db <subcommand>`
-
-Manage workspace databases.
-
-```bash
-mra db status                # show database status table
-mra db setup                 # start containers + import dumps
-mra db import gspadmin       # re-import a specific database/schema
-```
-
-### `mra doctor [project]`
-
-Three-level environment health check:
-
-```bash
-mra doctor                   # check everything
-mra doctor erp               # check only erp
-```
-
-Output:
-```
-[doctor] === Basic Checks ===
-[check] git: ok
-[check] docker: ok
-[check] jq: ok
-[doctor] === Database Checks ===
-[check] mysql (mysql:5.7): running
-[check] mysql: connectable
-[check] mysql/gspadmin: 469 tables
-[doctor] === Project Checks ===
-[check] erp: directory exists
-[check] erp: bundle check ok
-[doctor] === Summary ===
-[doctor] 15 passed, 2 warnings, 0 errors
-```
-
-### `mra ask <project> "<question>"`
-
-Query a project's codebase using Claude. Non-interactive by default (returns text answer). Add `--interactive` for a full session with follow-ups.
-
-```bash
-mra ask erp "列出所有 order 相關的 API endpoint"
-mra ask erp --with-deps "erp 和 partner-api-gateway 之間的 API 依賴"
-mra ask erp --interactive "分析 orders controller 的設計模式"
-```
-
-### `mra export [project]`
-
-Generate static context files per project for external tools (e.g., reqbot-slack). Includes routes, schema, dependencies, env vars, and file structure.
-
-```bash
-mra export erp               # export single project
-mra export                   # export all projects
-```
-
-Output: `<workspace>/.collab/exports/<project>-context.md`
-
-### `mra config <key> <value>`
-
-Manage settings.
-
-```bash
-mra config auto-scan off     # disable auto-scan on startup
-mra config auto-scan on      # enable auto-scan on startup
-mra config parallel-test on  # enable parallel test execution (advanced)
-```
-
-### `mra alias <name> <path>`
-
-Create a workspace shortcut. `mra init` automatically creates one from the directory name.
-
-```bash
-mra alias onead ~/OneAD
-# Now you can use:
-onead erp --with-deps
-```
-
-### `mra test <project> [options]`
-
-Run tests in Docker with automatic environment isolation.
-
-```bash
-mra test erp                  # auto-detect: API change → integration, otherwise → mock
-mra test erp --integration    # force integration tests (start containers, test consumers)
-mra test erp --mock           # force unit/mock tests only
-```
-
-How it works:
-1. Detects changed files via `git diff`
-2. Classifies changes: API (high) vs internal (low) using detection matrix
-3. For API changes: starts provider container, runs consumer integration tests
-4. Always runs the project's own tests in Docker with isolated DB
-
-### `mra lint <project|--all>`
-
-Check JS/TS projects against OneAD frontend BLOCKER rules.
-
-```bash
-mra lint odm-ui              # lint a single project
-mra lint --all               # lint all frontend projects
-```
-
-Checks for:
-- `interface` usage (should be `type`)
-- `enum` usage (should be `as const`)
-- `any` type annotations (should be `unknown`)
-- Non-null assertion `!` (should use type guards)
-- `var` declarations (should be `const`/`let`)
-
-Reference: https://dev-ito-fe-docs.onead.tw/best-practice/js-ts.html
-
-### `mra clean [--logs-older-than Nd]`
-
-Clean up orphan Docker containers and old log files.
-
-```bash
-mra clean                    # default: remove logs older than 7 days
-mra clean --logs-older-than 3d
-```
-
-### `mra watch <project|--all>`
-
-Watch project files for changes and auto-trigger `mra test`. Requires `fswatch` (`brew install fswatch`).
-
-```bash
-mra watch erp                # watch a single project
-mra watch --all              # watch all projects in the workspace
-```
-
-Excludes `node_modules`, `.git`, `tmp`, `log`, and `vendor` directories.
-
-### `mra setup <project|--all>`
-
-Auto-install project dependencies based on detected project type. Runs inside Docker for environment consistency.
-
-```bash
-mra setup erp                # setup a single project (bundle install, db:migrate, etc.)
-mra setup --all              # setup all projects
-```
-
-Supports: `rails-api` (bundle install + db:migrate), `node-frontend/node-backend/nextjs` (npm/yarn/pnpm install), `go-service` (go mod download), `python-service` (pip install).
-
-### `mra graph [--mermaid|--dot]`
-
-Visualize the dependency graph in multiple formats.
-
-```bash
-mra graph                    # terminal output
-mra graph --mermaid          # writes .collab/dep-graph.mmd
-mra graph --dot              # writes .collab/dep-graph.dot (Graphviz)
-```
-
-### `mra cost [--reset]`
-
-Track and display Claude API usage across sessions.
-
-```bash
-mra cost                     # show usage summary + 7-day breakdown
-mra cost --reset             # reset all tracked usage data
-```
-
-Usage is stored in `<workspace>/.collab/usage.json`. Call `record_usage` from scripts to log token counts and cost.
-
-### `mra template [repos|db|deps|all]`
-
-Generate starter config file templates in `<workspace>/.collab/`.
-
-```bash
-mra template                 # generate all templates
-mra template repos           # repos.json.template only
-mra template db              # db.json.template only
-mra template deps            # manual-deps.json.template only
-```
-
-Templates are only created if the corresponding `.json` file does not already exist.
-
-## Configuration Files
-
-All configuration lives in `<workspace>/.collab/`:
-
-### `repos.json` - Repository list
-
-Defines which repos to clone. Can be shared with teammates.
-
-```json
-{
-  "repos": [
-    { "name": "erp", "clone": true, "branch": "main", "description": "ERP backend" },
-    { "name": "odm-ui", "clone": true, "branch": "main", "description": "ODM frontend" },
-    { "name": "old-service", "clone": false, "branch": "main", "description": "Deprecated" }
-  ]
-}
-```
-
-### `db.json` - Database configuration
-
-Supports multiple engines, multi-schema instances, and compressed dumps.
+db.json format (supports multi-schema per instance):
 
 ```json
 {
@@ -340,10 +137,6 @@ Supports multiple engines, multi-schema instances, and compressed dumps.
         "gspadmin": {
           "source": "./dumps/gspadmin.sql.bz2",
           "usedBy": ["erp", "masa", "api-gateway"]
-        },
-        "moai": {
-          "source": "./dumps/moai.sql.bz2",
-          "usedBy": ["moai"]
         }
       }
     }
@@ -351,19 +144,313 @@ Supports multiple engines, multi-schema instances, and compressed dumps.
 }
 ```
 
-Supported dump formats: `.sql`, `.sql.gz`, `.sql.bz2`, `.sql.xz`, `.sql.zst`, `.dump` (pg_restore)
+### Step 4: Setup databases
+
+```bash
+mra db setup
+# Starts MySQL container, creates schemas, imports dumps
+```
+
+### Step 5: Verify everything
+
+```bash
+mra doctor
+```
+
+Expected output:
+```
+[doctor] === Basic Checks ===
+[check] git: ok
+[check] docker: ok
+[check] jq: ok
+[doctor] === Database Checks ===
+[check] mysql (mysql:5.7): running
+[check] mysql: connectable
+[check] mysql/gspadmin: 469 tables
+[doctor] === Project Checks ===
+[check] erp: directory exists
+...
+[doctor] === Summary ===
+[doctor] 22 passed, 0 warnings, 0 errors
+```
+
+### Step 6: Create a safety snapshot
+
+```bash
+mra snapshot "initial-setup"
+```
+
+---
+
+## Tutorial: Daily Development
+
+### Morning: Check workspace status
+
+```bash
+mra status        # overview of all projects: branch, changes, type
+mra diff          # which repos have uncommitted/unpushed changes
+mra dashboard     # interactive TUI with auto-refresh (press q to quit)
+```
+
+### Cross-project task: Launch the orchestrator
+
+```bash
+# Launch Claude with erp + all its dependencies
+mra erp --with-deps
+
+# Or use the workspace alias
+onead erp --with-deps
+
+# Claude starts with access to erp and partner-api-gateway
+# Give it a task:
+# > "修改 erp 的訂單 API，把 data 改成 items，同步更新 partner-api-gateway"
+```
+
+The orchestrator will:
+1. Dispatch PM agent for requirement analysis (if needed)
+2. Plan changes in dependency order (upstream first)
+3. Dispatch sub-agents for each project
+4. Run code review after each change
+5. Create PRs with cross-project dependency notes
+
+### Quick technical queries (no interactive session)
+
+```bash
+mra ask erp "列出所有 order 相關的 API endpoint"
+mra ask masa "JWT 驗證怎麼做的？"
+mra ask erp --with-deps "erp 和 partner-api-gateway 之間的 API 依賴"
+```
+
+### Run tests
+
+```bash
+mra test erp                  # auto-detect: API change -> integration, otherwise -> mock
+mra test erp --integration    # force full integration test
+mra test erp --mock           # force mock/unit test only
+```
+
+### Code quality
+
+```bash
+mra lint odm-ui               # check frontend BLOCKER rules (interface, enum, any, etc.)
+mra lint --all                 # check all frontend projects
+```
+
+### Before pushing
+
+```bash
+mra snapshot "before-push"     # safety checkpoint
+mra diff                       # review what's changed
+mra graph --mermaid            # visualize dependency changes
+```
+
+### Something broke? Rollback
+
+```bash
+mra rollback erp                     # rollback to latest snapshot
+mra rollback erp "initial-setup"     # rollback to specific snapshot
+mra rollback --all                   # rollback everything
+```
+
+### Useful combos
+
+```bash
+# Full health check
+mra doctor && mra lint --all && mra diff
+
+# Re-scan dependencies + export context
+mra scan && mra export
+
+# Track API costs
+mra cost
+```
+
+---
+
+## Tutorial: Onboarding a Teammate
+
+### What to share
+
+Give the new member these files from `<workspace>/.collab/`:
+
+| File | Content | Required? |
+|------|---------|-----------|
+| `repos.json` | Which repos to clone | Yes |
+| `db.json` | Database configuration | Yes |
+| `manual-deps.json` | Manual dependency overrides | Optional |
+| SQL dump files | Database data | Yes (separate transfer) |
+
+### New member steps
+
+```bash
+# 1. Clone and install mra
+git clone <mra-repo-url> ~/multi-repo-agent
+cd ~/multi-repo-agent && bash install.sh && source ~/.zshrc
+
+# 2. Switch to org GitHub account
+gh auth login
+
+# 3. Create workspace directory
+mkdir -p ~/OneAD/.collab
+
+# 4. Place shared config files
+cp /path/from/teammate/repos.json ~/OneAD/.collab/
+cp /path/from/teammate/db.json ~/OneAD/.collab/
+
+# 5. Place dump files
+mkdir -p ~/OneAD/dumps
+cp /path/to/dumps/*.sql.bz2 ~/OneAD/dumps/
+
+# 6. Initialize (skips interactive — uses existing configs)
+mra init ~/OneAD --git-org git@github.com:onead
+
+# 7. Setup databases
+mra db setup
+
+# 8. Verify
+mra doctor
+```
+
+### Generate config templates for a new workspace
+
+```bash
+mra template              # creates repos.json.template, db.json.template, manual-deps.json.template
+```
+
+---
+
+## Command Reference
+
+### Core
+
+| Command | Description |
+|---------|-------------|
+| `mra init <path> --git-org <url>` | Initialize workspace (clone repos, setup DB, scan deps) |
+| `mra scan [path]` | Re-scan dependencies (diff scan by default) |
+| `mra deps [project]` | Display dependency graph |
+| `mra status` | Workspace overview (all projects, branches, changes, DB) |
+| `mra diff` | Cross-repo diff summary (uncommitted/unpushed) |
+| `mra log [project]` | View operation history |
+
+### AI & Launch
+
+| Command | Description |
+|---------|-------------|
+| `mra <project...> [--with-deps] [--depth N] [--no-sync]` | Launch Claude orchestrator |
+| `mra --all` | Launch with all projects |
+| `mra ask <project> "<question>"` | Non-interactive codebase query |
+| `mra ask <project> --interactive "<question>"` | Interactive session with follow-ups |
+| `mra export [project]` | Export project context (routes, schema, deps, env) |
+
+### Docker & Testing
+
+| Command | Description |
+|---------|-------------|
+| `mra db setup` | Start DB containers + import dumps |
+| `mra db status` | Show database status table |
+| `mra db import <schema>` | Re-import a specific database |
+| `mra test <project> [--integration\|--mock]` | Run tests in Docker with isolation |
+| `mra setup <project\|--all>` | Auto-install deps (bundle install, pnpm install, etc.) |
+| `mra watch <project\|--all>` | Watch files, auto-test on change |
+
+### Quality & Health
+
+| Command | Description |
+|---------|-------------|
+| `mra doctor [project]` | Three-level health check (tools, DB, projects) |
+| `mra lint <project\|--all>` | Check JS/TS BLOCKER rules |
+| `mra cost [--reset]` | Claude API usage tracking |
+
+### Safety
+
+| Command | Description |
+|---------|-------------|
+| `mra snapshot [name]` | Create state checkpoint |
+| `mra snapshots` | List all snapshots |
+| `mra rollback <project\|--all> [name]` | Restore to snapshot |
+
+### CI/CD & Collaboration
+
+| Command | Description |
+|---------|-------------|
+| `mra ci <project>` | Generate GitHub Actions workflow |
+| `mra federation publish <project>` | Publish API contract |
+| `mra federation subscribe <url>` | Subscribe to external contract |
+| `mra federation verify` | Verify contracts match |
+| `mra federation list` | List all contracts |
+| `mra notify setup` | Create webhook config template |
+| `mra notify status` | Show configured webhooks |
+| `mra notify test` | Send test notification |
+
+### Utilities
+
+| Command | Description |
+|---------|-------------|
+| `mra graph [--mermaid\|--dot]` | Visualize dependency graph |
+| `mra dashboard` | Interactive terminal dashboard |
+| `mra open <project> [--with-deps]` | Open in IDE (VS Code/Cursor) |
+| `mra template [repos\|db\|deps\|all]` | Generate config templates |
+| `mra config <key> <value>` | Manage settings |
+| `mra alias <name> <path>` | Create workspace shortcut |
+| `mra clean [--logs-older-than Nd]` | Clean orphan containers + old logs |
+
+---
+
+## Configuration Files
+
+All configuration lives in `<workspace>/.collab/`:
+
+| File | Purpose | Shareable? |
+|------|---------|------------|
+| `repos.json` | Which repos to clone, branch settings | Yes |
+| `db.json` | Database engines, schemas, dump paths | Yes |
+| `dep-graph.json` | Auto-generated dependency graph | No (auto-generated) |
+| `manual-deps.json` | Manual dependency overrides | Yes |
+| `notify.json` | Webhook notification config | Yes |
+| `usage.json` | Claude API usage tracking | No |
+| `exports/` | Exported project context files | No (auto-generated) |
+| `contracts/` | Federation contract files | Depends |
+| `snapshots/` | State snapshots | No |
+| `logs/` | Operation logs | No |
+| `scanners/` | Custom scanner plugins | Yes |
+
+### repos.json
+
+```json
+{
+  "repos": [
+    { "name": "erp", "clone": true, "branch": "main", "description": "ERP backend" },
+    { "name": "odm-ui", "clone": true, "branch": "main", "description": "ODM frontend" },
+    { "name": "old-service", "clone": false, "branch": "main", "description": "Deprecated" }
+  ]
+}
+```
+
+### db.json
+
+```json
+{
+  "databases": {
+    "mysql": {
+      "engine": "mysql",
+      "version": "5.7",
+      "platform": "linux/amd64",
+      "port": 3306,
+      "password": "123456",
+      "schemas": {
+        "gspadmin": { "source": "./dumps/gspadmin.sql.bz2", "usedBy": ["erp", "masa"] },
+        "moai": { "source": "./dumps/moai.sql.bz2", "usedBy": ["moai"] }
+      }
+    }
+  }
+}
+```
+
+Supported dump formats: `.sql`, `.sql.gz`, `.sql.bz2`, `.sql.xz`, `.sql.zst`, `.dump`
 
 Supported engines: `mysql`, `postgres`
 
-The `platform` field handles Apple Silicon compatibility (e.g., `linux/amd64` for MySQL 5.7).
-
-### `dep-graph.json` - Dependency graph (auto-generated)
-
-Generated by `mra init` and updated by `mra scan`. Contains project metadata and inter-project dependencies.
-
-### `manual-deps.json` - Manual dependency overrides
-
-Add dependencies that scanners can't detect automatically. These override scanner results with `high` confidence.
+### manual-deps.json
 
 ```json
 [
@@ -372,151 +459,150 @@ Add dependencies that scanners can't detect automatically. These override scanne
 ]
 ```
 
-### `config.json` - Global settings (in mra install directory)
+### config.json (global, in mra install directory)
 
 ```json
 {
   "autoScan": true,
   "depthDefault": 1,
-  "aliases": {
-    "onead": {
-      "workspace": "/Users/you/OneAD",
-      "gitOrg": "git@github.com:onead"
-    }
-  },
-  "subAgentWorkflow": {
-    "reviewLoopMax": 3,
-    "autoCommit": true,
-    "autoPR": true
-  }
+  "aliases": { "onead": { "workspace": "~/OneAD", "gitOrg": "git@github.com:onead" } },
+  "subAgentWorkflow": { "reviewLoopMax": 3, "autoCommit": true, "autoPR": true }
 }
 ```
 
-## Dependency Scanners
+---
 
-mra includes 5 scanners that automatically detect cross-repo relationships:
+## AI Agent Team
+
+| Agent | Role | When dispatched |
+|-------|------|----------------|
+| **orchestrator** | Coordinates cross-project changes, dispatches sub-agents, API change detection | Always active in `mra <project>` session |
+| **pm-agent** | Requirement analysis, task decomposition, acceptance validation | User gives vague requirement or asks for impact analysis |
+| **sub-agent** | Writes code, runs tests, commits, follows frontend standards | Orchestrator assigns per-project tasks |
+| **code-reviewer** | Reviews diffs for correctness, security, API consistency | After sub-agent commits |
+| **pr-reviewer** | Reviews entire PR, checks cross-project dependency notes | After PR is created |
+
+### Sub-agent workflow
+
+```
+develop -> commit -> review -> PR -> review
+                                       |
+                                 pass? no -> fix -> commit -> review -> update PR (max 3 loops)
+                                       |
+                                      yes -> done
+```
+
+### PM agent modes
+
+- **Full (default)**: Requirements -> Planning -> Supervision -> Acceptance
+- **Analyze only**: Requirements analysis and task decomposition
+- **Document only**: Generate PRD/spec from code changes
+- **Review only**: Validate completed work against requirements
+
+---
+
+## Dependency Scanners
 
 | Scanner | Detects | Confidence |
 |---------|---------|------------|
-| `docker-compose` | `depends_on` relationships between services | high |
-| `shared-db` | Projects sharing the same database name | high |
-| `gateway-routes` | API gateway routing to upstream services | medium |
-| `shared-packages` | Internal npm/gem package dependencies | high |
-| `api-calls` | Environment variable API host references | low |
+| `docker-compose` | `depends_on` service relationships | high |
+| `shared-db` | Projects sharing the same database | high |
+| `gateway-routes` | API gateway routing to services | medium |
+| `shared-packages` | Internal npm/gem dependencies | high |
+| `api-calls` | Env var API host references | low |
 
-Low-confidence results are excluded by default. Confirm them in `manual-deps.json` to include.
+Low-confidence results require manual confirmation in `manual-deps.json`.
 
-### Custom Scanner Plugins
+### Custom scanner plugins
 
-Add workspace-specific scanners in `<workspace>/.collab/scanners/*.sh`. Each scanner receives the workspace path as `$1` and must output JSONL lines to stdout:
+Place scripts in `<workspace>/.collab/scanners/*.sh`. Each receives workspace path as `$1` and outputs JSONL:
 
 ```json
-{"source":"frontend","target":"api","type":"api","confidence":"high"}
+{"source":"frontend","target":"api","type":"api","confidence":"high","scanner":"custom"}
 ```
 
-Custom scanners run after built-in ones during `mra scan`.
+---
 
 ## Architecture
 
 ```
 Host (macOS/Linux)
   |
-  +-- mra CLI (shell function)
-  |     +-- Pre-flight checks (docker, gh, jq, git)
+  +-- mra CLI (shell function, zero dependencies beyond jq/git/docker/gh)
+  |     +-- Pre-flight checks
   |     +-- Repo sync (git pull/clone from repos.json)
-  |     +-- Dependency scan (5 scanners -> dep-graph.json)
-  |     +-- Database setup (docker containers from db.json)
+  |     +-- Dependency scan (5 built-in + custom scanners -> dep-graph.json)
+  |     +-- Database setup (Docker containers from db.json)
   |     +-- Launch Claude with --add-dir flags
   |
   +-- Claude Orchestrator Session
-        +-- Reads dep-graph.json for cross-repo context
-        +-- Reads/writes code across all loaded projects
-        +-- Dispatches sub-agents for project-specific tasks
-        +-- Executes tests via docker compose run
+  |     +-- Reads dep-graph.json for cross-repo context
+  |     +-- Dispatches PM/sub/reviewer agents
+  |     +-- Executes tests via docker compose run
+  |     +-- API change detection matrix for test strategy
+  |
+  +-- MCP Server (optional)
+  |     +-- 9 tools exposed via Model Context Protocol
+  |     +-- Any AI agent can query mra programmatically
+  |
+  +-- Docker Containers
+        +-- Per-project test environments (docker compose run)
+        +-- Database instances (MySQL, Postgres)
+        +-- Integration test network (mra-test-net)
 ```
 
-Claude runs on the host (preserving all plugins, MCP servers, and hooks). Docker containers are used only for executing environment-specific commands (tests, builds, linting).
+---
 
-## Integration: reqbot-slack
+## Integrations
 
-mra integrates with [reqbot-slack](reqbot-slack/) to provide technical context during requirement intake conversations.
+### reqbot-slack
 
-### How it works
-
-1. `mra export` generates static context files per project
-2. reqbot-slack reads these files when building prompts for Claude
-3. When a user mentions "ERP 訂單" in Slack, reqbot detects the relevant project and injects its technical context
-4. reqbot can also call `mra ask` for on-demand technical queries
-
-### Setup
+Provides technical context during Slack-based requirement intake.
 
 ```bash
 # In reqbot-slack .env:
 MRA_WORKSPACE_PATH=/Users/you/OneAD
-# MRA_BIN_PATH=/Users/you/multi-repo-agent/bin/mra.sh  (optional, auto-detected)
 ```
-
-### Available functions (from mra-client.ts)
 
 ```typescript
 import { askMra, readProjectContext, getProjectDeps } from "./claude/mra-client.js";
 
-// Query codebase (calls mra ask)
 const result = await askMra("erp", "列出 order 相關的 API");
-
-// Read pre-exported context
-const context = readProjectContext("erp");  // 17KB of routes, schema, deps
-
-// Get dependency info
-const deps = getProjectDeps("erp");
-// { deps: ["mysql", "redis"], consumedBy: ["partner-api-gateway"] }
+const context = readProjectContext("erp");  // 17KB routes, schema, deps
+const deps = getProjectDeps("erp");         // { deps: [...], consumedBy: [...] }
 ```
 
-## Project Structure
+### MCP Server
 
+```bash
+cd ~/multi-repo-agent/mcp-server && npm install && npm run build
+claude mcp add mra node ~/multi-repo-agent/mcp-server/dist/index.js
 ```
-~/multi-repo-agent/
-+-- install.sh              # Installation script
-+-- config.json             # Global settings
-+-- bin/
-|   +-- mra.sh              # Main CLI entry point
-+-- lib/
-|   +-- alias.sh            # Workspace alias management
-|   +-- ask.sh              # Codebase query (mra ask)
-|   +-- cleanup.sh          # Orphan container/log cleanup
-|   +-- colors.sh           # Color output ([tag] format)
-|   +-- export.sh           # Project context exporter
-|   +-- config.sh           # Configuration read/write
-|   +-- db.sh               # Database management
-|   +-- deps.sh             # Dependency graph reader
-|   +-- detect-type.sh      # Project type detection
-|   +-- doctor.sh           # Environment health checks
-|   +-- init.sh             # Workspace initialization
-|   +-- launch.sh           # Claude launcher
-|   +-- preflight.sh        # Tool availability checks
-|   +-- repos.sh            # GitHub org repo discovery
-|   +-- scan.sh             # Scanner orchestrator
-|   +-- sync.sh             # Git pull/clone
-|   +-- change-detector.sh     # API change detection matrix
-|   +-- docker-exec.sh         # Docker execution helpers
-|   +-- integration-test.sh    # Cross-repo integration testing
-|   +-- test-runner.sh         # Test execution with isolation
-|   +-- watch.sh               # File change watcher (fswatch)
-|   +-- setup-project.sh       # Auto project dependency setup
-|   +-- graph.sh               # Dependency graph visualization
-|   +-- cost.sh                # Claude API usage tracking
-|   +-- template.sh            # Config file template generator
-+-- scanners/
-|   +-- api-calls.sh        # API host env var scanner
-|   +-- docker-compose.sh   # Docker Compose scanner
-|   +-- gateway-routes.sh   # API gateway route scanner
-|   +-- shared-db.sh        # Shared database scanner
-|   +-- shared-packages.sh  # Internal package scanner
-+-- agents/
-|   +-- orchestrator.md     # Claude orchestrator system prompt
-+-- tests/
-    +-- test_*.sh           # 10 test suites
+
+9 tools: `mra_status`, `mra_deps`, `mra_ask`, `mra_export`, `mra_diff`, `mra_doctor`, `mra_graph`, `mra_scan`, `mra_test`
+
+### GitHub Actions
+
+```bash
+mra ci erp    # generates .github/workflows/mra-test.yml
 ```
+
+### Federation (Cross-Team)
+
+```bash
+mra federation publish erp                    # publish API contract
+mra federation subscribe https://url/erp.json # subscribe
+mra federation verify                         # check compatibility
+```
+
+### Notifications (Slack/Discord)
+
+```bash
+mra notify setup    # create webhook config
+mra notify test     # send test notification
+```
+
+---
 
 ## Testing
 
@@ -525,230 +611,104 @@ cd ~/multi-repo-agent
 for test in tests/test_*.sh; do bash "$test"; done
 ```
 
-## Sharing with Teammates
+20 test suites covering: colors, config, cost, dashboard, db, deps, detect-type, diff, doctor, federation, graph, init, lint, notify, preflight, scanners (17 sub-tests), snapshot, status, sync, template.
 
-To onboard a new team member:
+---
 
-1. They clone this repo and run `install.sh`
-2. Share your `repos.json` and `db.json` files (these are not in `.gitignore`)
-3. They place both files in `<workspace>/.collab/`
-4. Share database dump files (or provide a download URL in `db.json`)
-5. Run `mra init <workspace> --git-org <url>` - it will use the existing config files
+## Project Structure
 
-## MCP Server
-
-mra includes an MCP (Model Context Protocol) server that exposes all commands as tools for AI agents.
-
-### Setup
-
-```bash
-cd ~/multi-repo-agent/mcp-server
-npm install && npm run build
+```
+~/multi-repo-agent/
++-- install.sh                    # Installation script
++-- config.json                   # Global settings
++-- README.md                     # This file
++-- bin/
+|   +-- mra.sh                    # Main CLI entry point (24 commands)
++-- lib/
+|   +-- alias.sh                  # Workspace alias management
+|   +-- ask.sh                    # AI codebase query
+|   +-- change-detector.sh        # API change detection matrix
+|   +-- ci.sh                     # GitHub Actions workflow generator
+|   +-- cleanup.sh                # Orphan container/log cleanup
+|   +-- colors.sh                 # Color output ([tag] format)
+|   +-- config.sh                 # Configuration read/write
+|   +-- cost.sh                   # Claude API usage tracking
+|   +-- dashboard.sh              # Interactive terminal dashboard
+|   +-- db.sh                     # Database management
+|   +-- deps.sh                   # Dependency graph reader
+|   +-- detect-type.sh            # Project type detection
+|   +-- diff-summary.sh           # Cross-repo diff summary
+|   +-- docker-exec.sh            # Docker execution helpers
+|   +-- doctor.sh                 # Environment health checks
+|   +-- export.sh                 # Project context exporter
+|   +-- federation.sh             # Multi-workspace contracts
+|   +-- graph.sh                  # Dependency visualization
+|   +-- init.sh                   # Workspace initialization
+|   +-- integration-test.sh       # Cross-repo integration testing
+|   +-- launch.sh                 # Claude launcher
+|   +-- lint.sh                   # JS/TS BLOCKER rule checker
+|   +-- log-viewer.sh             # Operation history viewer
+|   +-- notify.sh                 # Webhook notifications
+|   +-- open-ide.sh               # IDE launcher
+|   +-- preflight.sh              # Tool availability checks
+|   +-- repos.sh                  # GitHub org repo discovery
+|   +-- scan.sh                   # Scanner orchestrator
+|   +-- setup-project.sh          # Auto dependency installer
+|   +-- snapshot.sh               # Snapshot & rollback
+|   +-- status.sh                 # Workspace status overview
+|   +-- sync.sh                   # Git pull/clone
+|   +-- template.sh               # Config template generator
+|   +-- test-runner.sh            # Test execution with isolation
+|   +-- watch.sh                  # File change watcher
+|   +-- workflow.sh               # Git workflow helpers
++-- scanners/
+|   +-- api-calls.sh              # API host env var scanner
+|   +-- docker-compose.sh         # Docker Compose scanner
+|   +-- gateway-routes.sh         # API gateway route scanner
+|   +-- shared-db.sh              # Shared database scanner
+|   +-- shared-packages.sh        # Internal package scanner
++-- agents/
+|   +-- orchestrator.md           # Orchestrator system prompt
+|   +-- pm-agent.md               # PM agent prompt
+|   +-- sub-agent.md              # Development sub-agent prompt
+|   +-- code-reviewer.md          # Code review agent prompt
+|   +-- pr-reviewer.md            # PR review agent prompt
++-- actions/
+|   +-- mra-setup/action.yml      # GitHub Action: install mra
+|   +-- mra-test/action.yml       # GitHub Action: run tests
++-- mcp-server/
+|   +-- src/index.ts              # MCP server entry
+|   +-- src/tools.ts              # 9 MCP tool definitions
+|   +-- src/mra-executor.ts       # Shell command executor
++-- templates/
+|   +-- github-workflow.yml       # CI workflow template
++-- tests/
+    +-- test_*.sh                 # 20 test suites
 ```
 
-### Add to Claude Code
-
-```bash
-claude mcp add mra node ~/multi-repo-agent/mcp-server/dist/index.js
-```
-
-### Available MCP Tools
-
-| Tool | Description |
-|------|-------------|
-| `mra_status` | Workspace status overview |
-| `mra_deps` | Dependency graph |
-| `mra_ask` | AI codebase query |
-| `mra_export` | Export project context |
-| `mra_diff` | Cross-repo diff summary |
-| `mra_doctor` | Environment health check |
-| `mra_graph` | Dependency visualization |
-| `mra_scan` | Re-scan dependencies |
-| `mra_test` | Run tests in Docker |
-
-All tools require a `workspace` parameter pointing to the workspace root.
-
-## GitHub Actions
-
-mra provides GitHub Actions for CI/CD integration.
-
-### Quick Setup
-
-Generate a workflow for your project:
-
-```bash
-mra ci erp
-# Creates erp/.github/workflows/mra-test.yml
-```
-
-### How It Works
-
-1. On PR, the workflow runs `change-detector` to classify changes
-2. API changes (high confidence) trigger integration test warnings
-3. Tests run based on detected project type (rspec, jest, go test, etc.)
-4. Cross-repo impact is reported in PR annotations
-
-### Custom Actions
-
-Available in `actions/`:
-- `mra-setup` — Install mra and dependencies in CI
-- `mra-test` — Run tests with change detection
-
-### Reusable Workflow
-
-Call from your repo's workflow:
-
-```yaml
-jobs:
-  test:
-    uses: your-org/multi-repo-agent/.github/workflows/mra-test.yml@main
-    with:
-      project: erp
-      git-org: git@github.com:onead
-```
-
-### `mra dashboard`
-
-Interactive terminal dashboard. Shows projects, dependencies, databases, and recent changes in a single view. Auto-refreshes every 30 seconds.
-
-```bash
-mra dashboard
-```
-
-Keyboard shortcuts:
-- `q` — quit
-- `r` — refresh
-- `s` — run scan
-- `d` — run doctor
-- `e` — export all projects
-
-## Notifications
-
-Send webhook notifications for key events (scan, test, review, escalation).
-
-### Setup
-
-```bash
-mra notify setup    # creates .collab/notify.json template
-# Edit notify.json: add webhook URLs, set enabled: true
-```
-
-### Configuration (.collab/notify.json)
-
-```json
-{
-  "webhooks": [
-    {
-      "name": "slack-dev",
-      "type": "slack",
-      "url": "https://hooks.slack.com/services/...",
-      "enabled": true,
-      "minLevel": "warn"
-    }
-  ]
-}
-```
-
-Supported types: `slack`, `discord`, `generic` (POST JSON).
-Levels: `info`, `warn`, `error`, `critical`.
-
-### Check status
-
-```bash
-mra notify status   # show configured webhooks
-mra notify test     # send a test notification
-```
-
-## Federation (Multi-Workspace)
-
-Share API contracts across workspaces for cross-team contract testing.
-
-### Publish a contract
-
-```bash
-mra federation publish erp
-# Extracts API endpoints and saves to .collab/contracts/published/erp.json
-```
-
-### Subscribe to a contract
-
-```bash
-mra federation subscribe https://example.com/contracts/erp.json
-mra federation subscribe /path/to/erp.json
-```
-
-### Verify contracts
-
-```bash
-mra federation verify
-# Checks local code against subscribed contracts
-```
-
-### List contracts
-
-```bash
-mra federation list
-```
-
-### Fetch all subscriptions
-
-```bash
-mra federation fetch
-# Re-fetches all subscribed contracts from their sources
-```
-
-Contract files are stored in `<workspace>/.collab/contracts/`:
-- `published/` — contracts this workspace has published
-- `subscribed/` — contracts fetched from other workspaces
-- `subscriptions.json` — subscription registry with URLs and fetch timestamps
-
-## Snapshots & Rollback
-
-Save workspace state and restore it later.
-
-### Create a snapshot
-
-```bash
-mra snapshot                  # auto-named: snapshot-YYYYMMDD-HHMMSS
-mra snapshot "before-refactor"  # custom name
-```
-
-### List snapshots
-
-```bash
-mra snapshots
-```
-
-### Rollback
-
-```bash
-mra rollback erp              # rollback erp to latest snapshot
-mra rollback erp "before-refactor"  # rollback to specific snapshot
-mra rollback --all             # rollback all projects to latest snapshot
-```
-
-Rollback stashes uncommitted changes before resetting. Snapshots capture git commit hashes, not file contents, so they are lightweight.
+---
 
 ## Roadmap
 
-- [x] **Phase 3**: Sub-agent workflow with develop-commit-review-PR loop
-- [x] **Phase 4**: Docker container execution with test isolation
-- [x] **Mid-term**: File watcher (`mra watch`) with auto-test on change
-- [x] **Mid-term**: Auto project setup (`mra setup`) per project type
-- [x] **Mid-term**: Dependency graph visualization (`mra graph`) — terminal, Mermaid, DOT
-- [x] **Mid-term**: Custom workspace scanner plugins (`<workspace>/.collab/scanners/`)
-- [x] **Mid-term**: Claude API usage tracking (`mra cost`)
-- [x] **Mid-term**: Config file templates (`mra template`)
-- [x] **Long-term**: MCP server exposing all mra commands as tools
-- [x] **Long-term**: GitHub Actions integration with change detection and `mra ci` command
-- [x] **Long-term**: Snapshot & rollback mechanism (`mra snapshot`, `mra rollback`)
-- [x] **Long-term**: Terminal UI dashboard (`mra dashboard`) — projects, deps, DB, changes
-- [x] **Long-term**: Multi-workspace federation (`mra federation`) — publish/subscribe/verify API contracts
-- [x] **Long-term**: Notifications (`mra notify`) — Slack/Discord/generic webhooks for scan, test, review, escalation events
+### Completed
+
+- [x] Phase 1: CLI skeleton, repos.json, dep-graph, git sync
+- [x] Phase 2: 5 automated scanners + diff scan
+- [x] Phase 3: Sub-agent workflow with review loops + PM agent
+- [x] Phase 4: Docker execution, test isolation, API change detection
+- [x] Short-term: status, diff, log, open, scan cache
+- [x] Mid-term: watch, setup, graph, custom scanners, cost, templates
+- [x] Long-term: MCP server, GitHub Actions, snapshots, dashboard, federation, notifications, lint
+
+### Future
+
 - [ ] Open source release
-- [ ] Web dashboard for dependency graph visualization
-- [ ] Support for `docker exec` into running containers
-- [ ] More scanner strategies (GraphQL schema, gRPC proto)
+- [ ] Web dashboard (browser-based dependency graph)
+- [ ] `docker exec` into running containers
+- [ ] More scanners (GraphQL schema, gRPC proto)
+- [ ] Multi-language lint rules (Ruby, Go, Python)
+
+---
 
 ## License
 
