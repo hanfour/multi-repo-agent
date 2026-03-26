@@ -222,6 +222,24 @@ How it works:
 3. For API changes: starts provider container, runs consumer integration tests
 4. Always runs the project's own tests in Docker with isolated DB
 
+### `mra lint <project|--all>`
+
+Check JS/TS projects against OneAD frontend BLOCKER rules.
+
+```bash
+mra lint odm-ui              # lint a single project
+mra lint --all               # lint all frontend projects
+```
+
+Checks for:
+- `interface` usage (should be `type`)
+- `enum` usage (should be `as const`)
+- `any` type annotations (should be `unknown`)
+- Non-null assertion `!` (should use type guards)
+- `var` declarations (should be `const`/`let`)
+
+Reference: https://dev-ito-fe-docs.onead.tw/best-practice/js-ts.html
+
 ### `mra clean [--logs-older-than Nd]`
 
 Clean up orphan Docker containers and old log files.

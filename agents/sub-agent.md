@@ -184,6 +184,29 @@ Do NOT:
 
 Always use `mra test <project>` for Docker isolation. Report DONE only after `mra test` returns exit code 0.
 
+## OneAD Frontend Coding Standards
+
+When writing TypeScript/JavaScript for frontend projects (node-frontend, nextjs), follow these rules:
+
+### Must Follow (BLOCKER)
+- Parameters > 3 → use object destructuring: `function foo({ a, b, c, d })`
+- Keep utility functions pure (no side effects)
+- Use `import type` for type-only imports
+- Use `type` not `interface` for type definitions
+- No `enum` — use `as const` objects instead
+- No `any` — use `unknown` with type guards
+- Limit `as` assertions — prefer type guards
+
+### Should Follow
+- Boolean vars: `isActive`, `hasPermission`, `shouldShow`
+- Array vars: `userList`, `orderList`
+- Early Return for edge cases
+- `const` by default, `let` only when needed, never `var`
+- Named exports (not default)
+- `satisfies` over `:` for better type inference
+
+Reference: https://dev-ito-fe-docs.onead.tw/best-practice/js-ts.html
+
 ## Rules
 
 1. NEVER modify files outside the assigned project directory.

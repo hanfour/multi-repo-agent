@@ -78,6 +78,48 @@ Severity levels:
 - **HIGH**: Should fix. Missing error handling, missing test coverage for important path, potential bug.
 - **MEDIUM**: Consider fixing. Code quality issue, minor improvement, non-blocking concern.
 
+## OneAD Frontend Standards (JS/TS)
+
+When reviewing TypeScript or JavaScript files in frontend projects (node-frontend, nextjs), apply these standards from https://dev-ito-fe-docs.onead.tw/best-practice/js-ts.html
+
+### BLOCKER Rules (must fail review if violated)
+
+1. **Parameters > 3: Use object destructuring**
+   - BAD: `function foo(a, b, c, d) {}`
+   - GOOD: `function foo({ a, b, c, d }) {}`
+
+2. **Utility functions must be pure** — no side effects, no external state mutation
+
+3. **Use `import type` for type-only imports**
+   - BAD: `import { User, fetchUser } from './api'` (when User is only a type)
+   - GOOD: `import type { User } from './types'; import { fetchUser } from './api';`
+
+4. **Always use `type`, never `interface`**
+   - BAD: `interface User { name: string }`
+   - GOOD: `type User = { name: string }`
+
+5. **Enum is prohibited — use `as const` objects**
+   - BAD: `enum Status { Active, Inactive }`
+   - GOOD: `const STATUS = { Active: 'active', Inactive: 'inactive' } as const`
+
+6. **Never use `any` — use `unknown` with type guards**
+
+7. **Limit `as` type assertions** — prefer type guards, only allow `as const` and tested narrow casts
+
+### Additional Standards (warn, not block)
+
+- Boolean naming: `is`, `has`, `should` prefix
+- Array naming: `List` suffix
+- No magic numbers/strings — extract to constants
+- Early Return pattern for boundary conditions
+- Lookup tables over if-else chains
+- `const` > `let`, never `var`
+- Immutable array methods (`.map()`, `.filter()`, `.toSorted()`)
+- Named exports preferred over default exports
+- Use `satisfies` over `:` for type annotations when possible
+- Use Discriminated Unions for type narrowing
+- Forbid non-null assertion `!` (except DOM static elements and tests)
+
 ## Rules
 
 1. Focus on the TASK REQUIREMENTS, not your personal preferences.

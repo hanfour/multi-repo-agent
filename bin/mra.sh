@@ -39,6 +39,7 @@ source "$MRA_DIR/lib/snapshot.sh"
 source "$MRA_DIR/lib/dashboard.sh"
 source "$MRA_DIR/lib/federation.sh"
 source "$MRA_DIR/lib/notify.sh"
+source "$MRA_DIR/lib/lint.sh"
 
 usage() {
   cat <<'USAGE'
@@ -73,6 +74,7 @@ Commands:
   dashboard                    Interactive terminal dashboard
   federation <subcommand>       Multi-workspace contract management
   notify [setup|status|test]    Manage notifications
+  lint <project|--all>          Check JS/TS BLOCKER rules
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -474,6 +476,18 @@ main() {
         test) test_notification "$workspace" ;;
         *) log_error "usage: mra notify [setup|status|test]" "notify"; exit 1 ;;
       esac
+      ;;
+
+    lint)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      if [[ "${1:-}" == "--all" ]]; then
+        lint_all_projects "$workspace" || exit $?
+      elif [[ -n "${1:-}" ]]; then
+        lint_project "$workspace" "$1" || exit $?
+      else
+        log_error "usage: mra lint <project|--all>" "lint"; exit 1
+      fi
       ;;
 
     *)
