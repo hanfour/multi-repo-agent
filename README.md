@@ -570,6 +570,49 @@ Keyboard shortcuts:
 - `d` — run doctor
 - `e` — export all projects
 
+## Federation (Multi-Workspace)
+
+Share API contracts across workspaces for cross-team contract testing.
+
+### Publish a contract
+
+```bash
+mra federation publish erp
+# Extracts API endpoints and saves to .collab/contracts/published/erp.json
+```
+
+### Subscribe to a contract
+
+```bash
+mra federation subscribe https://example.com/contracts/erp.json
+mra federation subscribe /path/to/erp.json
+```
+
+### Verify contracts
+
+```bash
+mra federation verify
+# Checks local code against subscribed contracts
+```
+
+### List contracts
+
+```bash
+mra federation list
+```
+
+### Fetch all subscriptions
+
+```bash
+mra federation fetch
+# Re-fetches all subscribed contracts from their sources
+```
+
+Contract files are stored in `<workspace>/.collab/contracts/`:
+- `published/` — contracts this workspace has published
+- `subscribed/` — contracts fetched from other workspaces
+- `subscriptions.json` — subscription registry with URLs and fetch timestamps
+
 ## Snapshots & Rollback
 
 Save workspace state and restore it later.
@@ -611,6 +654,7 @@ Rollback stashes uncommitted changes before resetting. Snapshots capture git com
 - [x] **Long-term**: GitHub Actions integration with change detection and `mra ci` command
 - [x] **Long-term**: Snapshot & rollback mechanism (`mra snapshot`, `mra rollback`)
 - [x] **Long-term**: Terminal UI dashboard (`mra dashboard`) — projects, deps, DB, changes
+- [x] **Long-term**: Multi-workspace federation (`mra federation`) — publish/subscribe/verify API contracts
 - [ ] Open source release
 - [ ] Web dashboard for dependency graph visualization
 - [ ] Support for `docker exec` into running containers
