@@ -98,7 +98,7 @@ gh auth login
 ### Step 2: Initialize workspace
 
 ```bash
-mra init ~/OneAD --git-org git@github.com:onead
+mra init ~/my-workspace --git-org git@github.com:my-org
 ```
 
 This will:
@@ -109,17 +109,17 @@ This will:
 5. Scan docker-compose files for database configuration
 6. Ask about database setup (engine, dump files)
 7. Detect cross-repo dependencies
-8. Create a workspace alias (`onead`)
+8. Create a workspace alias (`my-org`)
 
 ### Step 3: Prepare database dumps
 
 ```bash
 # Place SQL dump files in the workspace
-mkdir -p ~/OneAD/dumps
-cp /path/to/gspadmin.sql.bz2 ~/OneAD/dumps/
+mkdir -p ~/my-workspace/dumps
+cp /path/to/myapp_db.sql.bz2 ~/my-workspace/dumps/
 
 # Edit db.json to point to your dump files
-# ~/OneAD/.collab/db.json is created during init
+# ~/my-workspace/.collab/db.json is created during init
 ```
 
 db.json format (supports multi-schema per instance):
@@ -134,9 +134,9 @@ db.json format (supports multi-schema per instance):
       "port": 3306,
       "password": "123456",
       "schemas": {
-        "gspadmin": {
-          "source": "./dumps/gspadmin.sql.bz2",
-          "usedBy": ["erp", "masa", "api-gateway"]
+        "myapp_db": {
+          "source": "./dumps/myapp_db.sql.bz2",
+          "usedBy": ["erp", "backend-api", "api-gateway"]
         }
       }
     }
@@ -166,7 +166,7 @@ Expected output:
 [doctor] === Database Checks ===
 [check] mysql (mysql:5.7): running
 [check] mysql: connectable
-[check] mysql/gspadmin: 469 tables
+[check] mysql/myapp_db: 469 tables
 [doctor] === Project Checks ===
 [check] erp: directory exists
 ...
@@ -199,11 +199,11 @@ mra dashboard     # interactive TUI with auto-refresh (press q to quit)
 mra erp --with-deps
 
 # Or use the workspace alias
-onead erp --with-deps
+my-org erp --with-deps
 
-# Claude starts with access to erp and partner-api-gateway
+# Claude starts with access to erp and api-consumer
 # Give it a task:
-# > "修改 erp 的訂單 API，把 data 改成 items，同步更新 partner-api-gateway"
+# > "修改 erp 的訂單 API，把 data 改成 items，同步更新 api-consumer"
 ```
 
 The orchestrator will:
@@ -217,8 +217,8 @@ The orchestrator will:
 
 ```bash
 mra ask erp "列出所有 order 相關的 API endpoint"
-mra ask masa "JWT 驗證怎麼做的？"
-mra ask erp --with-deps "erp 和 partner-api-gateway 之間的 API 依賴"
+mra ask backend-api "JWT 驗證怎麼做的？"
+mra ask erp --with-deps "erp 和 api-consumer 之間的 API 依賴"
 ```
 
 ### Run tests
@@ -232,7 +232,7 @@ mra test erp --mock           # force mock/unit test only
 ### Code quality
 
 ```bash
-mra lint odm-ui               # check frontend BLOCKER rules (interface, enum, any, etc.)
+mra lint frontend-app               # check frontend BLOCKER rules (interface, enum, any, etc.)
 mra lint --all                 # check all frontend projects
 ```
 
@@ -291,18 +291,18 @@ cd ~/multi-repo-agent && bash install.sh && source ~/.zshrc
 gh auth login
 
 # 3. Create workspace directory
-mkdir -p ~/OneAD/.collab
+mkdir -p ~/my-workspace/.collab
 
 # 4. Place shared config files
-cp /path/from/teammate/repos.json ~/OneAD/.collab/
-cp /path/from/teammate/db.json ~/OneAD/.collab/
+cp /path/from/teammate/repos.json ~/my-workspace/.collab/
+cp /path/from/teammate/db.json ~/my-workspace/.collab/
 
 # 5. Place dump files
-mkdir -p ~/OneAD/dumps
-cp /path/to/dumps/*.sql.bz2 ~/OneAD/dumps/
+mkdir -p ~/my-workspace/dumps
+cp /path/to/dumps/*.sql.bz2 ~/my-workspace/dumps/
 
 # 6. Initialize (skips interactive — uses existing configs)
-mra init ~/OneAD --git-org git@github.com:onead
+mra init ~/my-workspace --git-org git@github.com:my-org
 
 # 7. Setup databases
 mra db setup
@@ -420,7 +420,7 @@ All configuration lives in `<workspace>/.collab/`:
 {
   "repos": [
     { "name": "erp", "clone": true, "branch": "main", "description": "ERP backend" },
-    { "name": "odm-ui", "clone": true, "branch": "main", "description": "ODM frontend" },
+    { "name": "frontend-app", "clone": true, "branch": "main", "description": "ODM frontend" },
     { "name": "old-service", "clone": false, "branch": "main", "description": "Deprecated" }
   ]
 }
@@ -438,8 +438,8 @@ All configuration lives in `<workspace>/.collab/`:
       "port": 3306,
       "password": "123456",
       "schemas": {
-        "gspadmin": { "source": "./dumps/gspadmin.sql.bz2", "usedBy": ["erp", "masa"] },
-        "moai": { "source": "./dumps/moai.sql.bz2", "usedBy": ["moai"] }
+        "myapp_db": { "source": "./dumps/myapp_db.sql.bz2", "usedBy": ["erp", "backend-api"] },
+        "secondary_db": { "source": "./dumps/secondary_db.sql.bz2", "usedBy": ["secondary_db"] }
       }
     }
   }
@@ -454,8 +454,8 @@ Supported engines: `mysql`, `postgres`
 
 ```json
 [
-  { "source": "odm-ui", "target": "erp", "type": "api" },
-  { "source": "bss-ui", "target": "masa", "type": "api" }
+  { "source": "frontend-app", "target": "erp", "type": "api" },
+  { "source": "bss-ui", "target": "backend-api", "type": "api" }
 ]
 ```
 
@@ -465,7 +465,7 @@ Supported engines: `mysql`, `postgres`
 {
   "autoScan": true,
   "depthDefault": 1,
-  "aliases": { "onead": { "workspace": "~/OneAD", "gitOrg": "git@github.com:onead" } },
+  "aliases": { "my-org": { "workspace": "~/my-workspace", "gitOrg": "git@github.com:my-org" } },
   "subAgentWorkflow": { "reviewLoopMax": 3, "autoCommit": true, "autoPR": true }
 }
 ```
@@ -561,7 +561,7 @@ Provides technical context during Slack-based requirement intake.
 
 ```bash
 # In reqbot-slack .env:
-MRA_WORKSPACE_PATH=/Users/you/OneAD
+MRA_WORKSPACE_PATH=/Users/you/my-workspace
 ```
 
 ```typescript
