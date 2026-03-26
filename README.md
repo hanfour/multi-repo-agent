@@ -95,6 +95,40 @@ mra deps                     # show all dependencies
 mra deps erp                 # show erp's dependencies only
 ```
 
+### `mra status`
+
+Show workspace overview: all projects with branch, uncommitted changes, type, and database status.
+
+```bash
+mra status
+```
+
+### `mra diff`
+
+Show cross-repo diff summary: which projects have uncommitted or unpushed changes.
+
+```bash
+mra diff
+```
+
+### `mra log [project]`
+
+View operation history from `.collab/logs/`.
+
+```bash
+mra log                      # show all recent logs
+mra log erp                  # show only erp logs
+```
+
+### `mra open <project> [--with-deps]`
+
+Open project in IDE (auto-detects VS Code or Cursor).
+
+```bash
+mra open erp                 # open erp in IDE
+mra open erp --with-deps     # open erp + its dependencies
+```
+
 ### `mra db <subcommand>`
 
 Manage workspace databases.
