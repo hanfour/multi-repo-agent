@@ -36,6 +36,7 @@ source "$MRA_DIR/lib/cost.sh"
 source "$MRA_DIR/lib/template.sh"
 source "$MRA_DIR/lib/ci.sh"
 source "$MRA_DIR/lib/snapshot.sh"
+source "$MRA_DIR/lib/dashboard.sh"
 
 usage() {
   cat <<'USAGE'
@@ -67,6 +68,7 @@ Commands:
   snapshots                     List all snapshots
   rollback <project> [name]    Rollback project to snapshot
   rollback --all [name]        Rollback all projects
+  dashboard                    Interactive terminal dashboard
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -412,6 +414,12 @@ main() {
         log_error "usage: mra rollback <project|--all> [snapshot-name]" "rollback"
         exit 1
       fi
+      ;;
+
+    dashboard)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      run_dashboard "$workspace"
       ;;
 
     *)

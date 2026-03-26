@@ -555,6 +555,21 @@ jobs:
       git-org: git@github.com:onead
 ```
 
+### `mra dashboard`
+
+Interactive terminal dashboard. Shows projects, dependencies, databases, and recent changes in a single view. Auto-refreshes every 30 seconds.
+
+```bash
+mra dashboard
+```
+
+Keyboard shortcuts:
+- `q` — quit
+- `r` — refresh
+- `s` — run scan
+- `d` — run doctor
+- `e` — export all projects
+
 ## Snapshots & Rollback
 
 Save workspace state and restore it later.
@@ -595,6 +610,7 @@ Rollback stashes uncommitted changes before resetting. Snapshots capture git com
 - [x] **Long-term**: MCP server exposing all mra commands as tools
 - [x] **Long-term**: GitHub Actions integration with change detection and `mra ci` command
 - [x] **Long-term**: Snapshot & rollback mechanism (`mra snapshot`, `mra rollback`)
+- [x] **Long-term**: Terminal UI dashboard (`mra dashboard`) — projects, deps, DB, changes
 - [ ] Open source release
 - [ ] Web dashboard for dependency graph visualization
 - [ ] Support for `docker exec` into running containers
