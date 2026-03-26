@@ -197,6 +197,62 @@ mra clean                    # default: remove logs older than 7 days
 mra clean --logs-older-than 3d
 ```
 
+### `mra watch <project|--all>`
+
+Watch project files for changes and auto-trigger `mra test`. Requires `fswatch` (`brew install fswatch`).
+
+```bash
+mra watch erp                # watch a single project
+mra watch --all              # watch all projects in the workspace
+```
+
+Excludes `node_modules`, `.git`, `tmp`, `log`, and `vendor` directories.
+
+### `mra setup <project|--all>`
+
+Auto-install project dependencies based on detected project type. Runs inside Docker for environment consistency.
+
+```bash
+mra setup erp                # setup a single project (bundle install, db:migrate, etc.)
+mra setup --all              # setup all projects
+```
+
+Supports: `rails-api` (bundle install + db:migrate), `node-frontend/node-backend/nextjs` (npm/yarn/pnpm install), `go-service` (go mod download), `python-service` (pip install).
+
+### `mra graph [--mermaid|--dot]`
+
+Visualize the dependency graph in multiple formats.
+
+```bash
+mra graph                    # terminal output
+mra graph --mermaid          # writes .collab/dep-graph.mmd
+mra graph --dot              # writes .collab/dep-graph.dot (Graphviz)
+```
+
+### `mra cost [--reset]`
+
+Track and display Claude API usage across sessions.
+
+```bash
+mra cost                     # show usage summary + 7-day breakdown
+mra cost --reset             # reset all tracked usage data
+```
+
+Usage is stored in `<workspace>/.collab/usage.json`. Call `record_usage` from scripts to log token counts and cost.
+
+### `mra template [repos|db|deps|all]`
+
+Generate starter config file templates in `<workspace>/.collab/`.
+
+```bash
+mra template                 # generate all templates
+mra template repos           # repos.json.template only
+mra template db              # db.json.template only
+mra template deps            # manual-deps.json.template only
+```
+
+Templates are only created if the corresponding `.json` file does not already exist.
+
 ## Configuration Files
 
 All configuration lives in `<workspace>/.collab/`:
@@ -298,6 +354,16 @@ mra includes 5 scanners that automatically detect cross-repo relationships:
 
 Low-confidence results are excluded by default. Confirm them in `manual-deps.json` to include.
 
+### Custom Scanner Plugins
+
+Add workspace-specific scanners in `<workspace>/.collab/scanners/*.sh`. Each scanner receives the workspace path as `$1` and must output JSONL lines to stdout:
+
+```json
+{"source":"frontend","target":"api","type":"api","confidence":"high"}
+```
+
+Custom scanners run after built-in ones during `mra scan`.
+
 ## Architecture
 
 ```
@@ -383,6 +449,11 @@ const deps = getProjectDeps("erp");
 |   +-- docker-exec.sh         # Docker execution helpers
 |   +-- integration-test.sh    # Cross-repo integration testing
 |   +-- test-runner.sh         # Test execution with isolation
+|   +-- watch.sh               # File change watcher (fswatch)
+|   +-- setup-project.sh       # Auto project dependency setup
+|   +-- graph.sh               # Dependency graph visualization
+|   +-- cost.sh                # Claude API usage tracking
+|   +-- template.sh            # Config file template generator
 +-- scanners/
 |   +-- api-calls.sh        # API host env var scanner
 |   +-- docker-compose.sh   # Docker Compose scanner
@@ -416,6 +487,12 @@ To onboard a new team member:
 
 - [x] **Phase 3**: Sub-agent workflow with develop-commit-review-PR loop
 - [x] **Phase 4**: Docker container execution with test isolation
+- [x] **Mid-term**: File watcher (`mra watch`) with auto-test on change
+- [x] **Mid-term**: Auto project setup (`mra setup`) per project type
+- [x] **Mid-term**: Dependency graph visualization (`mra graph`) — terminal, Mermaid, DOT
+- [x] **Mid-term**: Custom workspace scanner plugins (`<workspace>/.collab/scanners/`)
+- [x] **Mid-term**: Claude API usage tracking (`mra cost`)
+- [x] **Mid-term**: Config file templates (`mra template`)
 - [ ] Open source release
 - [ ] Web dashboard for dependency graph visualization
 - [ ] Support for `docker exec` into running containers

@@ -29,6 +29,11 @@ source "$MRA_DIR/lib/status.sh"
 source "$MRA_DIR/lib/log-viewer.sh"
 source "$MRA_DIR/lib/diff-summary.sh"
 source "$MRA_DIR/lib/open-ide.sh"
+source "$MRA_DIR/lib/watch.sh"
+source "$MRA_DIR/lib/setup-project.sh"
+source "$MRA_DIR/lib/graph.sh"
+source "$MRA_DIR/lib/cost.sh"
+source "$MRA_DIR/lib/template.sh"
 
 usage() {
   cat <<'USAGE'
@@ -50,6 +55,11 @@ Commands:
   log [project]                 View operation history
   diff                          Show cross-repo diff summary
   open <project> [--with-deps]  Open project in IDE
+  watch <project|--all>         Watch files and auto-test on change
+  setup <project|--all>         Auto-install dependencies
+  graph [--mermaid|--dot]       Visualize dependency graph
+  cost [--reset]                Show Claude API usage
+  template [repos|db|deps|all]  Generate config templates
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -308,6 +318,57 @@ main() {
       local workspace
       workspace=$(resolve_workspace)
       open_project "$workspace" "$@"
+      ;;
+
+    watch)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      if [[ "${1:-}" == "--all" ]]; then
+        watch_all "$workspace"
+      elif [[ -n "${1:-}" ]]; then
+        watch_project "$workspace" "$1"
+      else
+        log_error "usage: mra watch <project|--all>" "watch"; exit 1
+      fi
+      ;;
+
+    setup)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      if [[ "${1:-}" == "--all" ]]; then
+        setup_all_projects "$workspace"
+      elif [[ -n "${1:-}" ]]; then
+        setup_project "$workspace" "$1"
+      else
+        log_error "usage: mra setup <project|--all>" "setup"; exit 1
+      fi
+      ;;
+
+    graph)
+      shift
+      local workspace format="terminal"
+      workspace=$(resolve_workspace)
+      case "${1:-}" in
+        --mermaid) format="mermaid" ;;
+        --dot) format="dot" ;;
+      esac
+      generate_graph "$workspace" "$format"
+      ;;
+
+    cost)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      if [[ "${1:-}" == "--reset" ]]; then
+        reset_cost "$workspace"
+      else
+        show_cost "$workspace"
+      fi
+      ;;
+
+    template)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      generate_template "$workspace" "${1:-all}"
       ;;
 
     *)

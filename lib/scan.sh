@@ -16,6 +16,17 @@ run_all_scanners() {
     bash "$scanner" "$workspace" >> "$results_file" 2>/dev/null || true
   done
 
+  # Custom scanners from workspace
+  local custom_dir="$workspace/.collab/scanners"
+  if [[ -d "$custom_dir" ]]; then
+    for scanner in "$custom_dir"/*.sh; do
+      [[ ! -f "$scanner" ]] && continue
+      local scanner_name="custom/$(basename "$scanner" .sh)"
+      log_progress "running scanner: $scanner_name" "scan"
+      bash "$scanner" "$workspace" >> "$results_file" 2>/dev/null || true
+    done
+  fi
+
   echo "$results_file"
 }
 
