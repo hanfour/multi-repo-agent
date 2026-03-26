@@ -35,6 +35,7 @@ source "$MRA_DIR/lib/graph.sh"
 source "$MRA_DIR/lib/cost.sh"
 source "$MRA_DIR/lib/template.sh"
 source "$MRA_DIR/lib/ci.sh"
+source "$MRA_DIR/lib/snapshot.sh"
 
 usage() {
   cat <<'USAGE'
@@ -62,6 +63,10 @@ Commands:
   cost [--reset]                Show Claude API usage
   template [repos|db|deps|all]  Generate config templates
   ci <project>                 Generate GitHub Actions workflow
+  snapshot [name]               Create a state snapshot
+  snapshots                     List all snapshots
+  rollback <project> [name]    Rollback project to snapshot
+  rollback --all [name]        Rollback all projects
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -380,6 +385,33 @@ main() {
         log_error "usage: mra ci <project>" "ci"; exit 1
       fi
       generate_ci_workflow "$workspace" "$1"
+      ;;
+
+    snapshot)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      create_snapshot "$workspace" "${1:-}"
+      ;;
+
+    snapshots)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      list_snapshots "$workspace"
+      ;;
+
+    rollback)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      if [[ "${1:-}" == "--all" ]]; then
+        shift
+        rollback_all "$workspace" "${1:-}"
+      elif [[ -n "${1:-}" ]]; then
+        local project="$1"; shift
+        rollback_project "$workspace" "$project" "${1:-}"
+      else
+        log_error "usage: mra rollback <project|--all> [snapshot-name]" "rollback"
+        exit 1
+      fi
       ;;
 
     *)

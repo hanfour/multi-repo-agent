@@ -555,6 +555,33 @@ jobs:
       git-org: git@github.com:onead
 ```
 
+## Snapshots & Rollback
+
+Save workspace state and restore it later.
+
+### Create a snapshot
+
+```bash
+mra snapshot                  # auto-named: snapshot-YYYYMMDD-HHMMSS
+mra snapshot "before-refactor"  # custom name
+```
+
+### List snapshots
+
+```bash
+mra snapshots
+```
+
+### Rollback
+
+```bash
+mra rollback erp              # rollback erp to latest snapshot
+mra rollback erp "before-refactor"  # rollback to specific snapshot
+mra rollback --all             # rollback all projects to latest snapshot
+```
+
+Rollback stashes uncommitted changes before resetting. Snapshots capture git commit hashes, not file contents, so they are lightweight.
+
 ## Roadmap
 
 - [x] **Phase 3**: Sub-agent workflow with develop-commit-review-PR loop
@@ -567,6 +594,7 @@ jobs:
 - [x] **Mid-term**: Config file templates (`mra template`)
 - [x] **Long-term**: MCP server exposing all mra commands as tools
 - [x] **Long-term**: GitHub Actions integration with change detection and `mra ci` command
+- [x] **Long-term**: Snapshot & rollback mechanism (`mra snapshot`, `mra rollback`)
 - [ ] Open source release
 - [ ] Web dashboard for dependency graph visualization
 - [ ] Support for `docker exec` into running containers
