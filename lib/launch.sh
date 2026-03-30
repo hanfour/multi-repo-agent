@@ -49,6 +49,13 @@ launch_claude() {
     claude_args+=(--append-system-prompt-file "$mra_dir/agents/orchestrator.md")
   fi
 
+  # Inject output language from config
+  local output_lang
+  output_lang=$(config_get "outputLanguage" 2>/dev/null)
+  if [[ -n "$output_lang" && "$output_lang" != "null" ]]; then
+    claude_args+=(--append-system-prompt "Output Language: $output_lang. All agents (orchestrator, sub-agents, reviewers, PM) must use this language for descriptive output. Pass this language directive when dispatching any sub-agent.")
+  fi
+
   # Launch claude (array preserves spaces in paths)
   claude "${claude_args[@]}"
 }

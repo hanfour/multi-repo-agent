@@ -101,7 +101,11 @@ ask_project() {
   project_list=$(printf '%s, ' "${projects[@]}")
   project_list="${project_list%, }"
 
-  local system_prompt="You are a technical consultant analyzing the codebase of: ${project_list}. ${context}Answer questions by reading actual source code. Cite file paths and line numbers. Use 繁體中文台灣用語."
+  local output_lang
+  output_lang=$(config_get "outputLanguage" 2>/dev/null)
+  [[ -z "$output_lang" || "$output_lang" == "null" ]] && output_lang="English"
+
+  local system_prompt="You are a technical consultant analyzing the codebase of: ${project_list}. ${context}Answer questions by reading actual source code. Cite file paths and line numbers. Use ${output_lang}."
 
   log_progress "querying: $project_list" "ask"
 

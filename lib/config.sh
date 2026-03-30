@@ -37,6 +37,9 @@ config_handle() {
         config_set "parallelTest" "$( [[ "$value" == "on" ]] && echo true || echo false )"
         log_success "parallelTest $value" "config"
       else log_error "invalid value: $value (use on/off)" "config"; return 1; fi ;;
+    output-language)
+      config_set "outputLanguage" "\"$value\""
+      log_success "outputLanguage set to: $value" "config" ;;
     *) log_error "unknown config key: $key" "config"; return 1 ;;
   esac
 }
