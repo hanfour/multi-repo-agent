@@ -308,22 +308,46 @@ doctor_projects() {
     # Type-specific checks (report only, do not fix)
     case "$proj_type" in
       rails-api)
-        if docker compose -f "$proj_dir/docker-compose.yml" run --rm \
-            "$(basename "$proj_dir")" bundle check &>/dev/null 2>&1; then
-          log_success "$proj: bundle check ok" "check" >&2
-          ((pass++))
-        else
-          log_warn "$proj: bundle check failed (gems may need installing)" "check" >&2
+        # Check if docker-compose.yml exists
+        if [[ ! -f "$proj_dir/docker-compose.yml" ]]; then
+          log_warn "$proj: docker-compose.yml missing (cannot run Docker checks)" "check" >&2
           ((warn++))
-        fi
+        else
+          local service_name
+          service_name=$(docker compose -f "$proj_dir/docker-compose.yml" config --services 2>/dev/null | head -1)
+          if [[ -z "$service_name" ]]; then
+            log_warn "$proj: no service found in docker-compose.yml" "check" >&2
+            ((warn++))
+          else
+            # Bundle check
+            if docker compose -f "$proj_dir/docker-compose.yml" run --rm \
+                "$service_name" bundle check &>/dev/null 2>&1; then
+              log_success "$proj: bundle check ok" "check" >&2
+              ((pass++))
+            else
+              log_warn "$proj: bundle check failed (gems may need installing)" "check" >&2
+              ((warn++))
+            fi
 
-        if docker compose -f "$proj_dir/docker-compose.yml" run --rm \
-            "$(basename "$proj_dir")" rake db:migrate:status &>/dev/null 2>&1; then
-          log_success "$proj: db:migrate:status ok" "check" >&2
-          ((pass++))
-        else
-          log_warn "$proj: db:migrate:status failed (pending migrations?)" "check" >&2
-          ((warn++))
+            # db:migrate:status — only if ActiveRecord is enabled
+            local has_activerecord=true
+            if grep -q '# *require.*active_record' "$proj_dir/config/application.rb" 2>/dev/null; then
+              has_activerecord=false
+            fi
+
+            if [[ "$has_activerecord" == "true" ]]; then
+              if docker compose -f "$proj_dir/docker-compose.yml" run --rm \
+                  "$service_name" bundle exec rake db:migrate:status &>/dev/null 2>&1; then
+                log_success "$proj: db:migrate:status ok" "check" >&2
+                ((pass++))
+              else
+                log_warn "$proj: db:migrate:status failed (pending migrations or config issue?)" "check" >&2
+                ((warn++))
+              fi
+            else
+              log_info "$proj: no ActiveRecord — skipping db:migrate:status" "check" >&2
+            fi
+          fi
         fi
         ;;
 
