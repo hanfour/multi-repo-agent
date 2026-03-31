@@ -41,6 +41,7 @@ source "$MRA_DIR/lib/federation.sh"
 source "$MRA_DIR/lib/notify.sh"
 source "$MRA_DIR/lib/lint.sh"
 source "$MRA_DIR/lib/review-prompt.sh"
+source "$MRA_DIR/lib/review.sh"
 
 usage() {
   cat <<'USAGE'
@@ -76,6 +77,7 @@ Commands:
   federation <subcommand>       Multi-workspace contract management
   notify [setup|status|test]    Manage notifications
   lint <project|--all>          Check JS/TS BLOCKER rules
+  review <project> [--pr N]    Context-aware code review (inline on PR)
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -497,6 +499,12 @@ main() {
       else
         log_error "usage: mra lint <project|--all>" "lint"; exit 1
       fi
+      ;;
+
+    review)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      review_project "$workspace" "$@"
       ;;
 
     *)

@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Build context-aware review prompt for Claude Code CLI
 #
-# This script assembles a prompt that includes:
-# 1. The PR diff
-# 2. Dependency graph context (consumers, upstream deps)
-# 3. API change classification
-# 4. Instructions to read actual source code, not just the diff
+# Two output modes:
+#   - "terminal": human-readable text (default, for mra review <project>)
+#   - "inline":   JSON for GitHub inline PR review (for mra review <project> --pr N)
 
 build_review_prompt() {
   local project="$1"
@@ -17,6 +15,7 @@ build_review_prompt() {
   local deps="${7:-}"
   local has_api_change="${8:-false}"
   local output_language="${9:-}"
+  local output_mode="${10:-terminal}"
 
   # --- Get diff ---
   local diff=""
@@ -69,6 +68,63 @@ If the diff changes how upstream APIs are called, verify the call matches the up
 Use ${output_language} for all descriptive output in your review."
   fi
 
+  # --- Output format instructions ---
+  local output_instructions=""
+  if [[ "$output_mode" == "inline" ]]; then
+    output_instructions='## Output Format (STRICT JSON)
+
+You MUST output ONLY valid JSON with no text before or after. No markdown fences. No explanation outside the JSON.
+
+{
+  "status": "APPROVED" | "CHANGES_REQUESTED",
+  "summary": "<one-line summary of the review>",
+  "comments": [
+    {
+      "path": "<file path relative to project root>",
+      "line": <line number in the NEW version of the file>,
+      "severity": "CRITICAL" | "HIGH" | "MEDIUM",
+      "body": "<review comment explaining the issue and how to fix>"
+    }
+  ]
+}
+
+Rules for the "line" field:
+- Use the line number from the NEW (right-side) version of the diff.
+- The line MUST be within the diff hunk (a changed or adjacent line). GitHub rejects comments on lines not in the diff.
+- If a deleted line is the issue, comment on the nearest remaining line in the same hunk.
+
+Rules for "comments":
+- Only include comments for issues found in the DIFF. Do not comment on unchanged code.
+- Each comment must reference a specific file and line.
+- If status is APPROVED, comments array should be empty or contain only positive notes.
+
+Rules for "body":
+- Be specific about the problem and suggest a fix.
+- For API breaking changes, mention which consumer file and line is affected.'
+  else
+    output_instructions='## Review Output
+
+Produce your review in this format:
+
+If no issues found:
+```
+Status: APPROVED
+Summary: <one-line summary>
+Notes:
+  - <optional feedback>
+```
+
+If issues found:
+```
+Status: CHANGES_REQUESTED
+Summary: <one-line summary>
+Issues:
+  - [CRITICAL] <file>:<line> - <description>
+  - [HIGH] <file>:<line> - <description>
+  - [MEDIUM] <file>:<line> - <description>
+```'
+  fi
+
   # --- Assemble prompt ---
   cat <<PROMPT
 You are reviewing a pull request for the project "${project}" (type: ${project_type}).
@@ -94,27 +150,7 @@ ${changed_files}
 ${diff}
 \`\`\`
 
-## Review Output
-
-Produce your review in the standard format:
-
-If no issues found:
-\`\`\`
-Status: APPROVED
-Summary: <one-line summary>
-Notes:
-  - <optional feedback>
-\`\`\`
-
-If issues found:
-\`\`\`
-Status: CHANGES_REQUESTED
-Summary: <one-line summary>
-Issues:
-  - [CRITICAL] <file>:<line> - <description>
-  - [HIGH] <file>:<line> - <description>
-  - [MEDIUM] <file>:<line> - <description>
-\`\`\`
+${output_instructions}
 
 Important:
 - Only flag issues that are in the DIFF. Do not review unchanged code.
