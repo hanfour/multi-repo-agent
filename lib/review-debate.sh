@@ -202,6 +202,13 @@ You are Agent A (Impact Analyst). Your job is to find REAL, VERIFIED impact of t
    - Search if the same module (e.g., devtools, providers) is imported in multiple entry points.
 6. Check for leftover test/debug artifacts:
    - Search for console.log, devtools references, temporary mocks, or test-only code in production files.
+7. Dead code detection:
+   - When a function/method is deleted or replaced, search for remaining references in port interfaces, adapters, test mocks, re-exports.
+   - Report exact file:line of each orphaned reference.
+8. Async safety:
+   - If event emission is modified, verify emit() vs emitAsync() correctness.
+   - If return types changed, verify all callers handle the new type.
+   - If try/catch wraps async calls, verify the call is awaited.
 ${consumer_note}
 
 ## Diff
@@ -273,6 +280,20 @@ You are Agent B (Quality Auditor). Your job is to find code quality, security, a
    - Nested map/filter chains → suggest flatMap or reduce
    - Complex spread logic → suggest named intermediate variables
    - If project has es-toolkit/lodash, use their utilities instead of hand-rolling
+9. Naming & magic values:
+   - No single-letter variable names (r, e, x) outside tiny lambdas
+   - No magic numbers — use named constants
+   - Repeated string operations (e.g., date.substring(0,7)) → extract helper
+   - Validation decorators (@Matches, @IsString) should have custom error messages
+10. Backend architecture (NestJS/DDD):
+   - Module A should not import module B's internal entities — use shared ports
+   - Transaction scope: avoid cross-DB I/O inside transactions
+   - OpenAPI: integer DB fields must use type 'integer' in @ApiProperty
+   - Shared utilities should live outside specific modules
+11. Async safety:
+   - emit() vs emitAsync() — async handlers need emitAsync()
+   - Return types must reflect async reality (Promise<T> not T)
+   - try/catch must await async calls to catch errors
 
 ## Project Type: ${project_type}
 

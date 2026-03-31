@@ -182,6 +182,38 @@ When reviewing TypeScript or JavaScript files in frontend projects (node-fronten
 6. **Complex spread logic** — break into named intermediate variables for readability
 7. **Use project utilities** — if `es-toolkit` or `lodash` is installed, use `isNil`, `groupBy` etc. instead of hand-rolling
 
+### Async & Promise Safety (CRITICAL if violated)
+
+1. **`emit()` vs `emitAsync()`** — if event handlers are async, the emitter MUST use `emitAsync()`. Plain `emit()` drops the returned Promise, causing unhandled rejections.
+2. **Return type accuracy** — if a function performs async work internally, its return type must be `Promise<T>`, not `T`. Callers cannot `await` a synchronous signature.
+3. **`await` in try/catch** — if the goal is to catch async errors, the call MUST be `await`ed inside the try block. Without `await`, the catch never fires.
+
+### Dead Code & Interface Hygiene (HIGH)
+
+1. **When a function is removed or replaced**, search for it in: port interfaces, adapter implementations, test mocks, and re-exports. All references must be removed together.
+2. **When a method is no longer called**, flag it as dead code with the exact locations that still declare it.
+
+### Naming & Readability (MEDIUM)
+
+1. **No single-letter variable names** — `r`, `e`, `x` are not acceptable outside tiny lambdas
+2. **No magic numbers** — use named constants (`APPROVAL_STAGE.STAGE_1` not `>= 1`)
+3. **Repeated string operations** — extract into a helper (e.g., `date.substring(0,7)` → `toYearMonth(date)`)
+4. **Validation messages** — decorators like `@Matches` should include a human-readable message, not just a regex
+5. **Destructure command/request objects** early for readability
+
+### Backend Architecture (HIGH for DDD/NestJS projects)
+
+1. **Bounded context isolation** — module A should NOT import module B's internal entities directly. Use shared ports or read models.
+2. **Transaction scope** — cross-DB I/O inside a transaction extends lock duration. Read external data before opening the transaction when possible.
+3. **OpenAPI spec accuracy** — integer DB fields (`DECIMAL(n,0)`) must be `type: 'integer'` in DTO `@ApiProperty`, not default `number`.
+4. **Shared utilities** — functions like `calculateTotalWithTax` that are reusable should live outside the specific module.
+
+### Rails-Specific (for rails-api projects)
+
+1. **ActiveHash vs ActiveRecord** — do not apply N+1 prevention (`.includes`) to ActiveHash models
+2. **Error handling** — user input validation errors should return 4xx, not `raise` exceptions
+3. **Side effect awareness** — when modifying shared fields (e.g., `time_frame`), consider downstream impact on other features
+
 ## Rules
 
 1. Focus on the TASK REQUIREMENTS, not your personal preferences.
