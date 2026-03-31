@@ -17,10 +17,21 @@ build_review_prompt() {
   local output_language="${9:-}"
   local output_mode="${10:-terminal}"
 
+  # --- Resolve base ref (try local, then origin/) ---
+  local resolved_base="$base_ref"
+  if [[ -d "$project_dir/.git" ]]; then
+    if ! git -C "$project_dir" rev-parse --verify "$base_ref" &>/dev/null; then
+      if git -C "$project_dir" rev-parse --verify "origin/$base_ref" &>/dev/null; then
+        resolved_base="origin/$base_ref"
+      fi
+    fi
+  fi
+
   # --- Get diff ---
   local diff=""
   if [[ -d "$project_dir/.git" ]]; then
-    diff=$(git -C "$project_dir" diff "${base_ref}...HEAD" 2>/dev/null || \
+    diff=$(git -C "$project_dir" diff "${resolved_base}...HEAD" 2>/dev/null || \
+           git -C "$project_dir" diff "${resolved_base}" HEAD 2>/dev/null || \
            git -C "$project_dir" diff HEAD~1 2>/dev/null || \
            echo "(diff unavailable)")
   fi
@@ -28,7 +39,8 @@ build_review_prompt() {
   # --- Get changed files list ---
   local changed_files=""
   if [[ -d "$project_dir/.git" ]]; then
-    changed_files=$(git -C "$project_dir" diff --name-only "${base_ref}...HEAD" 2>/dev/null || \
+    changed_files=$(git -C "$project_dir" diff --name-only "${resolved_base}...HEAD" 2>/dev/null || \
+                    git -C "$project_dir" diff --name-only "${resolved_base}" HEAD 2>/dev/null || \
                     git -C "$project_dir" diff --name-only HEAD~1 2>/dev/null || \
                     echo "(file list unavailable)")
   fi

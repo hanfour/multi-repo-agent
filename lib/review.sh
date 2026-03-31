@@ -174,7 +174,7 @@ resolve_pr_base() {
   local remote_url
   remote_url=$(git -C "$project_dir" remote get-url origin 2>/dev/null)
   local repo_slug
-  repo_slug=$(echo "$remote_url" | sed -E 's|.*[:/]([^/]+/[^/]+?)(\.git)?$|\1|')
+  repo_slug=$(echo "$remote_url" | sed 's|\.git$||' | sed 's|.*[:/]\([^/]*/[^/]*\)$|\1|')
 
   if [[ -n "$repo_slug" ]]; then
     local base
@@ -195,7 +195,7 @@ post_inline_review() {
   local remote_url
   remote_url=$(git -C "$project_dir" remote get-url origin 2>/dev/null)
   local repo_slug
-  repo_slug=$(echo "$remote_url" | sed -E 's|.*[:/]([^/]+/[^/]+?)(\.git)?$|\1|')
+  repo_slug=$(echo "$remote_url" | sed 's|\.git$||' | sed 's|.*[:/]\([^/]*/[^/]*\)$|\1|')
 
   if [[ -z "$repo_slug" ]]; then
     log_error "cannot determine repo from git remote" "review"
