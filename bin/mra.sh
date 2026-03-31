@@ -42,6 +42,7 @@ source "$MRA_DIR/lib/notify.sh"
 source "$MRA_DIR/lib/lint.sh"
 source "$MRA_DIR/lib/review-prompt.sh"
 source "$MRA_DIR/lib/review.sh"
+source "$MRA_DIR/lib/review-debate.sh"
 
 usage() {
   cat <<'USAGE'
@@ -77,7 +78,7 @@ Commands:
   federation <subcommand>       Multi-workspace contract management
   notify [setup|status|test]    Manage notifications
   lint <project|--all>          Check JS/TS BLOCKER rules
-  review <project> [--pr N]    Context-aware code review (inline on PR)
+  review <project> [--pr N] [--debate]  Code review (--debate: multi-agent)
   --all                         Load all projects
   <project...>                  Load specific projects
 

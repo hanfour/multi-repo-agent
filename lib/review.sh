@@ -5,11 +5,12 @@
 #   mra review <project>              Terminal output (current branch vs main)
 #   mra review <project> --pr <N>     Inline review on GitHub PR
 #   mra review <project> --base <ref> Compare against specific branch
+#   mra review <project> --debate     Multi-agent adversarial debate review
 
 review_project() {
   local workspace="$1"
   shift
-  local project="" pr_number="" base_ref="" model="sonnet"
+  local project="" pr_number="" base_ref="" model="sonnet" debate=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -22,6 +23,8 @@ review_project() {
       --model)
         if [[ $# -lt 2 ]]; then log_error "--model requires a value" "review"; return 1; fi
         model="$2"; shift 2 ;;
+      --debate)
+        debate=true; shift ;;
       -*)
         log_error "unknown option: $1" "review"; return 1 ;;
       *)
@@ -78,9 +81,72 @@ review_project() {
   [[ -n "$pr_number" ]] && output_mode="inline"
 
   # --- Log context ---
-  log_progress "reviewing $project (type: $project_type, base: $base_ref)" "review"
+  local mode_label="single-pass"
+  [[ "$debate" == "true" ]] && mode_label="debate"
+  log_progress "reviewing $project (type: $project_type, base: $base_ref, mode: $mode_label)" "review"
   [[ "$has_api_change" == "true" ]] && log_warn "API change detected — loading consumer context" "review"
   [[ -n "$consumers" ]] && log_info "consumers: $consumers" "review"
+
+  # --- Build --add-dir args as string (for debate) and array (for single-pass) ---
+  local claude_add_dirs_str=""
+  local claude_args=("--add-dir" "$project_dir")
+  claude_add_dirs_str="--add-dir $project_dir"
+  for repo in $consumers $deps; do
+    local repo_dir="$workspace/$repo"
+    if [[ -d "$repo_dir" && "$repo" != "$project" ]]; then
+      claude_args+=("--add-dir" "$repo_dir")
+      claude_add_dirs_str="$claude_add_dirs_str --add-dir $repo_dir"
+    fi
+  done
+
+  local mra_dir
+  mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+  # ===================================================================
+  # DEBATE MODE: multi-agent adversarial review
+  # ===================================================================
+  if [[ "$debate" == "true" ]]; then
+    local review_json
+    review_json=$(run_debate_review \
+      "$project" "$project_dir" "$graph_file" "$base_ref" \
+      "$project_type" "$consumers" "$deps" "$has_api_change" \
+      "$output_language" "$model" "$claude_add_dirs_str")
+
+    if [[ -z "$review_json" ]]; then
+      log_error "debate review returned empty response" "review"
+      return 1
+    fi
+
+    review_json=$(extract_json "$review_json")
+
+    if [[ "$output_mode" == "terminal" ]]; then
+      # Print formatted output
+      if echo "$review_json" | jq . &>/dev/null; then
+        local status summary
+        status=$(echo "$review_json" | jq -r '.status')
+        summary=$(echo "$review_json" | jq -r '.summary')
+        echo ""
+        echo "Status: $status"
+        echo "Summary: $summary"
+        echo ""
+        echo "$review_json" | jq -r '.comments[]? | "- [\(.severity)] \(.path):\(.line) — \(.body)"'
+      else
+        echo "$review_json"
+      fi
+    else
+      if ! echo "$review_json" | jq . &>/dev/null; then
+        log_error "debate did not produce valid JSON. Raw output:" "review"
+        echo "$review_json"
+        return 1
+      fi
+      post_inline_review "$project_dir" "$pr_number" "$review_json"
+    fi
+    return
+  fi
+
+  # ===================================================================
+  # SINGLE-PASS MODE: standard review
+  # ===================================================================
 
   # --- Build prompt ---
   local prompt
@@ -89,15 +155,6 @@ review_project() {
     "$project_type" "$consumers" "$deps" "$has_api_change" \
     "$output_language" "$output_mode")
 
-  # --- Build --add-dir args ---
-  local claude_args=("--add-dir" "$project_dir")
-  for repo in $consumers $deps; do
-    local repo_dir="$workspace/$repo"
-    [[ -d "$repo_dir" && "$repo" != "$project" ]] && claude_args+=("--add-dir" "$repo_dir")
-  done
-
-  local mra_dir
-  mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   claude_args+=(--append-system-prompt-file "$mra_dir/agents/code-reviewer.md")
   claude_args+=(--model "$model")
   claude_args+=(--max-turns 3)
