@@ -195,6 +195,13 @@ You are Agent A (Impact Analyst). Your job is to find REAL, VERIFIED impact of t
    - Report ONLY confirmed references with exact file paths and line numbers.
 3. For each modified function signature or return type:
    - Search for all callers and verify they are compatible with the new signature.
+4. Check for duplicate definitions:
+   - Search if the same function/type/component name exists elsewhere in the project.
+   - Flag if a new utility duplicates an existing one.
+5. Check for duplicate imports:
+   - Search if the same module (e.g., devtools, providers) is imported in multiple entry points.
+6. Check for leftover test/debug artifacts:
+   - Search for console.log, devtools references, temporary mocks, or test-only code in production files.
 ${consumer_note}
 
 ## Diff
@@ -243,13 +250,29 @@ You are Agent B (Quality Auditor). Your job is to find code quality, security, a
 ## Your Method
 1. Read the diff to understand the changes.
 2. Read the surrounding source files to understand the existing patterns and conventions.
-3. Check for:
+3. Read the project's AGENTS.md, CLAUDE.md, or .claude/rules/ files if they exist — these contain project-specific conventions.
+4. Check for:
    - Security issues (XSS, injection, exposed secrets, missing validation)
    - Error handling gaps (missing try/catch, unhandled promise rejections, missing error states)
    - State management issues (race conditions, stale closures, memory leaks in effects)
    - Type safety (any usage, missing null checks, unsafe type assertions)
    - Pattern violations (does new code follow existing project conventions?)
    - Missing edge cases (empty arrays, null/undefined, loading/error states)
+5. Architecture & state management:
+   - Server data (API responses) should be in TanStack Query, NOT in client stores (Zustand/Pinia)
+   - Store access should be wrapped in custom hooks, not called directly in components
+   - API types should use Zod schema validation when the project uses Zod
+6. Performance:
+   - Static data (column definitions, config objects) should be hoisted outside components
+   - Check if expensive computations need useMemo
+7. Tailwind & styling:
+   - Use cn() for conditional classes, not ternary string concatenation
+   - No hardcoded color values (oklch, hex, rgb) — use theme tokens
+   - No redundant width + max-width
+8. Code readability:
+   - Nested map/filter chains → suggest flatMap or reduce
+   - Complex spread logic → suggest named intermediate variables
+   - If project has es-toolkit/lodash, use their utilities instead of hand-rolling
 
 ## Project Type: ${project_type}
 

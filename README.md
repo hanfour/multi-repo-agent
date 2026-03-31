@@ -604,8 +604,18 @@ Supported engines: `mysql`, `postgres`
 | **orchestrator** | Coordinates cross-project changes, dispatches sub-agents, API change detection | Always active in `mra <project>` session |
 | **pm-agent** | Requirement analysis, task decomposition, acceptance validation | User gives vague requirement or asks for impact analysis |
 | **sub-agent** | Writes code, runs tests, commits, follows frontend standards | Orchestrator assigns per-project tasks |
-| **code-reviewer** | Reviews diffs for correctness, security, API consistency | After sub-agent commits |
+| **code-reviewer** | Reviews diffs for correctness, security, API consistency, architecture patterns | After sub-agent commits, or via `mra review` |
 | **pr-reviewer** | Reviews entire PR, checks cross-project dependency notes | After PR is created |
+
+### Code reviewer checks
+
+The code-reviewer agent applies these checks (in addition to standard correctness/security):
+
+- **Architecture**: server data in TanStack Query (not Zustand), store access via hooks, Zod validation for API types
+- **Performance**: static data hoisted outside components, appropriate `useMemo` usage
+- **Tailwind**: `cn()` for conditional classes, no hardcoded colors, no redundant width/max-width
+- **Code smell**: duplicate definitions/imports, nested map/filter → flatMap, test artifacts, unused constants
+- **Project conventions**: reads `AGENTS.md` / `CLAUDE.md` / `.claude/rules/` for project-specific rules
 
 ### Sub-agent workflow
 

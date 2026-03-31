@@ -126,6 +126,62 @@ When reviewing TypeScript or JavaScript files in frontend projects (node-fronten
 - Use Discriminated Unions for type narrowing
 - Forbid non-null assertion `!` (except DOM static elements and tests)
 
+### Architecture & State Management Patterns (HIGH if violated)
+
+1. **Server data belongs in TanStack Query, not client stores (Zustand/Pinia)**
+   - Data fetched from API = server state → use `useQuery` / `useMutation`
+   - Only UI state (sidebar open, selected tab) belongs in client stores
+   - BAD: putting API response data in Zustand store
+   - GOOD: `useQuery` for reads, `useMutation` for writes, Zustand for UI-only state
+
+2. **Wrap store access in custom hooks**
+   - Do not call `useStore()` directly in components
+   - Wrap in domain hooks (e.g., `useAuth()`, `useChatMessages()`)
+   - Reason: enables swapping store implementation without changing consumers
+
+3. **Centralize actions in store, derive state in hooks**
+   - Permission checks → combine with mutation state inside hooks, not scattered in templates
+   - `mutationFn` can add a permission guard layer for defense-in-depth
+
+4. **API types should use Zod schema validation**
+   - Define API response types with `z.object()`, not plain `type` declarations
+   - Shared types go in `packages/shared-types` or a shared directory
+   - Use `z.number().min(0).max(1)` style — more readable than custom validation
+
+### Performance Patterns (MEDIUM)
+
+1. **Hoist static JSX and config outside components**
+   - Static column definitions, lookup tables, formatters → define outside the component
+   - If truly static, no need for `useMemo`
+   - Ref: https://github.com/vercel-labs/agent-skills/blob/main/skills/react-best-practices/rules/rendering-hoist-jsx.md
+
+2. **Use `useMemo` for expensive derived data only when inputs change**
+   - Not needed for static data (hoist instead)
+   - Needed for filtered/sorted lists derived from query data
+
+### Tailwind & Styling Patterns (MEDIUM)
+
+1. **Use `cn()` for conditional classes** — never ternary string concatenation
+   - BAD: `className={isOpen ? "w-64" : "w-0"}`
+   - GOOD: `className={cn("transition-all", isOpen ? "w-64" : "w-0")}`
+
+2. **No hardcoded color values** — use Tailwind theme tokens or CSS variables
+   - BAD: `bg-[oklch(98.3%_0.006_255)]`
+   - GOOD: `bg-muted` or define in `tailwind.config` as a semantic token
+   - If a color is used in multiple places, it MUST be a theme token
+
+3. **Avoid redundant width + max-width** — use one or the other
+
+### Code Smell Detection (MEDIUM)
+
+1. **Search for duplicate definitions** — grep for function/type names across the project
+2. **Search for duplicate imports** — same module imported in multiple entry points
+3. **Nested map/filter chains** — consider `flatMap` or `reduce`
+4. **Constants used in only one place** — inline them, don't extract
+5. **Test/debug artifacts left in code** — devtools, console.log, temporary mocks
+6. **Complex spread logic** — break into named intermediate variables for readability
+7. **Use project utilities** — if `es-toolkit` or `lodash` is installed, use `isNil`, `groupBy` etc. instead of hand-rolling
+
 ## Rules
 
 1. Focus on the TASK REQUIREMENTS, not your personal preferences.
