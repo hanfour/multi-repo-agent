@@ -78,7 +78,7 @@ Commands:
   federation <subcommand>       Multi-workspace contract management
   notify [setup|status|test]    Manage notifications
   lint <project|--all>          Check JS/TS BLOCKER rules
-  review <project> [--pr N] [--debate]  Code review (--debate: multi-agent)
+  review <project> [--pr N] [--no-debate]  Code review (debate by default)
   --all                         Load all projects
   <project...>                  Load specific projects
 

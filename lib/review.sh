@@ -5,12 +5,12 @@
 #   mra review <project>              Terminal output (current branch vs main)
 #   mra review <project> --pr <N>     Inline review on GitHub PR
 #   mra review <project> --base <ref> Compare against specific branch
-#   mra review <project> --debate     Multi-agent adversarial debate review
+#   mra review <project> --no-debate  Skip debate, single-pass review
 
 review_project() {
   local workspace="$1"
   shift
-  local project="" pr_number="" base_ref="" model="sonnet" debate=false
+  local project="" pr_number="" base_ref="" model="sonnet" debate=true
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -23,8 +23,8 @@ review_project() {
       --model)
         if [[ $# -lt 2 ]]; then log_error "--model requires a value" "review"; return 1; fi
         model="$2"; shift 2 ;;
-      --debate)
-        debate=true; shift ;;
+      --no-debate)
+        debate=false; shift ;;
       -*)
         log_error "unknown option: $1" "review"; return 1 ;;
       *)
