@@ -2,7 +2,7 @@
 
 Cross-repository collaboration tool for Claude Code. Orchestrate AI-assisted development across multiple Git repos with automatic dependency detection, Docker-based environments, and structured review workflows.
 
-**v2.0.0** | 44 commits | 91 files | 20 test suites | 24 CLI commands | 9 MCP tools | 5 AI agents
+**v2.1.0** | 91 files | 20 test suites | 26 CLI commands | 9 MCP tools | 5 AI agents
 
 ---
 
@@ -14,6 +14,7 @@ Cross-repository collaboration tool for Claude Code. Orchestrate AI-assisted dev
 - [Installation](#installation)
 - [Tutorial: First-Time Setup](#tutorial-first-time-setup)
 - [Tutorial: Daily Development](#tutorial-daily-development)
+- [Tutorial: Code Review](#tutorial-code-review)
 - [Tutorial: Onboarding a Teammate](#tutorial-onboarding-a-teammate)
 - [Command Reference](#command-reference)
 - [Configuration Files](#configuration-files)
@@ -267,6 +268,77 @@ mra cost
 
 ---
 
+## Tutorial: Code Review
+
+mra provides context-aware code review that loads the full project codebase and cross-repo dependencies — not just the diff. This means it can catch breaking API changes by actually reading consumer code.
+
+### Local review (terminal output)
+
+```bash
+# Review current branch vs main
+mra review my-api
+
+# Review against a specific branch
+mra review my-api --base development
+```
+
+### Inline PR review (posts comments on GitHub)
+
+```bash
+# Review PR #123 — posts inline comments on specific code lines + summary
+mra review my-api --pr 123
+
+# Use a different model
+mra review my-api --pr 123 --model opus
+```
+
+This will:
+1. Read `dep-graph.json` to find consumers (e.g., `api-consumer` depends on `my-api`)
+2. Clone consumer repos for context
+3. Run Claude with `--add-dir` for both projects
+4. Claude reads the actual consumer source code to verify API compatibility
+5. Post inline comments on the exact lines with issues
+6. Post a summary comment on the PR
+
+Example inline comment:
+
+> **[CRITICAL]** `app/serializers/order.rb:15` — Field renamed from `data` to `items`, but `api-consumer/src/services/order.ts:42` still references `response.data`. This is a breaking change.
+
+### Automated review in CI
+
+Generate a GitHub Actions workflow that runs review on every PR:
+
+```bash
+# Single project
+mra ci my-api --with-review
+
+# All projects
+for proj in $(jq -r '.projects | keys[]' .collab/dep-graph.json); do
+  mra ci "$proj" --with-review
+done
+```
+
+Then add `ANTHROPIC_API_KEY` to each repo's GitHub Settings > Secrets and variables > Actions.
+
+The CI workflow:
+- Triggers on PR open/sync/reopen
+- Clones consumer repos automatically
+- Posts inline review comments
+- Updates the same comment on subsequent pushes (no spam)
+- Cancels previous runs on new pushes
+
+### Configure review language
+
+```bash
+# Reviews will use this language for all output
+mra config output-language "繁體中文台灣用語"
+
+# Or English
+mra config output-language "English"
+```
+
+---
+
 ## Tutorial: Onboarding a Teammate
 
 ### What to share
@@ -369,11 +441,20 @@ mra template              # creates repos.json.template, db.json.template, manua
 | `mra snapshots` | List all snapshots |
 | `mra rollback <project\|--all> [name]` | Restore to snapshot |
 
+### Code Review
+
+| Command | Description |
+|---------|-------------|
+| `mra review <project>` | Context-aware review (terminal output) |
+| `mra review <project> --pr <N>` | Inline review on GitHub PR (comments on code lines) |
+| `mra review <project> --base <ref>` | Review against specific branch |
+| `mra review <project> --model <model>` | Use specific Claude model |
+
 ### CI/CD & Collaboration
 
 | Command | Description |
 |---------|-------------|
-| `mra ci <project>` | Generate GitHub Actions workflow |
+| `mra ci <project> [--with-review]` | Generate GitHub Actions workflow (optionally with code review) |
 | `mra federation publish <project>` | Publish API contract |
 | `mra federation subscribe <url>` | Subscribe to external contract |
 | `mra federation verify` | Verify contracts match |
@@ -465,10 +546,17 @@ Supported engines: `mysql`, `postgres`
 {
   "autoScan": true,
   "depthDefault": 1,
+  "outputLanguage": "繁體中文台灣用語",
   "aliases": { "my-org": { "workspace": "~/my-workspace", "gitOrg": "git@github.com:my-org" } },
   "subAgentWorkflow": { "reviewLoopMax": 3, "autoCommit": true, "autoPR": true }
 }
 ```
+
+| Key | Values | Description |
+|-----|--------|-------------|
+| `autoScan` | `on` / `off` | Auto-scan dependencies on launch |
+| `output-language` | any language string | Language for all agent output |
+| `parallel-test` | `on` / `off` | Parallel test execution |
 
 ---
 
@@ -584,8 +672,11 @@ claude mcp add mra node ~/multi-repo-agent/mcp-server/dist/index.js
 ### GitHub Actions
 
 ```bash
-mra ci my-api    # generates .github/workflows/mra-test.yml
+mra ci my-api                  # generates .github/workflows/mra-test.yml
+mra ci my-api --with-review    # also generates .github/workflows/mra-code-review.yml
 ```
+
+The code review workflow requires `ANTHROPIC_API_KEY` in repo secrets. It triggers on every PR and posts inline comments with cross-repo context.
 
 ### Federation (Cross-Team)
 
@@ -660,6 +751,8 @@ for test in tests/test_*.sh; do bash "$test"; done
 |   +-- template.sh               # Config template generator
 |   +-- test-runner.sh            # Test execution with isolation
 |   +-- watch.sh                  # File change watcher
+|   +-- review.sh                 # Context-aware code review (local + PR inline)
+|   +-- review-prompt.sh          # Review prompt builder (terminal + JSON modes)
 |   +-- workflow.sh               # Git workflow helpers
 +-- scanners/
 |   +-- api-calls.sh              # API host env var scanner
@@ -676,12 +769,14 @@ for test in tests/test_*.sh; do bash "$test"; done
 +-- actions/
 |   +-- mra-setup/action.yml      # GitHub Action: install mra
 |   +-- mra-test/action.yml       # GitHub Action: run tests
+|   +-- mra-code-review/action.yml # GitHub Action: context-aware PR review
 +-- mcp-server/
 |   +-- src/index.ts              # MCP server entry
 |   +-- src/tools.ts              # 9 MCP tool definitions
 |   +-- src/mra-executor.ts       # Shell command executor
 +-- templates/
-|   +-- github-workflow.yml       # CI workflow template
+|   +-- github-workflow.yml       # CI test workflow template
+|   +-- code-review-workflow.yml  # CI code review workflow template
 +-- tests/
     +-- test_*.sh                 # 20 test suites
 ```
@@ -700,9 +795,16 @@ for test in tests/test_*.sh; do bash "$test"; done
 - [x] Mid-term: watch, setup, graph, custom scanners, cost, templates
 - [x] Long-term: MCP server, GitHub Actions, snapshots, dashboard, federation, notifications, lint
 
+### Recently Added
+
+- [x] Context-aware code review (`mra review` + inline PR comments)
+- [x] CI code review workflow (`mra ci --with-review`)
+- [x] Configurable output language (`mra config output-language`)
+- [x] Improved doctor checks (Docker-based, ActiveRecord detection)
+
 ### Future
 
-- [ ] Open source release
+- [ ] Playwright E2E test integration
 - [ ] Web dashboard (browser-based dependency graph)
 - [ ] `docker exec` into running containers
 - [ ] More scanners (GraphQL schema, gRPC proto)
