@@ -297,13 +297,17 @@ post_inline_review() {
 ${summary}"
 
   # --- Build API payload ---
+  local body_file
+  body_file=$(mktemp)
+  echo "$body" > "$body_file"
+
   local payload
   if [[ "$comment_count" -gt 0 ]]; then
     # Build comments array for the API
     local comments_payload
     comments_payload=$(echo "$review_json" | jq -c '[.comments[] | {
       path: .path,
-      line: .line,
+      line: (.line // 1),
       side: "RIGHT",
       body: (
         (if .severity == "CRITICAL" then "**[CRITICAL]** "
@@ -314,17 +318,18 @@ ${summary}"
 
     payload=$(jq -n \
       --arg commit_id "$commit_sha" \
-      --arg body "$body" \
+      --rawfile body "$body_file" \
       --arg event "$event" \
       --argjson comments "$comments_payload" \
       '{commit_id: $commit_id, body: $body, event: $event, comments: $comments}')
   else
     payload=$(jq -n \
       --arg commit_id "$commit_sha" \
-      --arg body "$body" \
+      --rawfile body "$body_file" \
       --arg event "$event" \
       '{commit_id: $commit_id, body: $body, event: $event}')
   fi
+  rm -f "$body_file"
 
   # --- Post review ---
   log_progress "posting inline review to $repo_slug#$pr_number ($comment_count comments)..." "review"
@@ -339,11 +344,73 @@ ${summary}"
     log_success "review posted: $repo_slug#$pr_number (review #$review_id)" "review"
     log_info "status: $status | comments: $comment_count" "review"
   else
-    # If inline comments fail (line not in diff), fallback to PR comment
-    log_warn "inline review failed, falling back to PR comment" "review"
-    log_info "reason: $(echo "$response" | jq -r '.message // "unknown"' 2>/dev/null)" "review"
+    # Batch failed — try posting review without inline comments, then add comments individually
+    log_warn "batch inline review failed, trying individual comments..." "review"
 
-    post_fallback_comment "$repo_slug" "$pr_number" "$body" "$review_json"
+    # Post review body (summary) without inline comments
+    local body_file
+    body_file=$(mktemp)
+    echo "$body" > "$body_file"
+    local summary_payload
+    summary_payload=$(jq -n \
+      --arg commit_id "$commit_sha" \
+      --rawfile body "$body_file" \
+      --arg event "$event" \
+      '{commit_id: $commit_id, body: $body, event: $event}')
+    rm -f "$body_file"
+
+    local summary_response
+    summary_response=$(echo "$summary_payload" | gh api "repos/$repo_slug/pulls/$pr_number/reviews" \
+      --method POST --input - 2>&1)
+
+    if echo "$summary_response" | jq -e '.id' &>/dev/null; then
+      log_success "summary review posted" "review"
+    else
+      log_warn "summary review also failed, falling back to PR comment" "review"
+      post_fallback_comment "$repo_slug" "$pr_number" "$body" "$review_json"
+      return
+    fi
+
+    # Post each inline comment individually as review comments
+    local posted=0 skipped=0
+    local i=0
+    while [[ $i -lt $comment_count ]]; do
+      local c_path c_line c_body
+      c_path=$(echo "$review_json" | jq -r ".comments[$i].path")
+      c_line=$(echo "$review_json" | jq -r ".comments[$i].line")
+      c_body=$(echo "$review_json" | jq -r ".comments[$i].body")
+      local c_severity
+      c_severity=$(echo "$review_json" | jq -r ".comments[$i].severity")
+
+      local prefix=""
+      case "$c_severity" in
+        CRITICAL) prefix="**[CRITICAL]** " ;;
+        HIGH) prefix="**[HIGH]** " ;;
+        *) prefix="**[MEDIUM]** " ;;
+      esac
+
+      local c_payload
+      c_payload=$(jq -n \
+        --arg commit_id "$commit_sha" \
+        --arg path "$c_path" \
+        --argjson line "$c_line" \
+        --arg side "RIGHT" \
+        --arg body "${prefix}${c_body}" \
+        '{commit_id: $commit_id, path: $path, line: $line, side: $side, body: $body}')
+
+      local c_response
+      c_response=$(echo "$c_payload" | gh api "repos/$repo_slug/pulls/$pr_number/comments" \
+        --method POST --input - 2>&1)
+
+      if echo "$c_response" | jq -e '.id' &>/dev/null; then
+        ((posted++))
+      else
+        ((skipped++))
+      fi
+      ((i++))
+    done
+
+    log_success "posted $posted/$comment_count inline comments ($skipped skipped)" "review"
   fi
 }
 
