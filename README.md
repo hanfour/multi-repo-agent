@@ -270,39 +270,75 @@ mra cost
 
 ## Tutorial: Code Review
 
-mra provides context-aware code review that loads the full project codebase and cross-repo dependencies — not just the diff. This means it can catch breaking API changes by actually reading consumer code.
+mra provides context-aware code review that loads the full project codebase and cross-repo dependencies — not just the diff. By default, it uses an **adversarial multi-agent debate** system: two specialized agents independently search the codebase, then challenge each other's findings in iterative rounds until consensus.
+
+### How debate review works
+
+```
+Round 1: Independent Analysis (parallel)
+  Agent A (Impact Analyst)  → grep/read to find broken references, deleted API consumers
+  Agent B (Quality Auditor) → check patterns, security, edge cases, type safety
+
+Round 2+: Cross-Critique (loop)
+  Agent A critiques B's findings → "B's issue #2 is wrong because file X shows..."
+  Agent B critiques A's findings → "A missed this reference in file Y:42"
+  → Agents refine based on critique
+  → Repeat until no new challenges (convergence)
+
+Final: Synthesizer merges validated findings → inline review JSON
+```
 
 ### Local review (terminal output)
 
 ```bash
-# Review current branch vs main
+# Review current branch vs main (debate mode by default)
 mra review my-api
 
 # Review against a specific branch
 mra review my-api --base development
+
+# Quick single-pass review (skip debate)
+mra review my-api --no-debate
 ```
 
 ### Inline PR review (posts comments on GitHub)
 
 ```bash
-# Review PR #123 — posts inline comments on specific code lines + summary
+# Review PR #123 — inline comments on specific code lines + summary
 mra review my-api --pr 123
+
+# With specific base branch
+mra review my-api --pr 123 --base development
 
 # Use a different model
 mra review my-api --pr 123 --model opus
+
+# Quick single-pass (faster, less thorough)
+mra review my-api --pr 123 --no-debate
 ```
 
 This will:
 1. Read `dep-graph.json` to find consumers (e.g., `api-consumer` depends on `my-api`)
 2. Clone consumer repos for context
-3. Run Claude with `--add-dir` for both projects
-4. Claude reads the actual consumer source code to verify API compatibility
-5. Post inline comments on the exact lines with issues
-6. Post a summary comment on the PR
+3. Two agents independently search the codebase with `grep`/`read` (agentic mode)
+4. Agents cross-critique and refine findings in debate rounds
+5. Synthesizer merges validated findings
+6. Post inline comments on the exact lines with issues
+7. Post a summary on the PR
 
 Example inline comment:
 
 > **[CRITICAL]** `app/serializers/order.rb:15` — Field renamed from `data` to `items`, but `api-consumer/src/services/order.ts:42` still references `response.data`. This is a breaking change.
+
+### Debate vs single-pass
+
+| | Debate (default) | Single-pass (`--no-debate`) |
+|---|---|---|
+| Agents | 2 analysts + critic + synthesizer | 1 reviewer |
+| Method | Search codebase → debate → verify | Read diff → produce review |
+| Quality | Findings verified with evidence | May speculate without verifying |
+| Speed | 3-5 minutes | 30 seconds |
+| Use when | Merging to main, API changes | Quick feedback, small changes |
 
 ### Automated review in CI
 
@@ -445,10 +481,11 @@ mra template              # creates repos.json.template, db.json.template, manua
 
 | Command | Description |
 |---------|-------------|
-| `mra review <project>` | Context-aware review (terminal output) |
+| `mra review <project>` | Multi-agent debate review (terminal output) |
 | `mra review <project> --pr <N>` | Inline review on GitHub PR (comments on code lines) |
 | `mra review <project> --base <ref>` | Review against specific branch |
 | `mra review <project> --model <model>` | Use specific Claude model |
+| `mra review <project> --no-debate` | Quick single-pass review (skip debate) |
 
 ### CI/CD & Collaboration
 
@@ -752,6 +789,7 @@ for test in tests/test_*.sh; do bash "$test"; done
 |   +-- test-runner.sh            # Test execution with isolation
 |   +-- watch.sh                  # File change watcher
 |   +-- review.sh                 # Context-aware code review (local + PR inline)
+|   +-- review-debate.sh          # Adversarial multi-agent debate review system
 |   +-- review-prompt.sh          # Review prompt builder (terminal + JSON modes)
 |   +-- workflow.sh               # Git workflow helpers
 +-- scanners/
