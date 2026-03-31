@@ -40,6 +40,7 @@ source "$MRA_DIR/lib/dashboard.sh"
 source "$MRA_DIR/lib/federation.sh"
 source "$MRA_DIR/lib/notify.sh"
 source "$MRA_DIR/lib/lint.sh"
+source "$MRA_DIR/lib/review-prompt.sh"
 
 usage() {
   cat <<'USAGE'
@@ -66,7 +67,7 @@ Commands:
   graph [--mermaid|--dot]       Visualize dependency graph
   cost [--reset]                Show Claude API usage
   template [repos|db|deps|all]  Generate config templates
-  ci <project>                 Generate GitHub Actions workflow
+  ci <project> [--with-review] Generate GitHub Actions workflow
   snapshot [name]               Create a state snapshot
   snapshots                     List all snapshots
   rollback <project> [name]    Rollback project to snapshot
@@ -389,10 +390,18 @@ main() {
     ci)
       shift
       local workspace; workspace=$(resolve_workspace)
-      if [[ -z "${1:-}" ]]; then
-        log_error "usage: mra ci <project>" "ci"; exit 1
+      local ci_project="" ci_opts=()
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --with-review) ci_opts+=("--with-review"); shift ;;
+          -*) log_error "unknown option: $1" "ci"; exit 1 ;;
+          *) ci_project="$1"; shift ;;
+        esac
+      done
+      if [[ -z "$ci_project" ]]; then
+        log_error "usage: mra ci <project> [--with-review]" "ci"; exit 1
       fi
-      generate_ci_workflow "$workspace" "$1"
+      generate_ci_workflow "$workspace" "$ci_project" "${ci_opts[@]}"
       ;;
 
     snapshot)
