@@ -296,6 +296,63 @@ post_inline_review() {
 
 ${summary}"
 
+  # --- Get valid diff lines from GitHub ---
+  local diff_lines_file
+  diff_lines_file=$(mktemp)
+  gh api "repos/$repo_slug/pulls/$pr_number/files" --jq '
+    .[] | .filename as $f | .patch // "" |
+    split("\n") | to_entries[] |
+    select(.value | test("^@@")) |
+    .value | capture("\\+(?<start>[0-9]+)(,(?<count>[0-9]+))?") |
+    {file: $f, start: (.start | tonumber), end: ((.start | tonumber) + ((.count // "1") | tonumber) - 1)}
+  ' 2>/dev/null > "$diff_lines_file"
+
+  # Filter comments to only include valid diff lines
+  local valid_review_json
+  valid_review_json=$(echo "$review_json" | jq --slurpfile hunks <(cat "$diff_lines_file" | jq -s '.') '
+    .comments = [.comments[] |
+      . as $c |
+      if ($hunks[0] | any(.file == $c.path and $c.line >= .start and $c.line <= .end))
+      then . else empty end
+    ]
+  ')
+  rm -f "$diff_lines_file"
+
+  comment_count=$(echo "$valid_review_json" | jq '.comments | length')
+  local original_count
+  original_count=$(echo "$review_json" | jq '.comments | length')
+  local filtered_out=$((original_count - comment_count))
+  if [[ "$filtered_out" -gt 0 ]]; then
+    log_info "filtered $filtered_out comments with lines outside diff hunks" "review"
+
+    # Append filtered comments to the review body so they're not lost
+    local filtered_comments
+    filtered_comments=$(echo "$review_json" | jq --slurpfile hunks <(cat /dev/null | jq -n '[]') -r '
+      [.comments[] | . as $c |
+        "- **[\(.severity)]** `\(.path):\(.line)` — \(.body)"
+      ] | join("\n")
+    ' 2>/dev/null)
+
+    # Get only the filtered-out ones
+    filtered_comments=$(echo "$review_json" | jq --argjson valid "$(echo "$valid_review_json" | jq '[.comments[] | {path, line}]')" -r '
+      [.comments[] |
+        . as $c |
+        if ($valid | any(.path == $c.path and .line == $c.line)) then empty
+        else "- **[\(.severity)]** `\(.path):\(.line)` — \(.body)" end
+      ] | join("\n\n")
+    ' 2>/dev/null)
+
+    if [[ -n "$filtered_comments" ]]; then
+      body="${body}
+
+---
+
+### Additional Findings (outside diff range)
+
+${filtered_comments}"
+    fi
+  fi
+
   # --- Build API payload ---
   local body_file
   body_file=$(mktemp)
@@ -305,7 +362,7 @@ ${summary}"
   if [[ "$comment_count" -gt 0 ]]; then
     # Build comments array for the API
     local comments_payload
-    comments_payload=$(echo "$review_json" | jq -c '[.comments[] | {
+    comments_payload=$(echo "$valid_review_json" | jq -c '[.comments[] | {
       path: .path,
       line: (.line // 1),
       side: "RIGHT",
@@ -334,9 +391,14 @@ ${summary}"
   # --- Post review ---
   log_progress "posting inline review to $repo_slug#$pr_number ($comment_count comments)..." "review"
 
+  local payload_file
+  payload_file=$(mktemp)
+  echo "$payload" > "$payload_file"
+
   local response
-  response=$(echo "$payload" | gh api "repos/$repo_slug/pulls/$pr_number/reviews" \
-    --method POST --input - 2>&1)
+  response=$(gh api "repos/$repo_slug/pulls/$pr_number/reviews" \
+    --method POST --input "$payload_file" 2>&1)
+  rm -f "$payload_file"
 
   if echo "$response" | jq -e '.id' &>/dev/null; then
     local review_id
@@ -359,9 +421,13 @@ ${summary}"
       '{commit_id: $commit_id, body: $body, event: $event}')
     rm -f "$body_file"
 
+    local summary_file
+    summary_file=$(mktemp)
+    echo "$summary_payload" > "$summary_file"
     local summary_response
-    summary_response=$(echo "$summary_payload" | gh api "repos/$repo_slug/pulls/$pr_number/reviews" \
-      --method POST --input - 2>&1)
+    summary_response=$(gh api "repos/$repo_slug/pulls/$pr_number/reviews" \
+      --method POST --input "$summary_file" 2>&1)
+    rm -f "$summary_file"
 
     if echo "$summary_response" | jq -e '.id' &>/dev/null; then
       log_success "summary review posted" "review"
@@ -398,9 +464,13 @@ ${summary}"
         --arg body "${prefix}${c_body}" \
         '{commit_id: $commit_id, path: $path, line: $line, side: $side, body: $body}')
 
+      local c_file
+      c_file=$(mktemp)
+      echo "$c_payload" > "$c_file"
       local c_response
-      c_response=$(echo "$c_payload" | gh api "repos/$repo_slug/pulls/$pr_number/comments" \
-        --method POST --input - 2>&1)
+      c_response=$(gh api "repos/$repo_slug/pulls/$pr_number/comments" \
+        --method POST --input "$c_file" 2>&1)
+      rm -f "$c_file"
 
       if echo "$c_response" | jq -e '.id' &>/dev/null; then
         ((posted++))
