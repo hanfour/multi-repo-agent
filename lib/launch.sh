@@ -56,6 +56,25 @@ launch_claude() {
     claude_args+=(--append-system-prompt "Output Language: $output_lang. All agents (orchestrator, sub-agents, reviewers, PM) must use this language for descriptive output. Pass this language directive when dispatching any sub-agent.")
   fi
 
+  # Inject PKB context if available for any loaded project
+  local pkb_injected=false
+  for project in "${projects[@]}"; do
+    local project_dir="$workspace/$project"
+    if pkb_exists "$project_dir" 2>/dev/null; then
+      local pkb_ctx
+      # Launch uses "full" tier — orchestrator needs complete project understanding
+      pkb_ctx=$(pkb_build_context "$project_dir" "" "full")
+      if [[ -n "$pkb_ctx" ]]; then
+        claude_args+=(--append-system-prompt "$pkb_ctx")
+        log_info "PKB loaded for $project" "load"
+        pkb_injected=true
+      fi
+    fi
+  done
+  if [[ "$pkb_injected" == "false" ]]; then
+    log_info "no PKB found — run 'mra analyze <project>' for faster context" "load"
+  fi
+
   # Launch claude (array preserves spaces in paths)
   claude "${claude_args[@]}"
 }

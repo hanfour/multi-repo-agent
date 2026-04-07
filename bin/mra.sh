@@ -43,6 +43,8 @@ source "$MRA_DIR/lib/lint.sh"
 source "$MRA_DIR/lib/review-prompt.sh"
 source "$MRA_DIR/lib/review.sh"
 source "$MRA_DIR/lib/review-debate.sh"
+source "$MRA_DIR/lib/pkb.sh"
+source "$MRA_DIR/lib/eval.sh"
 
 usage() {
   cat <<'USAGE'
@@ -506,6 +508,38 @@ main() {
       shift
       local workspace; workspace=$(resolve_workspace)
       review_project "$workspace" "$@"
+      ;;
+
+    analyze)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      local project="" model="sonnet"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --model)
+            if [[ $# -lt 2 ]]; then log_error "--model requires a value" "analyze"; exit 1; fi
+            model="$2"; shift 2 ;;
+          -*) log_error "unknown option: $1" "analyze"; exit 1 ;;
+          *) project="$1"; shift ;;
+        esac
+      done
+      if [[ -z "$project" ]]; then
+        log_error "usage: mra analyze <project> [--model <model>]" "analyze"; exit 1
+      fi
+      local project_dir="$workspace/$project"
+      if [[ ! -d "$project_dir" ]]; then
+        log_error "$project: directory not found" "analyze"; exit 1
+      fi
+      local output_language=""
+      output_language=$(config_get "outputLanguage" 2>/dev/null)
+      [[ -z "$output_language" || "$output_language" == "null" ]] && output_language=""
+      pkb_generate "$project" "$project_dir" "$model" "$output_language"
+      ;;
+
+    eval-review)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      eval_review "$workspace" "$@"
       ;;
 
     *)

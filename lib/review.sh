@@ -7,10 +7,29 @@
 #   mra review <project> --base <ref> Compare against specific branch
 #   mra review <project> --no-debate  Skip debate, single-pass review
 
+## Strategy selection based on diff size, file count, and API change
+## Returns: light | standard | debate
+select_review_strategy() {
+  local diff="$1" changed_count="$2" has_api_change="$3"
+
+  local diff_lines
+  diff_lines=$(printf '%s' "$diff" | wc -l | tr -d '[:space:]')
+  diff_lines=$((diff_lines + 0))
+  changed_count=$((changed_count + 0))
+
+  if [[ "$diff_lines" -lt 50 && "$changed_count" -le 3 && "$has_api_change" == "false" ]]; then
+    echo "light"
+  elif [[ "$diff_lines" -lt 300 && "$has_api_change" == "false" ]]; then
+    echo "standard"
+  else
+    echo "debate"
+  fi
+}
+
 review_project() {
   local workspace="$1"
   shift
-  local project="" pr_number="" base_ref="" model="sonnet" debate=true
+  local project="" pr_number="" base_ref="" model="sonnet" debate=true force_strategy=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -25,6 +44,9 @@ review_project() {
         model="$2"; shift 2 ;;
       --no-debate)
         debate=false; shift ;;
+      --strategy)
+        if [[ $# -lt 2 ]]; then log_error "--strategy requires light|standard|debate" "review"; return 1; fi
+        force_strategy="$2"; shift 2 ;;
       -*)
         log_error "unknown option: $1" "review"; return 1 ;;
       *)
@@ -76,21 +98,74 @@ review_project() {
   output_language=$(config_get "outputLanguage" 2>/dev/null)
   [[ -z "$output_language" || "$output_language" == "null" ]] && output_language=""
 
-  # --- Determine mode ---
+  # --- Determine output mode ---
   local output_mode="terminal"
   [[ -n "$pr_number" ]] && output_mode="inline"
 
+  # --- Resolve base ref for git operations ---
+  local resolved_base="$base_ref"
+  if [[ -d "$project_dir/.git" ]]; then
+    if ! git -C "$project_dir" rev-parse --verify "$base_ref" &>/dev/null; then
+      if git -C "$project_dir" rev-parse --verify "origin/$base_ref" &>/dev/null; then
+        resolved_base="origin/$base_ref"
+      fi
+    fi
+  fi
+
+  # --- Auto-select strategy based on diff size ---
+  local diff_for_strategy
+  diff_for_strategy=$(git -C "$project_dir" diff "${resolved_base}...HEAD" 2>/dev/null || \
+                      git -C "$project_dir" diff "${resolved_base}" HEAD 2>/dev/null || echo "")
+  local changed_files_for_strategy
+  changed_files_for_strategy=$(git -C "$project_dir" diff --name-only "${resolved_base}...HEAD" 2>/dev/null || \
+                               git -C "$project_dir" diff --name-only "${resolved_base}" HEAD 2>/dev/null || echo "")
+  local changed_count
+  changed_count=$(printf '%s\n' "$changed_files_for_strategy" | grep -c '[^[:space:]]' 2>/dev/null | tr -d '[:space:]')
+  [[ -z "$changed_count" ]] && changed_count=0
+
+  local strategy=""
+  if [[ -n "$force_strategy" ]]; then
+    strategy="$force_strategy"
+  elif [[ "$debate" == "false" ]]; then
+    strategy="standard"
+  else
+    strategy=$(select_review_strategy "$diff_for_strategy" "$changed_count" "$has_api_change")
+  fi
+
   # --- Log context ---
-  local mode_label="single-pass"
-  [[ "$debate" == "true" ]] && mode_label="debate"
-  log_progress "reviewing $project (type: $project_type, base: $base_ref, mode: $mode_label)" "review"
+  log_progress "reviewing $project (type: $project_type, base: $base_ref, strategy: $strategy)" "review"
   [[ "$has_api_change" == "true" ]] && log_warn "API change detected — loading consumer context" "review"
   [[ -n "$consumers" ]] && log_info "consumers: $consumers" "review"
 
+  # --- PKB: Use knowledge base if available ---
+  local pkb_context="" use_pkb=false
+  if pkb_exists "$project_dir"; then
+    local relevant_modules
+    relevant_modules=$(pkb_modules_from_files "$changed_files_for_strategy")
+    # Review uses "standard" tier: sitemap + conventions + architecture + api-surface
+    # Module summaries loaded only by debate Agent B (full tier) when needed
+    pkb_context=$(pkb_build_context "$project_dir" "$relevant_modules" "standard")
+    use_pkb=true
+    log_info "PKB available — using knowledge base (modules: ${relevant_modules:-all})" "review"
+  fi
+
   # --- Build --add-dir args as string (for debate) and array (for single-pass) ---
   local claude_add_dirs_str=""
-  local claude_args=("--add-dir" "$project_dir")
-  claude_add_dirs_str="--add-dir $project_dir"
+  local claude_args=()
+
+  if [[ "$use_pkb" == "true" ]]; then
+    # With PKB: only load changed-file directories (not full project)
+    local focused_dirs
+    focused_dirs=$(build_focused_context "$project_dir" "$changed_files_for_strategy")
+    claude_args+=($focused_dirs)
+    claude_add_dirs_str="$focused_dirs"
+  else
+    # Without PKB: load full project (original behavior)
+    claude_args=("--add-dir" "$project_dir")
+    claude_add_dirs_str="--add-dir $project_dir"
+  fi
+
+  # Always add consumer/dep repos if API change
   for repo in $consumers $deps; do
     local repo_dir="$workspace/$repo"
     if [[ -d "$repo_dir" && "$repo" != "$project" ]]; then
@@ -99,18 +174,23 @@ review_project() {
     fi
   done
 
+  # --- Build focused context (changed files only) for lightweight agents ---
+  local claude_focused_dirs_str=""
+  claude_focused_dirs_str=$(build_focused_context "$project_dir" "$changed_files_for_strategy")
+
   local mra_dir
   mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
   # ===================================================================
   # DEBATE MODE: multi-agent adversarial review
   # ===================================================================
-  if [[ "$debate" == "true" ]]; then
+  if [[ "$strategy" == "debate" ]]; then
     local review_json
     review_json=$(run_debate_review \
       "$project" "$project_dir" "$graph_file" "$base_ref" \
       "$project_type" "$consumers" "$deps" "$has_api_change" \
-      "$output_language" "$model" "$claude_add_dirs_str")
+      "$output_language" "$model" "$claude_add_dirs_str" "$claude_focused_dirs_str" \
+      "$pkb_context")
 
     if [[ -z "$review_json" ]]; then
       log_error "debate review returned empty response" "review"
@@ -141,11 +221,14 @@ review_project() {
       fi
       post_inline_review "$project_dir" "$pr_number" "$review_json"
     fi
+
+    # Auto-update PKB after debate review (background, non-blocking)
+    _review_pkb_auto_update "$project" "$project_dir" "$changed_files_for_strategy" "$output_language" &
     return
   fi
 
   # ===================================================================
-  # SINGLE-PASS MODE: standard review
+  # SINGLE-PASS MODE: light or standard review
   # ===================================================================
 
   # --- Build prompt ---
@@ -155,10 +238,24 @@ review_project() {
     "$project_type" "$consumers" "$deps" "$has_api_change" \
     "$output_language" "$output_mode")
 
+  # Inject PKB context into prompt if available
+  if [[ -n "$pkb_context" ]]; then
+    prompt="${pkb_context}
+
+${prompt}"
+  fi
+
   claude_args+=(--append-system-prompt-file "$mra_dir/agents/code-reviewer.md")
   claude_args+=(--model "$model")
-  claude_args+=(--max-turns 3)
   claude_args+=(--setting-sources "project")
+
+  # Light strategy: fewer turns, no consumer context search
+  if [[ "$strategy" == "light" ]]; then
+    claude_args+=(--max-turns 2)
+    log_info "light strategy: max-turns=2, focused context" "review"
+  else
+    claude_args+=(--max-turns 3)
+  fi
 
   # --- Run Claude ---
   log_progress "running Claude ($model)..." "review"
@@ -187,6 +284,44 @@ review_project() {
 
     post_inline_review "$project_dir" "$pr_number" "$review_json"
   fi
+
+  # Auto-update PKB after single-pass review (background, non-blocking)
+  _review_pkb_auto_update "$project" "$project_dir" "$changed_files_for_strategy" "$output_language" &
+}
+
+# Background PKB update after review — only runs if PKB exists
+_review_pkb_auto_update() {
+  local project="$1" project_dir="$2" changed_files="$3" output_language="$4"
+  if pkb_exists "$project_dir"; then
+    pkb_incremental_update "$project" "$project_dir" "$changed_files" "haiku" "$output_language" 2>/dev/null
+  fi
+}
+
+# Build focused context: unique directories of changed files
+# Used by lightweight agents (critique, refine, synthesize) to reduce token usage
+# Uses --add-dir on changed-file directories instead of full project root
+build_focused_context() {
+  local project_dir="$1" changed_files="$2"
+  local -A seen_dirs=()
+  local context_args=""
+
+  while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+    local dir
+    dir=$(dirname "$project_dir/$file")
+    [[ -d "$dir" ]] || continue
+    if [[ -z "${seen_dirs[$dir]+x}" ]]; then
+      seen_dirs["$dir"]=1
+      context_args="$context_args --add-dir $dir"
+    fi
+  done <<< "$changed_files"
+
+  # Always include project root for config files (package.json, tsconfig, etc.)
+  if [[ -z "${seen_dirs[$project_dir]+x}" ]]; then
+    context_args="$context_args --add-dir $project_dir"
+  fi
+
+  echo "$context_args"
 }
 
 # Extract JSON from Claude response (handles markdown fencing)

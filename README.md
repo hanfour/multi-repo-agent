@@ -2,7 +2,7 @@
 
 Cross-repository collaboration tool for Claude Code. Orchestrate AI-assisted development across multiple Git repos with automatic dependency detection, Docker-based environments, and structured review workflows.
 
-**v2.1.0** | 91 files | 20 test suites | 26 CLI commands | 9 MCP tools | 5 AI agents
+**v2.2.0** | 93 files | 20 test suites | 28 CLI commands | 9 MCP tools | 5 AI agents
 
 ---
 
@@ -15,6 +15,8 @@ Cross-repository collaboration tool for Claude Code. Orchestrate AI-assisted dev
 - [Tutorial: First-Time Setup](#tutorial-first-time-setup)
 - [Tutorial: Daily Development](#tutorial-daily-development)
 - [Tutorial: Code Review](#tutorial-code-review)
+- [Tutorial: Project Knowledge Base](#tutorial-project-knowledge-base)
+- [Tutorial: Review Quality Evaluation](#tutorial-review-quality-evaluation)
 - [Tutorial: Onboarding a Teammate](#tutorial-onboarding-a-teammate)
 - [Command Reference](#command-reference)
 - [Configuration Files](#configuration-files)
@@ -270,34 +272,64 @@ mra cost
 
 ## Tutorial: Code Review
 
-mra provides context-aware code review that loads the full project codebase and cross-repo dependencies — not just the diff. By default, it uses an **adversarial multi-agent debate** system: two specialized agents independently search the codebase, then challenge each other's findings in iterative rounds until consensus.
+mra provides context-aware code review with **automatic strategy selection**, **Project Knowledge Base (PKB)** support, and an **adversarial multi-agent debate** system with mailbox voting.
+
+### Auto-strategy: right level of review for every PR
+
+mra automatically selects a review strategy based on diff size, file count, and API change detection:
+
+| Strategy | Criteria | Agents | Typical tokens |
+|----------|----------|--------|---------------|
+| **light** | <50 diff lines, ≤3 files, no API change | 1 reviewer, 2 turns | 30K–60K |
+| **standard** | <300 diff lines, no API change | 1 reviewer, 3 turns | 50K–150K |
+| **debate** | ≥300 lines or API change detected | 2 analysts + voter + synthesizer | 100K–300K |
+
+You can override with `--strategy light|standard|debate` or `--no-debate`.
 
 ### How debate review works
 
 ```
 Round 1: Independent Analysis (parallel)
-  Agent A (Impact Analyst)  → grep/read to find broken references, deleted API consumers
+  Agent A (Impact Analyst)  → grep/read to find broken references, dead code
   Agent B (Quality Auditor) → check patterns, security, edge cases, type safety
+  ↓
+  Fast convergence: 0 findings → APPROVED instantly
+                    ≤5 findings → skip debate, direct synthesis
 
-Round 2+: Cross-Critique (loop)
-  Agent A critiques B's findings → "B's issue #2 is wrong because file X shows..."
-  Agent B critiques A's findings → "A missed this reference in file Y:42"
-  → Agents refine based on critique
-  → Repeat until no new challenges (convergence)
+Round 2: Mailbox Voting (parallel)
+  All findings merged into numbered pool (deduplicated)
+  Agent A votes KEEP/DROP on each finding (with evidence)
+  Agent B votes KEEP/DROP on each finding (with evidence)
+  → Findings with net positive votes survive
 
-Final: Synthesizer merges validated findings → inline review JSON
+Final: Synthesizer merges surviving findings → inline review JSON
 ```
+
+### Token optimization
+
+Review agents use several strategies to minimize token consumption:
+
+- **PKB integration**: If a Project Knowledge Base exists (`mra analyze`), agents use distilled knowledge instead of loading the full codebase
+- **Tiered PKB loading**: Critique agents get `minimal` tier (conventions only), review agents get `standard` tier
+- **Focused context**: Non-search agents only load directories containing changed files
+- **Model tiering**: Voting agents use `haiku` (3x cheaper), analysis agents use `sonnet`
+- **Findings compression**: Round 3+ uses summary-only findings (OpenHarness-inspired micro-compaction)
+- **Write protection**: All review agents run with `--disallowedTools "Write,Edit,NotebookEdit"`
 
 ### Local review (terminal output)
 
 ```bash
-# Review current branch vs main (debate mode by default)
+# Review current branch vs main (auto-selects strategy)
 mra review my-api
 
 # Review against a specific branch
 mra review my-api --base development
 
-# Quick single-pass review (skip debate)
+# Force a specific strategy
+mra review my-api --strategy light
+mra review my-api --strategy debate
+
+# Quick single-pass review (same as --strategy standard)
 mra review my-api --no-debate
 ```
 
@@ -313,32 +345,32 @@ mra review my-api --pr 123 --base development
 # Use a different model
 mra review my-api --pr 123 --model opus
 
-# Quick single-pass (faster, less thorough)
-mra review my-api --pr 123 --no-debate
+# Force debate for thorough review
+mra review my-api --pr 123 --strategy debate
 ```
 
 This will:
-1. Read `dep-graph.json` to find consumers (e.g., `api-consumer` depends on `my-api`)
-2. Clone consumer repos for context
-3. Two agents independently search the codebase with `grep`/`read` (agentic mode)
-4. Agents cross-critique and refine findings in debate rounds
-5. Synthesizer merges validated findings
-6. Post inline comments on the exact lines with issues
-7. Post a summary on the PR
+1. Auto-select strategy based on diff size and API change detection
+2. Load PKB context if available (or fall back to full codebase)
+3. Run analysis agents (1 for light/standard, 2 for debate)
+4. Debate mode: merge findings → mailbox voting → filter by evidence
+5. Post inline comments on exact lines with issues + summary on the PR
+6. Trigger background PKB update for changed modules
 
 Example inline comment:
 
 > **[CRITICAL]** `app/serializers/order.rb:15` — Field renamed from `data` to `items`, but `api-consumer/src/services/order.ts:42` still references `response.data`. This is a breaking change.
 
-### Debate vs single-pass
+### Strategy comparison
 
-| | Debate (default) | Single-pass (`--no-debate`) |
-|---|---|---|
-| Agents | 2 analysts + critic + synthesizer | 1 reviewer |
-| Method | Search codebase → debate → verify | Read diff → produce review |
-| Quality | Findings verified with evidence | May speculate without verifying |
-| Speed | 3-5 minutes | 30 seconds |
-| Use when | Merging to main, API changes | Quick feedback, small changes |
+| | Light | Standard | Debate |
+|---|---|---|---|
+| Agents | 1 reviewer | 1 reviewer | 2 analysts + 2 voters + synthesizer |
+| Method | Read diff only | Read diff + source files | Search codebase → vote → verify |
+| Quality | Surface-level | Good for most PRs | Highest — evidence-backed findings |
+| Speed | ~15 seconds | ~30 seconds | 2-4 minutes |
+| Tokens | 30K-60K | 50K-150K | 100K-300K |
+| Use when | Typos, docs, config | Most daily PRs | Merging to main, API changes |
 
 ### Automated review in CI
 
@@ -372,6 +404,125 @@ mra config output-language "繁體中文台灣用語"
 # Or English
 mra config output-language "English"
 ```
+
+---
+
+## Tutorial: Project Knowledge Base
+
+The **Project Knowledge Base (PKB)** is a cumulative knowledge system that distills project understanding into reusable documents. Instead of re-reading the entire codebase on every review or development session, agents use the PKB as their primary context — dramatically reducing token usage.
+
+### How it works
+
+```
+First time:  mra analyze my-api  →  4 agents scan project in parallel
+                                     → sitemap.md, architecture.md, conventions.md, api-surface.md
+                                     → Per-module summaries (auth.md, users.md, ...)
+
+Every review: PKB context injected instead of --add-dir full project
+              → Agents understand project from ~500 lines of knowledge docs
+              → Only read source files when verifying specific findings
+
+After review: Background update of affected module summaries (haiku, non-blocking)
+```
+
+### Generate PKB for a project
+
+```bash
+# Full analysis (4 parallel agents + module summaries)
+mra analyze my-api
+
+# Use a cheaper model for module summaries
+mra analyze my-api --model haiku
+```
+
+This creates `<project>/.mra/pkb/` with:
+
+| File | Content | Size |
+|------|---------|------|
+| `sitemap.md` | File tree + module purpose index | ~100 lines |
+| `architecture.md` | Patterns, data flow, tech stack | ~150 lines |
+| `conventions.md` | Coding style, naming, tooling | ~120 lines |
+| `api-surface.md` | Endpoints, exports, event contracts | ~100 lines |
+| `modules/*.md` | Per-module deep summaries | ~50 lines each |
+| `meta.json` | Version, timestamps, commit hash | metadata |
+
+### PKB tier system
+
+Not every agent needs all knowledge. PKB loads in tiers to save tokens:
+
+| Tier | Includes | Tokens | Used by |
+|------|----------|--------|---------|
+| `minimal` | sitemap + conventions | ~200-400 | Voting/critique agents |
+| `standard` | + architecture + api-surface | ~500-800 | Review, ask |
+| `full` | + all module summaries | ~800-1500 | Orchestrator (mra launch) |
+
+### Token savings with PKB
+
+| Scenario | Without PKB | With PKB | Savings |
+|----------|------------|----------|---------|
+| Standard review | 50K-150K | 15K-40K | **~70%** |
+| Debate review | 300K-600K | 80K-200K | **~65%** |
+| mra launch/ask | Re-reads codebase | Uses cached knowledge | **~60%** |
+
+### Auto-update after review
+
+After every review, mra automatically updates the PKB in the background:
+- Identifies which modules were affected by the diff
+- Updates only those module summaries (using haiku for cost efficiency)
+- Updates sitemap if new files were added
+
+### Integration with other commands
+
+PKB is automatically used by all agent-facing commands when available:
+
+```bash
+mra review my-api --pr 123   # Uses PKB for review context
+mra my-api --with-deps        # Orchestrator gets full PKB
+mra ask my-api "how does auth work?"  # Standard tier PKB
+```
+
+If no PKB exists, all commands fall back to the original behavior (loading full codebase).
+
+---
+
+## Tutorial: Review Quality Evaluation
+
+`mra eval-review` measures how well the automated review performs compared to human reviewers.
+
+### Run an evaluation
+
+```bash
+# Compare MRA review against human reviews on a PR
+mra eval-review my-api --pr 123
+
+# Specify base branch
+mra eval-review my-api --pr 123 --base development
+
+# Force a specific strategy for comparison
+mra eval-review my-api --pr 123 --strategy debate
+
+# Use a custom baseline file
+mra eval-review my-api --pr 123 --baseline human-review.json
+```
+
+### How it works
+
+1. **Collect baseline**: Fetches human review comments from the GitHub PR (excludes bot/MRA comments)
+2. **Run MRA review**: Executes a fresh review and captures the JSON output
+3. **Compare**: Uses LLM-assisted semantic matching to pair MRA findings with human findings
+4. **Report**: Calculates Precision, Recall, and F1 Score
+
+### Metrics explained
+
+| Metric | Formula | Meaning |
+|--------|---------|---------|
+| **Precision** | true_positives / total_mra_findings | What % of MRA findings are real issues? |
+| **Recall** | caught / total_human_findings | What % of human findings did MRA catch? |
+| **F1 Score** | 2 × precision × recall / (precision + recall) | Balanced quality score |
+
+### Reports
+
+Reports are saved to `<workspace>/.collab/eval/` as JSON files with timestamps, enabling trend tracking over time.
 
 ---
 
@@ -477,15 +628,20 @@ mra template              # creates repos.json.template, db.json.template, manua
 | `mra snapshots` | List all snapshots |
 | `mra rollback <project\|--all> [name]` | Restore to snapshot |
 
-### Code Review
+### Code Review & Analysis
 
 | Command | Description |
 |---------|-------------|
-| `mra review <project>` | Multi-agent debate review (terminal output) |
+| `mra review <project>` | Auto-strategy review (terminal output) |
 | `mra review <project> --pr <N>` | Inline review on GitHub PR (comments on code lines) |
 | `mra review <project> --base <ref>` | Review against specific branch |
 | `mra review <project> --model <model>` | Use specific Claude model |
-| `mra review <project> --no-debate` | Quick single-pass review (skip debate) |
+| `mra review <project> --strategy <s>` | Force strategy: `light`, `standard`, or `debate` |
+| `mra review <project> --no-debate` | Quick single-pass review (same as `--strategy standard`) |
+| `mra analyze <project>` | Generate Project Knowledge Base (PKB) |
+| `mra analyze <project> --model <model>` | Use specific model for PKB generation |
+| `mra eval-review <project> --pr <N>` | Evaluate review quality vs human baseline |
+| `mra eval-review <project> --pr <N> --baseline <file>` | Use custom baseline JSON |
 
 ### CI/CD & Collaboration
 
@@ -530,6 +686,7 @@ All configuration lives in `<workspace>/.collab/`:
 | `contracts/` | Federation contract files | Depends |
 | `snapshots/` | State snapshots | No |
 | `logs/` | Operation logs | No |
+| `eval/` | Review evaluation reports | No (auto-generated) |
 | `scanners/` | Custom scanner plugins | Yes |
 
 ### repos.json
@@ -606,6 +763,18 @@ Supported engines: `mysql`, `postgres`
 | **sub-agent** | Writes code, runs tests, commits, follows frontend standards | Orchestrator assigns per-project tasks |
 | **code-reviewer** | Reviews diffs for correctness, security, API consistency, architecture patterns | After sub-agent commits, or via `mra review` |
 | **pr-reviewer** | Reviews entire PR, checks cross-project dependency notes | After PR is created |
+| **pkb-analyzer** | Deep project analysis, generates knowledge base documents | Via `mra analyze` |
+
+### Debate review agents (internal)
+
+These agents are spawned during `--strategy debate` reviews:
+
+| Agent | Model | Role | Write access |
+|-------|-------|------|-------------|
+| **Agent A** (Impact Analyst) | sonnet | Search codebase for broken references, dead code | Read-only |
+| **Agent B** (Quality Auditor) | sonnet | Check patterns, security, type safety, conventions | Read-only |
+| **Voter A/B** | haiku | Vote KEEP/DROP on merged findings pool | Read-only |
+| **Synthesizer** | sonnet | Merge surviving findings into structured JSON | Read-only |
 
 ### Code reviewer checks
 
@@ -670,8 +839,23 @@ Host (macOS/Linux)
   |     +-- Database setup (Docker containers from db.json)
   |     +-- Launch Claude with --add-dir flags
   |
+  +-- Project Knowledge Base (PKB)
+  |     +-- mra analyze: 4 parallel agents → sitemap, architecture, conventions, api-surface
+  |     +-- Per-module summaries (auto-discovered features/modules)
+  |     +-- Tiered loading: minimal/standard/full per agent role
+  |     +-- Auto-update after each review (background, non-blocking)
+  |     +-- Stored in <project>/.mra/pkb/
+  |
+  +-- Code Review Engine
+  |     +-- Auto-strategy selection (light/standard/debate by diff size)
+  |     +-- Debate: Round 1 analysis → Mailbox voting → Synthesis
+  |     +-- PKB-aware: uses knowledge docs instead of full codebase when available
+  |     +-- Write-protected agents (--disallowedTools Write,Edit)
+  |     +-- Model tiering: sonnet for analysis, haiku for voting
+  |     +-- Eval framework: precision/recall/F1 vs human baseline
+  |
   +-- Claude Orchestrator Session
-  |     +-- Reads dep-graph.json for cross-repo context
+  |     +-- Reads dep-graph.json + PKB for cross-repo context
   |     +-- Dispatches PM/sub/reviewer agents
   |     +-- Executes tests via docker compose run
   |     +-- API change detection matrix for test strategy
@@ -798,9 +982,11 @@ for test in tests/test_*.sh; do bash "$test"; done
 |   +-- template.sh               # Config template generator
 |   +-- test-runner.sh            # Test execution with isolation
 |   +-- watch.sh                  # File change watcher
-|   +-- review.sh                 # Context-aware code review (local + PR inline)
-|   +-- review-debate.sh          # Adversarial multi-agent debate review system
+|   +-- review.sh                 # Context-aware code review (auto-strategy + PKB)
+|   +-- review-debate.sh          # Multi-agent debate with mailbox voting
 |   +-- review-prompt.sh          # Review prompt builder (terminal + JSON modes)
+|   +-- pkb.sh                    # Project Knowledge Base engine
+|   +-- eval.sh                   # Review quality evaluation framework
 |   +-- workflow.sh               # Git workflow helpers
 +-- scanners/
 |   +-- api-calls.sh              # API host env var scanner
@@ -849,6 +1035,13 @@ for test in tests/test_*.sh; do bash "$test"; done
 - [x] CI code review workflow (`mra ci --with-review`)
 - [x] Configurable output language (`mra config output-language`)
 - [x] Improved doctor checks (Docker-based, ActiveRecord detection)
+- [x] **Auto-strategy review** — light/standard/debate selected by diff size
+- [x] **Mailbox voting** — replaced iterative critique rounds with parallel voting
+- [x] **Token optimization** — model tiering, focused context, findings compression
+- [x] **Project Knowledge Base** (`mra analyze`) — cumulative project understanding
+- [x] **PKB tiered loading** — minimal/standard/full per agent role
+- [x] **Review eval framework** (`mra eval-review`) — precision/recall vs human baseline
+- [x] **Write-protected review agents** — `--disallowedTools` prevents accidental edits
 
 ### Future
 
@@ -857,6 +1050,9 @@ for test in tests/test_*.sh; do bash "$test"; done
 - [ ] `docker exec` into running containers
 - [ ] More scanners (GraphQL schema, gRPC proto)
 - [ ] Multi-language lint rules (Ruby, Go, Python)
+- [ ] PKB semantic search (embedding-based module retrieval)
+- [ ] Cross-repo PKB linking (shared type contracts)
+- [ ] Eval dashboard (trend tracking across PRs)
 
 ---
 

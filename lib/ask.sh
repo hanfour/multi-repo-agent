@@ -105,7 +105,22 @@ ask_project() {
   output_lang=$(config_get "outputLanguage" 2>/dev/null)
   [[ -z "$output_lang" || "$output_lang" == "null" ]] && output_lang="English"
 
-  local system_prompt="You are a technical consultant analyzing the codebase of: ${project_list}. ${context}Answer questions by reading actual source code. Cite file paths and line numbers. Use ${output_lang}."
+  # Inject PKB context if available
+  local pkb_section=""
+  for project in "${projects[@]}"; do
+    local project_dir="$workspace/$project"
+    if pkb_exists "$project_dir" 2>/dev/null; then
+      local pkb_ctx
+      # Ask uses "standard" tier — enough for most queries
+      pkb_ctx=$(pkb_build_context "$project_dir" "" "standard")
+      if [[ -n "$pkb_ctx" ]]; then
+        pkb_section="${pkb_section}${pkb_ctx}\n\n"
+        log_info "PKB loaded for $project" "ask"
+      fi
+    fi
+  done
+
+  local system_prompt="You are a technical consultant analyzing the codebase of: ${project_list}. ${pkb_section}${context}Answer questions by reading actual source code. Cite file paths and line numbers. Use ${output_lang}."
 
   log_progress "querying: $project_list" "ask"
 

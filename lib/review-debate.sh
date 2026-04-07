@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# Adversarial multi-agent debate review system
+# Adversarial multi-agent debate review system (optimized)
 #
-# Multiple specialized agents independently analyze code, then
-# cross-critique each other's findings in iterative rounds until
-# consensus is reached. Produces higher-quality reviews by:
-# 1. Actually searching the codebase (agentic mode with tools)
-# 2. Challenging each finding with counter-evidence
-# 3. Eliminating false positives through adversarial debate
+# Token optimization strategies applied:
+# 1. Fast convergence: skip debate rounds when findings are few
+# 2. Merged critique+refine: 2 agents per round instead of 4
+# 3. Reduced max-turns: Agent A/B=8, critique-refine=5, synthesize=3
+# 4. Model tiering: critique-refine uses haiku for cost savings
+# 5. Focused context: non-search agents use --add-file instead of --add-dir
+# 6. Leaner prompts: removed duplicated review criteria
 #
-# Usage: called from review.sh when --debate flag is used
+# Usage: called from review.sh when strategy=debate
 
 DEBATE_MAX_ROUNDS=3
 
 # Run the full debate review pipeline
+# NOTE: All log_* calls use >&2 because this function runs inside $()
+# and stdout must contain only the final JSON result
 run_debate_review() {
   local project="$1"
   local project_dir="$2"
@@ -25,6 +28,8 @@ run_debate_review() {
   local output_language="$9"
   local model="${10:-sonnet}"
   local claude_add_dirs="${11:-}"
+  local claude_focused_dirs="${12:-}"
+  local pkb_context="${13:-}"
 
   local mra_dir
   mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -52,25 +57,42 @@ run_debate_review() {
   local lang_directive=""
   [[ -n "$output_language" ]] && lang_directive="Use ${output_language} for all output."
 
+  # Model tiering: critique-refine uses haiku for cost savings
+  local lite_model="haiku"
+
+  # PKB tiering: critique-refine only needs minimal PKB (conventions)
+  local pkb_context_lite=""
+  if [[ -n "$pkb_context" ]]; then
+    pkb_context_lite=$(pkb_build_context "$project_dir" "" "minimal")
+  fi
+
+  # Use focused context for non-search agents; fallback to full dirs
+  local focused_ctx="$claude_focused_dirs"
+  [[ -z "$focused_ctx" ]] && focused_ctx="$claude_add_dirs"
+
   # =====================================================================
   # ROUND 1: Independent Analysis (two agents in parallel)
   # =====================================================================
-  log_progress "[round 1] independent analysis — 2 agents searching codebase..." "debate"
+  log_progress >&2 "[round 1] independent analysis — 2 agents searching codebase..." "debate"
 
   local findings_a_file findings_b_file
   findings_a_file=$(mktemp)
   findings_b_file=$(mktemp)
 
   # Agent A: Impact Analyst — focuses on what's broken by the changes
+  # With PKB: uses focused dirs + knowledge context (avoids full codebase scan)
+  # Without PKB: uses full --add-dir (needs to search entire codebase)
   run_agent_a "$project" "$project_dir" "$diff" "$changed_files" \
     "$consumers" "$lang_directive" "$model" "$claude_add_dirs" \
-    "$mra_dir" > "$findings_a_file" 2>/dev/null &
+    "$mra_dir" "$pkb_context" > "$findings_a_file" 2>/dev/null &
   local pid_a=$!
 
   # Agent B: Quality Auditor — focuses on code quality, security, patterns
+  # With PKB: uses focused dirs + conventions/architecture knowledge
+  # Without PKB: uses full --add-dir
   run_agent_b "$project" "$project_dir" "$diff" "$changed_files" \
     "$project_type" "$lang_directive" "$model" "$claude_add_dirs" \
-    "$mra_dir" > "$findings_b_file" 2>/dev/null &
+    "$mra_dir" "$pkb_context" > "$findings_b_file" 2>/dev/null &
   local pid_b=$!
 
   wait $pid_a $pid_b
@@ -80,103 +102,121 @@ run_debate_review() {
   rm -f "$findings_a_file" "$findings_b_file"
 
   local count_a count_b
-  count_a=$(echo "$findings_a" | grep -c '^\- \[' 2>/dev/null | tr -d '[:space:]' || echo "0")
-  count_b=$(echo "$findings_b" | grep -c '^\- \[' 2>/dev/null | tr -d '[:space:]' || echo "0")
-  [[ -z "$count_a" ]] && count_a=0
-  [[ -z "$count_b" ]] && count_b=0
-  log_info "[round 1] Agent A: $count_a findings, Agent B: $count_b findings" "debate"
+  count_a=$(echo "$findings_a" | grep -c '^\- \[' || true)
+  count_b=$(echo "$findings_b" | grep -c '^\- \[' || true)
+  count_a=${count_a//[^0-9]/}; [[ -z "$count_a" ]] && count_a=0
+  count_b=${count_b//[^0-9]/}; [[ -z "$count_b" ]] && count_b=0
+  log_info >&2 "[round 1] Agent A: $count_a findings, Agent B: $count_b findings" "debate"
 
   # =====================================================================
-  # ROUND 2+: Adversarial Cross-Critique Loop
+  # FAST CONVERGENCE: skip debate if findings are few or zero
   # =====================================================================
-  local round=2
-  local prev_critique_a="" prev_critique_b=""
+  local total_findings=$((count_a + count_b))
 
-  while [[ $round -le $((DEBATE_MAX_ROUNDS + 1)) ]]; do
-    log_progress "[round $round] cross-critique — agents challenging each other..." "debate"
+  if [[ "$total_findings" -eq 0 ]]; then
+    log_success >&2 "[fast] no findings from either agent — APPROVED" "debate"
+    echo '{"status":"APPROVED","summary":"No issues found by either agent","comments":[]}'
+    return
+  fi
 
-    local critique_a_file critique_b_file
-    critique_a_file=$(mktemp)
-    critique_b_file=$(mktemp)
+  if [[ "$total_findings" -le 5 ]]; then
+    log_info >&2 "[fast] few findings ($total_findings total), skipping debate — direct synthesis" "debate"
+    run_synthesize "$project" "$project_dir" "$diff" "$changed_files" \
+      "$findings_a" "$findings_b" "$consumers" "$has_api_change" \
+      "$lang_directive" "$model" "$focused_ctx" "$mra_dir"
+    return
+  fi
 
-    # Agent A critiques Agent B's findings
-    run_critique "$project_dir" "$diff" "$findings_b" "Agent B (Quality Auditor)" \
-      "$findings_a" "$lang_directive" "$model" "$claude_add_dirs" \
-      "$mra_dir" > "$critique_a_file" 2>/dev/null &
-    local pid_ca=$!
+  # =====================================================================
+  # ROUND 2: Mailbox Voting — merge findings into shared pool, then vote
+  #
+  # Inspired by OpenHarness swarm mailbox pattern:
+  # Instead of iterative critique→refine rounds, each agent independently
+  # votes on a merged findings pool. Findings that survive voting (net
+  # positive votes) proceed to synthesis.
+  #
+  # This is more token-efficient than iterative rounds because:
+  # 1. Only 2 agents per voting round (not 4)
+  # 2. Pool deduplicates findings upfront
+  # 3. Single round typically sufficient for convergence
+  # =====================================================================
+  log_progress >&2 "[round 2] mailbox voting — merging findings into shared pool..." "debate"
 
-    # Agent B critiques Agent A's findings
-    run_critique "$project_dir" "$diff" "$findings_a" "Agent A (Impact Analyst)" \
-      "$findings_b" "$lang_directive" "$model" "$claude_add_dirs" \
-      "$mra_dir" > "$critique_b_file" 2>/dev/null &
-    local pid_cb=$!
+  # Merge all findings into a numbered pool for voting
+  local pool_file
+  pool_file=$(mktemp)
+  _build_findings_pool "$findings_a" "$findings_b" > "$pool_file"
 
-    wait $pid_ca $pid_cb
-    local critique_a critique_b
-    critique_a=$(cat "$critique_a_file")
-    critique_b=$(cat "$critique_b_file")
-    rm -f "$critique_a_file" "$critique_b_file"
+  local pool
+  pool=$(cat "$pool_file")
+  rm -f "$pool_file"
 
-    # Check convergence: if critiques are essentially "no issues found"
-    local new_issues_a new_issues_b
-    new_issues_a=$(echo "$critique_a" | grep -c "DISAGREE\|MISSING\|UPGRADE\|NEW" 2>/dev/null | tr -d '[:space:]' || echo "0")
-    new_issues_b=$(echo "$critique_b" | grep -c "DISAGREE\|MISSING\|UPGRADE\|NEW" 2>/dev/null | tr -d '[:space:]' || echo "0")
-    [[ -z "$new_issues_a" ]] && new_issues_a=0
-    [[ -z "$new_issues_b" ]] && new_issues_b=0
+  local pool_count
+  pool_count=$(echo "$pool" | grep -c '^#[0-9]' || true)
+  pool_count=${pool_count//[^0-9]/}; [[ -z "$pool_count" ]] && pool_count=0
+  log_info >&2 "[round 2] merged pool: $pool_count unique findings" "debate"
 
-    log_info "[round $round] critique A: $new_issues_a challenges, critique B: $new_issues_b challenges" "debate"
+  if [[ "$pool_count" -eq 0 ]]; then
+    log_success >&2 "[round 2] empty pool after merge — APPROVED" "debate"
+    echo '{"status":"APPROVED","summary":"No issues survived merging","comments":[]}'
+    return
+  fi
 
-    if [[ "$new_issues_a" -eq 0 && "$new_issues_b" -eq 0 ]]; then
-      log_success "[round $round] consensus reached — no new challenges" "debate"
-      break
-    fi
+  # Two agents vote in parallel
+  local vote_a_file vote_b_file
+  vote_a_file=$(mktemp)
+  vote_b_file=$(mktemp)
 
-    if [[ $round -gt $DEBATE_MAX_ROUNDS ]]; then
-      log_warn "max rounds ($DEBATE_MAX_ROUNDS) reached, proceeding to synthesis" "debate"
-      break
-    fi
+  run_vote "$project_dir" "$diff" "$pool" "Agent A (Impact Analyst)" \
+    "$lang_directive" "$lite_model" "$focused_ctx" \
+    "$mra_dir" "$pkb_context_lite" > "$vote_a_file" 2>/dev/null &
+  local pid_va=$!
 
-    # Refine findings based on critique
-    log_progress "[round $round] agents refining based on critique..." "debate"
+  run_vote "$project_dir" "$diff" "$pool" "Agent B (Quality Auditor)" \
+    "$lang_directive" "$lite_model" "$focused_ctx" \
+    "$mra_dir" "$pkb_context_lite" > "$vote_b_file" 2>/dev/null &
+  local pid_vb=$!
 
-    local refined_a_file refined_b_file
-    refined_a_file=$(mktemp)
-    refined_b_file=$(mktemp)
+  wait $pid_va $pid_vb
+  local votes_a votes_b
+  votes_a=$(cat "$vote_a_file")
+  votes_b=$(cat "$vote_b_file")
+  rm -f "$vote_a_file" "$vote_b_file"
 
-    run_refine "$project_dir" "$diff" "$findings_a" "$critique_b" \
-      "$lang_directive" "$model" "$claude_add_dirs" "$mra_dir" > "$refined_a_file" 2>/dev/null &
-    local pid_ra=$!
+  # Tally votes and filter surviving findings
+  local surviving_findings
+  surviving_findings=$(_tally_votes "$pool" "$votes_a" "$votes_b")
 
-    run_refine "$project_dir" "$diff" "$findings_b" "$critique_a" \
-      "$lang_directive" "$model" "$claude_add_dirs" "$mra_dir" > "$refined_b_file" 2>/dev/null &
-    local pid_rb=$!
+  local surviving_count
+  surviving_count=$(echo "$surviving_findings" | grep -c '^\- \[' || true)
+  surviving_count=${surviving_count//[^0-9]/}; [[ -z "$surviving_count" ]] && surviving_count=0
+  log_info >&2 "[round 2] $surviving_count findings survived voting (from $pool_count)" "debate"
 
-    wait $pid_ra $pid_rb
-    findings_a=$(cat "$refined_a_file")
-    findings_b=$(cat "$refined_b_file")
-    rm -f "$refined_a_file" "$refined_b_file"
-
-    ((round++))
-  done
+  # Use surviving findings for synthesis
+  findings_a="$surviving_findings"
+  findings_b=""
 
   # =====================================================================
   # FINAL: Synthesize into structured review
+  # Uses focused context (not full codebase)
   # =====================================================================
-  log_progress "[final] synthesizing review from debate results..." "debate"
+  log_progress >&2 "[final] synthesizing review from debate results..." "debate"
 
   run_synthesize "$project" "$project_dir" "$diff" "$changed_files" \
     "$findings_a" "$findings_b" "$consumers" "$has_api_change" \
-    "$lang_directive" "$model" "$claude_add_dirs" "$mra_dir"
+    "$lang_directive" "$model" "$focused_ctx" "$mra_dir"
 }
 
 # -----------------------------------------------------------------------
 # Agent A: Impact Analyst
 # Searches codebase for broken references, deleted API consumers, etc.
+# Uses FULL --add-dir (needs codebase search)
+# max-turns: 8 (down from 15)
 # -----------------------------------------------------------------------
 run_agent_a() {
   local project="$1" project_dir="$2" diff="$3" changed_files="$4"
   local consumers="$5" lang_directive="$6" model="$7"
-  local claude_add_dirs="$8" mra_dir="$9"
+  local claude_add_dirs="$8" mra_dir="$9" pkb_context="${10:-}"
 
   local consumer_note=""
   if [[ -n "$consumers" ]]; then
@@ -184,31 +224,25 @@ run_agent_a() {
 Search their source code for references to any changed/deleted exports."
   fi
 
+  local pkb_section=""
+  if [[ -n "$pkb_context" ]]; then
+    pkb_section="$pkb_context
+
+Use the knowledge base above to understand the project structure and API surface.
+Only read source files when you need exact file:line evidence for a finding.
+"
+  fi
+
   local prompt
   prompt=$(cat <<PROMPT
-You are Agent A (Impact Analyst). Your job is to find REAL, VERIFIED impact of this PR on the codebase.
-
-## Your Method
-1. Read the diff to identify what was added, modified, or DELETED.
-2. For each deleted/renamed export, function, type, or hook:
-   - Use grep/read to search the ENTIRE project for files that import or reference it.
-   - Report ONLY confirmed references with exact file paths and line numbers.
-3. For each modified function signature or return type:
-   - Search for all callers and verify they are compatible with the new signature.
-4. Check for duplicate definitions:
-   - Search if the same function/type/component name exists elsewhere in the project.
-   - Flag if a new utility duplicates an existing one.
-5. Check for duplicate imports:
-   - Search if the same module (e.g., devtools, providers) is imported in multiple entry points.
-6. Check for leftover test/debug artifacts:
-   - Search for console.log, devtools references, temporary mocks, or test-only code in production files.
-7. Dead code detection:
-   - When a function/method is deleted or replaced, search for remaining references in port interfaces, adapters, test mocks, re-exports.
-   - Report exact file:line of each orphaned reference.
-8. Async safety:
-   - If event emission is modified, verify emit() vs emitAsync() correctness.
-   - If return types changed, verify all callers handle the new type.
-   - If try/catch wraps async calls, verify the call is awaited.
+You are Agent A (Impact Analyst). Find REAL, VERIFIED impact of this PR.
+${pkb_section}
+## Method
+1. Read diff → identify added, modified, DELETED items.
+2. For each deleted/renamed export: grep the project for remaining references. Report with file:line.
+3. For modified signatures: search callers, verify compatibility.
+4. Check for: duplicate definitions, duplicate imports, leftover debug artifacts, dead code.
+5. Async safety: emit() vs emitAsync(), return type accuracy, await in try/catch.
 ${consumer_note}
 
 ## Diff
@@ -219,17 +253,16 @@ ${diff}
 ## Changed Files
 ${changed_files}
 
-## Output Format
-List your findings as:
+## Output
 - [CRITICAL] \`file:line\` — <verified issue with evidence>
 - [HIGH] \`file:line\` — <verified issue with evidence>
-- [MEDIUM] \`file:line\` — <potential issue, explain uncertainty>
+- [MEDIUM] \`file:line\` — <potential issue>
 
-If you searched and found NO references to a deleted item, state: "Verified: <item> has no remaining references."
+If no references found for a deleted item: "Verified: <item> has no remaining references."
 
 ${lang_directive}
 
-IMPORTANT: You MUST actually search the codebase using file reading. Do NOT guess or speculate. Every finding must include the exact file and line you found.
+IMPORTANT: You MUST search the codebase using file reading/grep. Every finding must include exact file and line.
 PROMPT
 )
 
@@ -237,63 +270,48 @@ PROMPT
   claude -p "$prompt" \
     $claude_add_dirs \
     --model "$model" \
-    --max-turns 15 \
+    --max-turns 8 \
+    --disallowedTools "Write,Edit,NotebookEdit" \
     --setting-sources "project" 2>/dev/null
 }
 
 # -----------------------------------------------------------------------
 # Agent B: Quality Auditor
 # Checks patterns, security, edge cases, best practices
+# Uses FULL --add-dir (needs to read surrounding code & conventions)
+# max-turns: 8 (down from 15)
 # -----------------------------------------------------------------------
 run_agent_b() {
   local project="$1" project_dir="$2" diff="$3" changed_files="$4"
   local project_type="$5" lang_directive="$6" model="$7"
-  local claude_add_dirs="$8" mra_dir="$9"
+  local claude_add_dirs="$8" mra_dir="$9" pkb_context="${10:-}"
+
+  local pkb_section=""
+  if [[ -n "$pkb_context" ]]; then
+    pkb_section="$pkb_context
+
+Use the knowledge base above for project conventions, architecture, and patterns.
+Only read source files when you need to verify specific code around changed lines.
+"
+  fi
 
   local prompt
   prompt=$(cat <<PROMPT
-You are Agent B (Quality Auditor). Your job is to find code quality, security, and pattern issues in this PR.
-
-## Your Method
-1. Read the diff to understand the changes.
-2. Read the surrounding source files to understand the existing patterns and conventions.
-3. Read the project's AGENTS.md, CLAUDE.md, or .claude/rules/ files if they exist — these contain project-specific conventions.
-4. Check for:
-   - Security issues (XSS, injection, exposed secrets, missing validation)
-   - Error handling gaps (missing try/catch, unhandled promise rejections, missing error states)
-   - State management issues (race conditions, stale closures, memory leaks in effects)
-   - Type safety (any usage, missing null checks, unsafe type assertions)
-   - Pattern violations (does new code follow existing project conventions?)
-   - Missing edge cases (empty arrays, null/undefined, loading/error states)
-5. Architecture & state management:
-   - Server data (API responses) should be in TanStack Query, NOT in client stores (Zustand/Pinia)
-   - Store access should be wrapped in custom hooks, not called directly in components
-   - API types should use Zod schema validation when the project uses Zod
-6. Performance:
-   - Static data (column definitions, config objects) should be hoisted outside components
-   - Check if expensive computations need useMemo
-7. Tailwind & styling:
-   - Use cn() for conditional classes, not ternary string concatenation
-   - No hardcoded color values (oklch, hex, rgb) — use theme tokens
-   - No redundant width + max-width
-8. Code readability:
-   - Nested map/filter chains → suggest flatMap or reduce
-   - Complex spread logic → suggest named intermediate variables
-   - If project has es-toolkit/lodash, use their utilities instead of hand-rolling
-9. Naming & magic values:
-   - No single-letter variable names (r, e, x) outside tiny lambdas
-   - No magic numbers — use named constants
-   - Repeated string operations (e.g., date.substring(0,7)) → extract helper
-   - Validation decorators (@Matches, @IsString) should have custom error messages
-10. Backend architecture (NestJS/DDD):
-   - Module A should not import module B's internal entities — use shared ports
-   - Transaction scope: avoid cross-DB I/O inside transactions
-   - OpenAPI: integer DB fields must use type 'integer' in @ApiProperty
-   - Shared utilities should live outside specific modules
-11. Async safety:
-   - emit() vs emitAsync() — async handlers need emitAsync()
-   - Return types must reflect async reality (Promise<T> not T)
-   - try/catch must await async calls to catch errors
+You are Agent B (Quality Auditor). Find code quality, security, and pattern issues.
+${pkb_section}
+## Method
+1. Read diff + surrounding source files for context.
+2. Read AGENTS.md / CLAUDE.md / .claude/rules/ for project conventions (skip if PKB conventions are provided above).
+3. Check each category — report ONLY real issues found by reading code:
+   - **Security**: XSS, injection, secrets, missing validation
+   - **Error handling**: missing try/catch, unhandled rejections, missing error states
+   - **State mgmt**: race conditions, stale closures, memory leaks; server data → TanStack Query not Zustand
+   - **Type safety**: any usage, missing null checks, unsafe assertions
+   - **Patterns**: violations of project conventions
+   - **Performance**: static data inside components, missing useMemo for expensive ops
+   - **Naming**: magic numbers, single-letter vars, missing validation messages
+   - **Backend DDD**: bounded context isolation, transaction scope, OpenAPI accuracy
+   - **Async safety**: emit vs emitAsync, Promise<T> accuracy, await in try/catch
 
 ## Project Type: ${project_type}
 
@@ -305,15 +323,14 @@ ${diff}
 ## Changed Files
 ${changed_files}
 
-## Output Format
-List your findings as:
-- [CRITICAL] \`file:line\` — <issue with evidence from reading the code>
+## Output
+- [CRITICAL] \`file:line\` — <issue with evidence>
 - [HIGH] \`file:line\` — <issue with evidence>
 - [MEDIUM] \`file:line\` — <suggestion with rationale>
 
 ${lang_directive}
 
-IMPORTANT: Read the actual source files around the changed code. Base your findings on what you see in the codebase, not assumptions.
+IMPORTANT: Read actual source files. Base findings on code, not assumptions.
 PROMPT
 )
 
@@ -321,103 +338,64 @@ PROMPT
   claude -p "$prompt" \
     $claude_add_dirs \
     --model "$model" \
-    --max-turns 15 \
+    --max-turns 8 \
+    --disallowedTools "Write,Edit,NotebookEdit" \
     --setting-sources "project" 2>/dev/null
 }
 
 # -----------------------------------------------------------------------
-# Cross-Critique: one agent reviews the other's findings
+# Merged Critique-and-Refine: one agent critiques the other AND updates
+# its own findings in a single pass (replaces separate critique + refine)
+# Uses FOCUSED context (changed files only) + haiku model
+# max-turns: 5 (down from 10+10)
 # -----------------------------------------------------------------------
-run_critique() {
-  local project_dir="$1" diff="$2" target_findings="$3" target_name="$4"
-  local own_findings="$5" lang_directive="$6" model="$7"
-  local claude_add_dirs="$8" mra_dir="$9"
+run_critique_and_refine() {
+  local project_dir="$1" diff="$2"
+  local own_findings="$3" target_findings="$4" target_name="$5"
+  local lang_directive="$6" model="$7"
+  local claude_add_dirs="$8" mra_dir="$9" pkb_context="${10:-}"
+
+  local pkb_section=""
+  if [[ -n "$pkb_context" ]]; then
+    pkb_section="$pkb_context
+Use conventions above to judge whether findings align with project standards.
+"
+  fi
 
   local prompt
   prompt=$(cat <<PROMPT
-You are a critical reviewer. Another agent (${target_name}) produced the following code review findings. Your job is to CHALLENGE them.
+You are a critical reviewer. Review ${target_name}'s findings AND refine your own.
+${pkb_section}
+
+## Your Current Findings
+${own_findings}
 
 ## ${target_name}'s Findings
 ${target_findings}
 
-## Your Own Findings (for context)
-${own_findings}
-
-## The Diff Being Reviewed
+## Diff
 \`\`\`diff
 ${diff}
 \`\`\`
 
-## Your Task
-For EACH finding by ${target_name}:
-1. Verify the claim by reading the actual source file and line mentioned.
-2. If the finding is WRONG (file doesn't exist, line doesn't match, logic is flawed):
-   → Mark as: DISAGREE — <reason with evidence>
-3. If the finding is CORRECT but severity is wrong:
-   → Mark as: UPGRADE/DOWNGRADE — <reason>
-4. If the finding is valid:
-   → Mark as: AGREE
-5. If ${target_name} MISSED something important that you found:
-   → Mark as: MISSING — <what was missed, with file:line evidence>
+## Tasks
+1. For EACH of ${target_name}'s findings: verify by reading the source file.
+   - WRONG → note why (file/line mismatch, flawed logic)
+   - CORRECT but wrong severity → note upgrade/downgrade
+   - MISSED something → add with file:line evidence
+2. Update YOUR OWN findings:
+   - Remove any you can no longer defend
+   - Adjust severity based on valid challenges
+   - Add new issues discovered during verification
 
-## Output Format
-For each of ${target_name}'s findings:
-- [AGREE/DISAGREE/UPGRADE/DOWNGRADE] Finding: "<summary>" — <your evidence>
-
-Additional findings they missed:
-- [NEW] \`file:line\` — <issue with evidence>
-
-${lang_directive}
-
-IMPORTANT: Actually read the files to verify. Do not just agree or disagree based on reasoning alone.
-PROMPT
-)
-
-  # shellcheck disable=SC2086
-  claude -p "$prompt" \
-    $claude_add_dirs \
-    --model "$model" \
-    --max-turns 10 \
-    --setting-sources "project" 2>/dev/null
-}
-
-# -----------------------------------------------------------------------
-# Refine: agent updates findings based on critique received
-# -----------------------------------------------------------------------
-run_refine() {
-  local project_dir="$1" diff="$2" own_findings="$3" critique="$4"
-  local lang_directive="$5" model="$6" claude_add_dirs="$7" mra_dir="$8"
-
-  local prompt
-  prompt=$(cat <<PROMPT
-You previously produced these code review findings:
-
-## Your Previous Findings
-${own_findings}
-
-## Critique You Received
-${critique}
-
-## The Diff
-\`\`\`diff
-${diff}
-\`\`\`
-
-## Your Task
-1. For each DISAGREE critique: re-verify by reading the file. If they're right, remove or fix your finding. If you're still correct, keep it with stronger evidence.
-2. For each UPGRADE/DOWNGRADE: adjust severity if the argument is valid.
-3. For each MISSING/NEW item: verify it and add to your findings if confirmed.
-4. Remove any finding you can no longer defend with evidence.
-
-## Output Format
-Your refined findings list:
+## Output: Your REFINED findings list ONLY
 - [CRITICAL] \`file:line\` — <issue with evidence>
 - [HIGH] \`file:line\` — <issue with evidence>
 - [MEDIUM] \`file:line\` — <issue>
 
 ${lang_directive}
 
-Only include findings you can defend with evidence from the actual source code.
+Only include findings with evidence from actual source code.
 PROMPT
 )
 
@@ -425,12 +403,141 @@ PROMPT
   claude -p "$prompt" \
     $claude_add_dirs \
     --model "$model" \
-    --max-turns 10 \
+    --max-turns 5 \
+    --disallowedTools "Write,Edit,NotebookEdit" \
     --setting-sources "project" 2>/dev/null
 }
 
 # -----------------------------------------------------------------------
+# Mailbox: Build numbered findings pool from two agents' outputs
+# Deduplicates by file:line, assigns unique IDs
+# -----------------------------------------------------------------------
+_build_findings_pool() {
+  local findings_a="$1" findings_b="$2"
+
+  # Extract finding lines from both agents
+  local all_findings
+  all_findings=$(
+    echo "$findings_a" | grep '^\- \[' 2>/dev/null || true
+    echo "$findings_b" | grep '^\- \[' 2>/dev/null || true
+  )
+
+  # Number each unique finding
+  local i=1
+  local -A seen=()
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    # Extract file:line as dedup key (macOS compatible, no -P flag)
+    local key
+    key=$(echo "$line" | sed -n 's/.*`\([^`]*\)`.*/\1/p' | head -1)
+    [[ -z "$key" ]] && key="$line"
+    if [[ -z "${seen[$key]+x}" ]]; then
+      seen["$key"]=1
+      echo "#${i}. ${line}"
+      i=$((i + 1))
+    fi
+  done <<< "$all_findings"
+}
+
+# -----------------------------------------------------------------------
+# Mailbox: Vote on findings pool
+# Each agent independently votes KEEP/DROP on each finding
+# Uses FOCUSED context + haiku model
+# max-turns: 3
+# -----------------------------------------------------------------------
+run_vote() {
+  local project_dir="$1" diff="$2" pool="$3" agent_name="$4"
+  local lang_directive="$5" model="$6"
+  local claude_add_dirs="$7" mra_dir="$8" pkb_context="${9:-}"
+
+  local pkb_section=""
+  if [[ -n "$pkb_context" ]]; then
+    pkb_section="$pkb_context
+"
+  fi
+
+  local prompt
+  prompt=$(cat <<PROMPT
+You are ${agent_name}. Vote on each finding in the pool below.
+${pkb_section}
+## Findings Pool
+${pool}
+
+## Diff
+\`\`\`diff
+${diff}
+\`\`\`
+
+## Your Task
+For EACH numbered finding, verify by reading the actual source file, then vote:
+- KEEP — the finding is valid and important
+- DROP — the finding is wrong, irrelevant, or already handled
+
+## Output Format (one line per finding)
+#1. KEEP — <brief reason>
+#2. DROP — <brief reason>
+...
+
+${lang_directive}
+
+Be strict: only KEEP findings with real evidence. DROP anything speculative.
+PROMPT
+)
+
+  # shellcheck disable=SC2086
+  claude -p "$prompt" \
+    $claude_add_dirs \
+    --model "$model" \
+    --max-turns 3 \
+    --disallowedTools "Write,Edit,NotebookEdit" \
+    --setting-sources "project" 2>/dev/null
+}
+
+# -----------------------------------------------------------------------
+# Mailbox: Tally votes and return surviving findings
+# A finding survives if at least one agent votes KEEP and neither
+# votes DROP with strong evidence (net positive votes)
+# -----------------------------------------------------------------------
+_tally_votes() {
+  local pool="$1" votes_a="$2" votes_b="$3"
+
+  # Parse pool into associative array by ID
+  local -A pool_items=()
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^#([0-9]+)\. ]]; then
+      local id="${BASH_REMATCH[1]}"
+      pool_items["$id"]="$line"
+    fi
+  done <<< "$pool"
+
+  # Parse votes
+  local -A score=()
+  for votes in "$votes_a" "$votes_b"; do
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^#([0-9]+)\..*KEEP ]]; then
+        local id="${BASH_REMATCH[1]}"
+        score["$id"]=$(( ${score[$id]:-0} + 1 ))
+      elif [[ "$line" =~ ^#([0-9]+)\..*DROP ]]; then
+        local id="${BASH_REMATCH[1]}"
+        score["$id"]=$(( ${score[$id]:-0} - 1 ))
+      fi
+    done <<< "$votes"
+  done
+
+  # Output surviving findings (score >= 1, i.e., at least one KEEP and not unanimously DROP)
+  for id in $(echo "${!pool_items[@]}" | tr ' ' '\n' | sort -n); do
+    local s=${score[$id]:-0}
+    if [[ $s -ge 1 ]]; then
+      # Strip the #N. prefix and output as standard finding format
+      echo "${pool_items[$id]}" | sed "s/^#[0-9]*\. //"
+    fi
+  done
+}
+
+# -----------------------------------------------------------------------
 # Synthesize: merge debate results into final structured review
+# Uses FOCUSED context (changed files only)
+# max-turns: 3
 # -----------------------------------------------------------------------
 run_synthesize() {
   local project="$1" project_dir="$2" diff="$3" changed_files="$4"
@@ -440,7 +547,7 @@ run_synthesize() {
 
   local prompt
   prompt=$(cat <<'PROMPT_START'
-You are the final synthesizer. Two agents have debated and refined their code review findings through multiple rounds. Produce the FINAL review.
+You are the final synthesizer. Two agents have debated and refined their code review findings. Produce the FINAL review.
 
 ## Agent A (Impact Analyst) Final Findings
 PROMPT_START
@@ -488,5 +595,6 @@ Rules for line numbers:
     $claude_add_dirs \
     --model "$model" \
     --max-turns 3 \
+    --disallowedTools "Write,Edit,NotebookEdit" \
     --setting-sources "project" 2>/dev/null
 }
