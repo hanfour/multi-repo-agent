@@ -14,7 +14,7 @@
 #   modules/
 #     <name>.md     — per-module deep summary (features, hooks, stores)
 
-PKB_VERSION=1
+PKB_VERSION=2
 PKB_DIR_NAME=".mra/pkb"
 
 # ---------------------------------------------------------------------------
@@ -116,6 +116,9 @@ pkb_generate() {
     project_type=$(detect_project_type "$project_dir" 2>/dev/null || echo "unknown")
   fi
 
+  # --- Phase 0: Generate L0 identity (ultra-compact, ~50 tokens) ---
+  _pkb_generate_identity "$project" "$project_dir" "$project_type" "$pkb"
+
   # --- Phase 1: Parallel generation of 4 core documents ---
   log_progress "[phase 1] generating core knowledge documents (4 agents in parallel)..." "pkb"
 
@@ -164,6 +167,13 @@ pkb_generate() {
   _pkb_generate_modules "$project" "$project_dir" "$project_type" \
     "$lang_directive" "$model" "$pkb"
 
+  # --- Phase 3: Generate tunnel links (cross-module references) ---
+  log_progress "[phase 3] generating tunnel links..." "pkb"
+  _pkb_generate_tunnels "$pkb"
+
+  # --- Phase 4: Record source file mtimes for incremental updates ---
+  _pkb_record_mtimes "$project_dir" "$pkb"
+
   # Finalize
   pkb_update_meta "$project_dir"
 
@@ -189,6 +199,19 @@ pkb_incremental_update() {
   if ! pkb_exists "$project_dir"; then
     log_warn "PKB not found for $project, run 'mra analyze $project' first" "pkb"
     return 1
+  fi
+
+  # mtime check: skip update if no source files changed
+  local changed_areas
+  changed_areas=$(_pkb_check_mtimes "$project_dir")
+  if [[ -z "$changed_areas" ]]; then
+    log_info "no source changes detected (mtime), skipping PKB update" "pkb"
+    return 0
+  fi
+
+  # If config files changed, regenerate conventions
+  if echo "$changed_areas" | grep -qE 'package.json|tsconfig|eslintrc|CLAUDE.md|AGENTS.md'; then
+    log_info "config files changed, conventions may need update" "pkb"
   fi
 
   local lang_directive=""
@@ -254,20 +277,28 @@ pkb_incremental_update() {
       "$changed_files" "$lang_directive" "$model"
   fi
 
+  # Regenerate tunnels after module updates
+  _pkb_generate_tunnels "$pkb"
+
+  # Record new mtimes
+  _pkb_record_mtimes "$project_dir" "$pkb"
+
   pkb_update_meta "$project_dir"
   log_success "PKB updated for modules:$affected_modules" "pkb"
 }
 
 # ---------------------------------------------------------------------------
-# Build context string for agents — replaces --add-dir with knowledge docs
+# Build context string for agents — 4-layer memory stack (mempalace-inspired)
 #
-# Tier system (inspired by OpenHarness on-demand skill loading):
-#   minimal  — sitemap + conventions only (~200-400 lines, navigation + rules)
-#   standard — minimal + architecture + api-surface (~500-800 lines)
-#   full     — standard + all relevant module summaries (~800-1500 lines)
+# L0: Identity   (~50 tokens)  — project name, type, one-line purpose
+# L1: Essential   (~200 tokens) — core conventions + architecture summary
+# L2: Room Recall (on-demand)  — module summaries relevant to changed files
+# L3: Deep Search (on-demand)  — full architecture + api-surface + all modules
 #
-# Default tier is "minimal" to reduce token usage. Agents that need deeper
-# understanding can request higher tiers.
+# Layer mapping (backwards-compatible with old tier names):
+#   minimal  → L0 + L1 (~250 tokens wake-up cost)
+#   standard → L0 + L1 + relevant L2 (~500-800 tokens)
+#   full     → L0 + L1 + L2 + L3 (~800-1500 tokens)
 # ---------------------------------------------------------------------------
 pkb_build_context() {
   local project_dir="$1"
@@ -282,56 +313,106 @@ pkb_build_context() {
     return
   fi
 
-  local context="
-## Project Knowledge Base (tier: $tier)
+  local context=""
 
-Distilled knowledge about this project. Use as primary context — only read source
-files when you need exact line numbers or to verify specific code.
+  # --- L0: Identity (always loaded, ~50 tokens) ---
+  local identity_file="$pkb/identity.md"
+  if [[ -f "$identity_file" ]]; then
+    context="## Project Identity
+$(cat "$identity_file")
 "
-
-  # Tier: minimal — always included
-  for doc in sitemap conventions; do
-    local doc_file="$pkb/${doc}.md"
-    if [[ -f "$doc_file" ]]; then
-      context="${context}
-### ${doc^}
-$(cat "$doc_file")
-"
-    fi
-  done
-
-  # Tier: standard — add architecture + api-surface
-  if [[ "$tier" == "standard" || "$tier" == "full" ]]; then
-    for doc in architecture api-surface; do
-      local doc_file="$pkb/${doc}.md"
-      if [[ -f "$doc_file" ]]; then
-        context="${context}
-### ${doc^}
-$(cat "$doc_file")
-"
-      fi
-    done
   fi
 
-  # Tier: full — add module summaries
-  if [[ "$tier" == "full" ]]; then
+  # --- L1: Essential conventions (always loaded, ~200 tokens) ---
+  # Extract only tagged [CONVENTION] and [PATTERN] lines from conventions.md
+  local conventions_file="$pkb/conventions.md"
+  if [[ -f "$conventions_file" ]]; then
+    local essential
+    essential=$(grep -E '^\[CONVENTION\]|^\[PATTERN\]|^\[DECISION\]|^## |^# ' "$conventions_file" 2>/dev/null || true)
+    if [[ -n "$essential" ]]; then
+      context="${context}
+## Essential Conventions
+${essential}
+"
+    else
+      # Fallback: load full conventions if no tags found (pre-v2 PKB)
+      context="${context}
+## Conventions
+$(cat "$conventions_file")
+"
+    fi
+  fi
+
+  # Tunnel links (always include if available)
+  local tunnels_file="$pkb/tunnels.md"
+  if [[ -f "$tunnels_file" && -s "$tunnels_file" ]]; then
+    context="${context}
+## Cross-Module References
+$(cat "$tunnels_file")
+"
+  fi
+
+  # --- L2: Room Recall (standard tier — relevant modules only) ---
+  if [[ "$tier" == "standard" || "$tier" == "full" ]]; then
+    # Include sitemap for navigation
+    local sitemap_file="$pkb/sitemap.md"
+    if [[ -f "$sitemap_file" ]]; then
+      context="${context}
+## Sitemap
+$(cat "$sitemap_file")
+"
+    fi
+
+    # Include architecture overview
+    local arch_file="$pkb/architecture.md"
+    if [[ -f "$arch_file" ]]; then
+      context="${context}
+## Architecture
+$(cat "$arch_file")
+"
+    fi
+
+    # Include relevant module summaries (room recall)
     if [[ -n "$relevant_modules" ]]; then
       for mod in $relevant_modules; do
         local mod_file="$pkb/modules/${mod}.md"
         if [[ -f "$mod_file" && -s "$mod_file" ]]; then
           context="${context}
-### Module: ${mod}
+## Module: ${mod}
 $(cat "$mod_file")
 "
         fi
       done
-    else
+    fi
+  fi
+
+  # --- L3: Deep Search (full tier — everything) ---
+  if [[ "$tier" == "full" ]]; then
+    # API surface
+    local api_file="$pkb/api-surface.md"
+    if [[ -f "$api_file" ]]; then
+      context="${context}
+## API Surface
+$(cat "$api_file")
+"
+    fi
+
+    # Full conventions (not just tagged lines)
+    if [[ -f "$conventions_file" ]]; then
+      context="${context}
+## Full Conventions
+$(cat "$conventions_file")
+"
+    fi
+
+    # All module summaries (not just relevant ones)
+    if [[ -z "$relevant_modules" ]]; then
       for mod_file in "$pkb"/modules/*.md; do
         [[ -f "$mod_file" && -s "$mod_file" ]] || continue
         local mod_name
         mod_name=$(basename "$mod_file" .md)
         context="${context}
-### Module: ${mod_name}
+## Module: ${mod_name}
 $(cat "$mod_file")
 "
       done
@@ -514,29 +595,39 @@ You are a code quality analyst. Generate a CONVENTIONS document for "$project" (
 4. Note any project-specific rules or deviations from standard.
 
 ## Output Format (markdown)
+
+IMPORTANT: Prefix each rule/pattern with a classification tag:
+- [CONVENTION] — coding style rules (naming, imports, formatting)
+- [PATTERN] — architecture/design patterns used in the codebase
+- [DECISION] — explicit technical decisions (why X was chosen over Y)
+
 # Conventions: $project
 
 ## Coding Style
-- ...
+[CONVENTION] ...
 
 ## Naming Conventions
-- ...
+[CONVENTION] ...
 
 ## Import & Module Patterns
-- ...
+[PATTERN] ...
 
 ## Error Handling
-- ...
+[PATTERN] ...
 
 ## Testing Approach
-- ...
+[CONVENTION] ...
+
+## Key Technical Decisions
+[DECISION] ...
 
 ## Project-Specific Rules
-- ...
+[CONVENTION] ...
 
 ${lang_directive}
 
 Only document patterns actually used in the codebase. Don't assume or prescribe.
+Every line must start with [CONVENTION], [PATTERN], or [DECISION] tag.
 PROMPT
 )" --add-dir "$project_dir" --model "$model" --max-turns 5 --setting-sources "project"
 }
@@ -728,6 +819,228 @@ ${lang_directive}
 Output the COMPLETE updated summary (not a diff).
 PROMPT
 )" --add-dir "$module_dir" --model "$model" --max-turns 3 --setting-sources "project"
+}
+
+# ---------------------------------------------------------------------------
+# L0: Generate ultra-compact identity file (~50 tokens)
+# No LLM call needed — derived from project metadata
+# ---------------------------------------------------------------------------
+_pkb_generate_identity() {
+  local project="$1" project_dir="$2" project_type="$3" pkb="$4"
+
+  local tech_stack=""
+  # Detect tech stack from files
+  [[ -f "$project_dir/package.json" ]] && tech_stack="Node.js"
+  [[ -f "$project_dir/Gemfile" ]] && tech_stack="Ruby/Rails"
+  [[ -f "$project_dir/go.mod" ]] && tech_stack="Go"
+  [[ -f "$project_dir/requirements.txt" || -f "$project_dir/pyproject.toml" ]] && tech_stack="Python"
+
+  # Detect frontend framework
+  if [[ -f "$project_dir/package.json" ]]; then
+    local pkg
+    pkg=$(cat "$project_dir/package.json" 2>/dev/null)
+    echo "$pkg" | grep -q '"react"' && tech_stack="$tech_stack/React"
+    echo "$pkg" | grep -q '"vue"' && tech_stack="$tech_stack/Vue"
+    echo "$pkg" | grep -q '"next"' && tech_stack="$tech_stack/Next.js"
+    echo "$pkg" | grep -q '"@nestjs/core"' && tech_stack="NestJS"
+  fi
+  [[ -z "$tech_stack" ]] && tech_stack="unknown"
+
+  # Try to get description from package.json or README first line
+  local description=""
+  if [[ -f "$project_dir/package.json" ]]; then
+    description=$(jq -r '.description // ""' "$project_dir/package.json" 2>/dev/null)
+  fi
+  if [[ -z "$description" && -f "$project_dir/README.md" ]]; then
+    description=$(head -5 "$project_dir/README.md" | grep -v '^#' | grep -v '^$' | head -1)
+  fi
+  [[ -z "$description" ]] && description="$project_type project"
+
+  cat > "$pkb/identity.md" <<EOF
+**${project}** | ${project_type} | ${tech_stack}
+${description}
+EOF
+  log_info "[L0] identity generated (~50 tokens)" "pkb"
+}
+
+# ---------------------------------------------------------------------------
+# Tunnel linking: detect shared entities across module summaries
+# Creates tunnels.md with cross-reference map
+# ---------------------------------------------------------------------------
+_pkb_generate_tunnels() {
+  local pkb="$1"
+  local tunnels_file="$pkb/tunnels.md"
+  local -A entity_modules=()
+
+  # Scan all module summaries for entity references
+  for mod_file in "$pkb"/modules/*.md; do
+    [[ -f "$mod_file" && -s "$mod_file" ]] || continue
+    local mod_name
+    mod_name=$(basename "$mod_file" .md)
+
+    # Extract capitalized entity names (likely types/components)
+    local entities
+    entities=$(grep -oE '\b[A-Z][a-zA-Z]{2,}\b' "$mod_file" 2>/dev/null | sort -u || true)
+    while IFS= read -r entity; do
+      [[ -z "$entity" ]] && continue
+      # Skip common noise words
+      case "$entity" in
+        Module|Purpose|Name|Type|Table|Key|Components|Dependencies|Internal|External|Business|Rules|Gotchas) continue ;;
+      esac
+      if [[ -n "${entity_modules[$entity]+x}" ]]; then
+        entity_modules["$entity"]="${entity_modules[$entity]}, $mod_name"
+      else
+        entity_modules["$entity"]="$mod_name"
+      fi
+    done <<< "$entities"
+  done
+
+  # Write tunnels (only entities appearing in 2+ modules)
+  local has_tunnels=false
+  {
+    echo "# Cross-Module References (Tunnels)"
+    echo ""
+    echo "| Entity | Modules |"
+    echo "|--------|---------|"
+    for entity in $(echo "${!entity_modules[@]}" | tr ' ' '\n' | sort); do
+      local modules="${entity_modules[$entity]}"
+      if [[ "$modules" == *","* ]]; then
+        echo "| ${entity} | ${modules} |"
+        has_tunnels=true
+      fi
+    done
+  } > "$tunnels_file"
+
+  if [[ "$has_tunnels" == "true" ]]; then
+    local tunnel_count
+    tunnel_count=$(grep -c '|' "$tunnels_file" || true)
+    tunnel_count=$((tunnel_count - 2))  # subtract header rows
+    log_info "[tunnels] $tunnel_count cross-module references detected" "pkb"
+  else
+    rm -f "$tunnels_file"
+    log_info "[tunnels] no cross-module references found" "pkb"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Record source file mtimes for incremental change detection
+# Stores mtime of key source dirs in meta.json
+# ---------------------------------------------------------------------------
+_pkb_record_mtimes() {
+  local project_dir="$1" pkb="$2"
+  local meta_file="$pkb/meta.json"
+  [[ ! -f "$meta_file" ]] && return
+
+  local mtimes="{}"
+  # Record mtime of key config/source files
+  for f in package.json tsconfig.json Gemfile go.mod requirements.txt \
+           .eslintrc.js .eslintrc.json CLAUDE.md AGENTS.md; do
+    local full_path="$project_dir/$f"
+    if [[ -f "$full_path" ]]; then
+      local mtime
+      mtime=$(stat -f %m "$full_path" 2>/dev/null || stat -c %Y "$full_path" 2>/dev/null || echo "0")
+      mtimes=$(echo "$mtimes" | jq --arg k "$f" --arg v "$mtime" '. + {($k): ($v | tonumber)}')
+    fi
+  done
+
+  # Record mtime of source directories
+  for d in src frontend/src backend/src app lib; do
+    local full_dir="$project_dir/$d"
+    if [[ -d "$full_dir" ]]; then
+      local newest_mtime
+      newest_mtime=$(find "$full_dir" -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.rb' -o -name '*.go' -o -name '*.py' 2>/dev/null | \
+        xargs stat -f %m 2>/dev/null | sort -rn | head -1 || echo "0")
+      [[ -z "$newest_mtime" ]] && newest_mtime=0
+      mtimes=$(echo "$mtimes" | jq --arg k "$d" --arg v "$newest_mtime" '. + {($k): ($v | tonumber)}')
+    fi
+  done
+
+  local tmp
+  tmp=$(mktemp)
+  jq --argjson mtimes "$mtimes" '.sourceMtimes = $mtimes' "$meta_file" > "$tmp" && mv "$tmp" "$meta_file"
+}
+
+# Check which source areas have changed since last PKB generation
+# Returns: space-separated list of changed areas (e.g., "package.json src")
+_pkb_check_mtimes() {
+  local project_dir="$1"
+  local pkb
+  pkb="$(pkb_dir "$project_dir")"
+  local meta_file="$pkb/meta.json"
+
+  if [[ ! -f "$meta_file" ]] || ! jq -e '.sourceMtimes' "$meta_file" &>/dev/null; then
+    echo "all"
+    return
+  fi
+
+  local changed=""
+  local stored_mtimes
+  stored_mtimes=$(jq -c '.sourceMtimes // {}' "$meta_file")
+
+  # Check config files
+  for f in package.json tsconfig.json Gemfile go.mod requirements.txt \
+           .eslintrc.js .eslintrc.json CLAUDE.md AGENTS.md; do
+    local full_path="$project_dir/$f"
+    if [[ -f "$full_path" ]]; then
+      local current_mtime stored_mtime
+      current_mtime=$(stat -f %m "$full_path" 2>/dev/null || stat -c %Y "$full_path" 2>/dev/null || echo "0")
+      stored_mtime=$(echo "$stored_mtimes" | jq -r --arg k "$f" '.[$k] // 0')
+      if [[ "$current_mtime" != "$stored_mtime" ]]; then
+        changed="$changed $f"
+      fi
+    fi
+  done
+
+  # Check source directories
+  for d in src frontend/src backend/src app lib; do
+    local full_dir="$project_dir/$d"
+    if [[ -d "$full_dir" ]]; then
+      local current_mtime stored_mtime
+      current_mtime=$(find "$full_dir" -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.rb' -o -name '*.go' -o -name '*.py' 2>/dev/null | \
+        xargs stat -f %m 2>/dev/null | sort -rn | head -1 || echo "0")
+      [[ -z "$current_mtime" ]] && current_mtime=0
+      stored_mtime=$(echo "$stored_mtimes" | jq -r --arg k "$d" '.[$k] // 0')
+      if [[ "$current_mtime" != "$stored_mtime" ]]; then
+        changed="$changed $d"
+      fi
+    fi
+  done
+
+  echo "${changed# }"
+}
+
+# ---------------------------------------------------------------------------
+# Capture decisions from review results and append to conventions.md
+# Called after review completes
+# ---------------------------------------------------------------------------
+pkb_capture_decisions() {
+  local project_dir="$1" review_json="$2"
+
+  local pkb
+  pkb="$(pkb_dir "$project_dir")"
+  [[ ! -d "$pkb" ]] && return
+
+  local conventions_file="$pkb/conventions.md"
+  [[ ! -f "$conventions_file" ]] && return
+
+  # Extract CRITICAL and HIGH findings that reveal project conventions
+  local decisions
+  decisions=$(echo "$review_json" | jq -r '
+    .comments[]? |
+    select(.severity == "CRITICAL" or .severity == "HIGH") |
+    "[DECISION] \(.body | split("\n")[0])"
+  ' 2>/dev/null || true)
+
+  if [[ -n "$decisions" && "$decisions" != "null" ]]; then
+    # Append new decisions if not already present
+    while IFS= read -r decision; do
+      [[ -z "$decision" ]] && continue
+      # Check if this decision already exists
+      if ! grep -qF "$(echo "$decision" | cut -c13-50)" "$conventions_file" 2>/dev/null; then
+        echo "$decision" >> "$conventions_file"
+      fi
+    done <<< "$decisions"
+  fi
 }
 
 _pkb_update_sitemap() {

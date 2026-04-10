@@ -223,7 +223,7 @@ review_project() {
     fi
 
     # Auto-update PKB after debate review (background, non-blocking)
-    _review_pkb_auto_update "$project" "$project_dir" "$changed_files_for_strategy" "$output_language" &
+    _review_pkb_auto_update "$project" "$project_dir" "$changed_files_for_strategy" "$output_language" "$review_json" &
     return
   fi
 
@@ -286,14 +286,19 @@ ${prompt}"
   fi
 
   # Auto-update PKB after single-pass review (background, non-blocking)
-  _review_pkb_auto_update "$project" "$project_dir" "$changed_files_for_strategy" "$output_language" &
+  _review_pkb_auto_update "$project" "$project_dir" "$changed_files_for_strategy" "$output_language" "${review_json:-}" &
 }
 
 # Background PKB update after review — only runs if PKB exists
+# Also captures decisions from review findings into conventions.md
 _review_pkb_auto_update() {
-  local project="$1" project_dir="$2" changed_files="$3" output_language="$4"
+  local project="$1" project_dir="$2" changed_files="$3" output_language="$4" review_json="${5:-}"
   if pkb_exists "$project_dir"; then
     pkb_incremental_update "$project" "$project_dir" "$changed_files" "haiku" "$output_language" 2>/dev/null
+    # Capture decisions from review findings (mempalace-inspired conversation hook)
+    if [[ -n "$review_json" ]] && echo "$review_json" | jq . &>/dev/null 2>&1; then
+      pkb_capture_decisions "$project_dir" "$review_json" 2>/dev/null
+    fi
   fi
 }
 
