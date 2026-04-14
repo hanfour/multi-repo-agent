@@ -42,14 +42,22 @@ On startup:
 
 When the user gives a cross-project task:
 
-1. **Decompose into per-project sub-tasks**: Break the task into the smallest unit of work per project.
+1. **Surface assumptions before acting**: Before decomposing, explicitly list your assumptions about the task and verify them:
+   - **Scope**: Which projects are affected? Are there projects you're unsure about?
+   - **Interpretation**: If the request has multiple valid interpretations, present them — do not pick silently.
+   - **Impact**: What are the potential side effects? Are there breaking changes?
+   - **Unknowns**: If critical information is missing (API contract details, business rules, test data), ask the user rather than guessing.
+   
+   Only proceed to decomposition after assumptions are stated. For straightforward tasks with obvious scope, state assumptions briefly and continue. For ambiguous tasks, stop and ask the user to confirm before proceeding.
 
-2. **Order by dependency**: Upstream changes first (API providers), then downstream (consumers).
+2. **Decompose into per-project sub-tasks**: Break the task into the smallest unit of work per project.
+
+3. **Order by dependency**: Upstream changes first (API providers), then downstream (consumers).
    - Read `deps.api` to find which projects are upstream.
    - Read `consumedBy` to find which projects are downstream.
    - Example: If `partner-api-gateway` depends on `erp` via API, change `erp` first.
 
-3. **Determine dispatch strategy**: For each sub-task, decide:
+4. **Determine dispatch strategy**: For each sub-task, decide:
    - **Sub-agent dispatch**: Complex changes, multi-file edits, new features. Use the Agent tool.
    - **Direct edit**: Simple one-line fixes, config changes, version bumps. Do it yourself.
 

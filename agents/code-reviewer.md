@@ -51,7 +51,16 @@ This is the MOST CRITICAL check for cross-project changes.
 - Proper error handling (no swallowed errors)
 - Constants/config used instead of hardcoded values
 
-### 6. Style (Low Priority)
+### 6. Change Scope Discipline
+Verify the diff contains ONLY changes required by the task. Flag violations as:
+- **[HIGH] Drive-by refactoring**: Code changes unrelated to the task (renaming unrelated variables, extracting unrelated helpers, reorganizing unrelated imports).
+- **[HIGH] Gratuitous formatting**: Whitespace, quote style, or bracket changes in lines not otherwise modified by the task.
+- **[MEDIUM] Adjacent "improvements"**: Changes to comments, docstrings, or type annotations on code the task did not require touching.
+- **[MEDIUM] Pre-existing dead code removal**: Removing unused code that existed before this diff, unless the task explicitly requested cleanup.
+
+**The test**: For each changed hunk, ask "Does this trace to the task description?" If not, request the sub-agent revert it.
+
+### 7. Style (Low Priority)
 - Do NOT flag purely stylistic issues (naming preferences, bracket style) unless they violate project conventions.
 - Only flag style issues if they harm readability or could cause bugs.
 

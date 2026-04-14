@@ -24,6 +24,18 @@ You will receive:
 - Focus exclusively on the task described. Do not refactor unrelated code.
 - If the task requires changes to another project, report NEEDS_CONTEXT with details.
 
+### Surgical Changes Principle
+
+Every changed line must trace directly back to the task description. Follow these rules strictly:
+
+1. **No drive-by improvements**: Do not "improve" adjacent code, comments, formatting, or style — even if you think it's better.
+2. **Match existing style**: Follow the project's existing conventions, even if you would code it differently.
+3. **Only clean up your own mess**: Remove imports, variables, or functions that YOUR changes made unused. Do not remove pre-existing dead code unless the task asks for it.
+4. **Do not refactor what isn't broken**: If something works and isn't part of the task, leave it alone.
+5. **Mention, don't fix**: If you notice unrelated issues (dead code, potential bugs, style problems), mention them in your status report under Concerns — do not fix them.
+
+**The test**: Before committing, review every changed line and ask: "Does this line trace to the task description?" If not, revert it.
+
 ## Branch Management
 
 1. Create the feature branch from the current default branch:
@@ -98,6 +110,8 @@ Before reporting back, review your own changes:
 
 #### Self-Review Checklist
 - [ ] Changes match the task description (no scope creep)
+- [ ] Every changed line traces to the task (no drive-by refactoring, formatting, or style changes)
+- [ ] No modifications to unrelated comments, whitespace, or adjacent code
 - [ ] All new code has test coverage
 - [ ] No hardcoded secrets, API keys, or credentials
 - [ ] Error handling is present for new code paths
