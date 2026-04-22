@@ -100,6 +100,27 @@ Final: Synthesizer produces structured inline review
 
 All review agents are **write-protected** (`--disallowedTools "Write,Edit"`) — they can only read.
 
+### 2b. Persona-Based Review (opt-in)
+
+For PRs where generic Impact/Quality analysis isn't enough, run five named domain experts in parallel:
+
+```bash
+mra review my-api --personas          # Use 5 named domain experts
+mra review my-api --pr 123 --personas # PR review with personas
+```
+
+| Persona | Focus |
+|---------|-------|
+| `security-auditor` | Secrets, injection, auth, deserialization (Troy Hunt style) |
+| `api-contract-guardian` | Cross-repo signature drift, response shape changes |
+| `performance-hawk` | N+1 queries, hot-path I/O, bundle bloat (Vercel style) |
+| `refactoring-sage` | Code smells, naming, cohesion (Martin Fowler style) |
+| `test-architect` | Kent Beck 11 principles |
+
+Each persona has a focused lens and writes to the same severity ladder (CRITICAL/HIGH/MEDIUM). Findings are merged and synthesised into the same JSON the debate path produces — PR inline comments work identically.
+
+Add your own by dropping a markdown file in `agents/personas/`. See `agents/personas/README.md`.
+
 ### 3. Project Knowledge Base (PKB)
 
 Instead of re-reading the entire codebase every session, PKB distills project knowledge into reusable documents.
@@ -278,6 +299,23 @@ mra review my-api --pr 123       # Inline PR review
 mra rollback my-api              # Restore to latest snapshot
 ```
 
+#### Multi-Expert Planning
+
+```bash
+mra plan my-api "Migrate session tokens to JWT"
+```
+
+Five domain experts independently propose implementation strategies, then a synthesizer merges them into one unified plan (consolidated files, risk-ranked concerns, execution steps). Output goes to stdout — pipe to a file to save.
+
+#### Test Quality Audit
+
+```bash
+mra test-audit frontend-app        # Kent Beck 11-principles audit of all test files
+MRA_AUDIT_PARALLEL=3 mra test-audit frontend-app  # Cap concurrent audits
+```
+
+Discovers `*.test.*`, `*_test.*`, `*.spec.*` files (excluding `node_modules`, `dist`, `build`, `vendor`, `.git`) and audits each against Kent Beck's 11 testing principles via the `test-architect` persona.
+
 </details>
 
 ### Code Review
@@ -400,7 +438,9 @@ Generate templates: `mra template`
 
 | Command | Description |
 |---------|-------------|
-| `mra review <project> [--pr N] [--strategy S] [--base ref]` | Code review |
+| `mra review <project> [--pr N] [--strategy S] [--base ref] [--personas]` | Code review (add --personas for 5 named experts) |
+| `mra plan <project> "<task>" [--model M]` | Multi-expert implementation plan |
+| `mra test-audit <project> [--model M]` | Kent Beck 11-principles test audit |
 | `mra analyze <project> [--model M]` | Generate PKB |
 | `mra eval-review <project> --pr N [--baseline file]` | Evaluate review quality |
 
