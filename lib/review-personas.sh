@@ -51,11 +51,15 @@ run_persona_review() {
 
   log_progress >&2 "[personas] running $(echo "$personas" | wc -w | tr -d ' ') personas in parallel..." "review"
 
-  local pids=() result_files=()
+  local pids=() result_files=() err_files=() persona_names=()
   local p
   for p in $personas; do
-    local f; f=$(mktemp)
+    local f err
+    f=$(mktemp)
+    err=$(mktemp)
     result_files+=("$f")
+    err_files+=("$err")
+    persona_names+=("$p")
     (
       local prompt
       prompt=$(build_persona_prompt "$p" "$diff" "$changed_files" "$consumers" "$pkb_context" "$lang_directive")
@@ -65,19 +69,31 @@ run_persona_review() {
         --model "$model" \
         --max-turns 8 \
         --disallowedTools "Write,Edit,NotebookEdit" \
-        --setting-sources "project" 2>/dev/null
-    ) > "$f" 2>/dev/null &
+        --setting-sources "project"
+    ) > "$f" 2> "$err" &
     pids+=("$!")
   done
 
-  local pid
-  for pid in "${pids[@]}"; do wait "$pid"; done
+  local i pid rc
+  for i in "${!pids[@]}"; do
+    pid="${pids[$i]}"
+    if ! wait "$pid"; then
+      rc=$?
+      log_warn >&2 "[personas] ${persona_names[$i]} failed (rc=$rc) — stderr: ${err_files[$i]}" "review"
+    fi
+  done
 
   local all_findings=""
   local f
   for f in "${result_files[@]}"; do
     all_findings+="$(cat "$f")"$'\n'
     rm -f "$f"
+  done
+  local e
+  for e in "${err_files[@]}"; do
+    if [[ ! -s "$e" ]]; then
+      rm -f "$e"
+    fi
   done
 
   echo "$all_findings"
