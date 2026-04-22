@@ -6,6 +6,7 @@ export default defineConfig({
   description: 'AI-powered development across multiple repositories — from a single terminal',
   lastUpdated: true,
   cleanUrls: true,
+  ignoreDeadLinks: [/^\/commands\//],
   head: [
     ['meta', { name: 'theme-color', content: '#3b82f6' }],
   ],
@@ -15,7 +16,17 @@ export default defineConfig({
       { text: 'Commands', link: '/commands/' },
       { text: 'GitHub', link: 'https://github.com/hanfour/multi-repo-agent' },
     ],
-    sidebar: [],
+    sidebar: {
+      '/guide/': [
+        {
+          text: 'Guide',
+          items: [
+            { text: 'Getting Started', link: '/guide/getting-started' },
+            { text: 'Cross-Repo Development', link: '/guide/cross-repo-dev' },
+          ],
+        },
+      ],
+    },
     socialLinks: [
       { icon: 'github', link: 'https://github.com/hanfour/multi-repo-agent' },
     ],
