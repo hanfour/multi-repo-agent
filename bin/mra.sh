@@ -43,6 +43,8 @@ source "$MRA_DIR/lib/lint.sh"
 source "$MRA_DIR/lib/review-prompt.sh"
 source "$MRA_DIR/lib/review.sh"
 source "$MRA_DIR/lib/review-debate.sh"
+source "$MRA_DIR/lib/personas.sh"
+source "$MRA_DIR/lib/review-personas.sh"
 source "$MRA_DIR/lib/pkb.sh"
 source "$MRA_DIR/lib/eval.sh"
 
@@ -507,7 +509,15 @@ main() {
     review)
       shift
       local workspace; workspace=$(resolve_workspace)
-      review_project "$workspace" "$@"
+      local review_args=() personas_flag=false
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --personas) personas_flag=true; shift ;;
+          *) review_args+=("$1"); shift ;;
+        esac
+      done
+      export MRA_REVIEW_PERSONAS="$personas_flag"
+      review_project "$workspace" "${review_args[@]}"
       ;;
 
     analyze)

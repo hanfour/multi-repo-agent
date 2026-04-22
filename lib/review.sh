@@ -59,6 +59,8 @@ review_project() {
     return 1
   fi
 
+  local review_personas_flag="${MRA_REVIEW_PERSONAS:-false}"
+
   local project_dir="$workspace/$project"
   if [[ ! -d "$project_dir" ]]; then
     log_error "$project: directory not found" "review"
@@ -181,6 +183,47 @@ review_project() {
   local mra_dir
   mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+  # ---- Persona-based review path (opt-in via --personas) ----
+  # Reuses the debate path's post-synthesis rendering via the _render_review_json helper.
+  if [[ "$review_personas_flag" == "true" ]]; then
+    # Resolve base + diff (same as debate path does internally)
+    local resolved_base_p="$base_ref"
+    if [[ -d "$project_dir/.git" ]]; then
+      if ! git -C "$project_dir" rev-parse --verify "$base_ref" &>/dev/null; then
+        if git -C "$project_dir" rev-parse --verify "origin/$base_ref" &>/dev/null; then
+          resolved_base_p="origin/$base_ref"
+        fi
+      fi
+    fi
+    local persona_diff persona_changed
+    persona_diff=$(git -C "$project_dir" diff "${resolved_base_p}...HEAD" 2>/dev/null || \
+                   git -C "$project_dir" diff "${resolved_base_p}" HEAD 2>/dev/null || \
+                   echo "(diff unavailable)")
+    persona_changed=$(git -C "$project_dir" diff --name-only "${resolved_base_p}...HEAD" 2>/dev/null || \
+                      git -C "$project_dir" diff --name-only "${resolved_base_p}" HEAD 2>/dev/null || \
+                      echo "")
+    local persona_lang=""
+    [[ -n "$output_language" ]] && persona_lang="Use ${output_language} for all output."
+    local persona_focused="$claude_focused_dirs_str"
+    [[ -z "$persona_focused" ]] && persona_focused="$claude_add_dirs_str"
+
+    local persona_findings
+    persona_findings="$(run_persona_review \
+      "$project" "$project_dir" "$persona_diff" "$persona_changed" \
+      "$(default_review_personas)" "$consumers" "$persona_lang" "$model" \
+      "$claude_add_dirs_str" "$pkb_context")"
+
+    local review_json
+    review_json=$(run_synthesize \
+      "$project" "$project_dir" "$persona_diff" "$persona_changed" \
+      "$persona_findings" "" "$consumers" "$has_api_change" \
+      "$persona_lang" "$model" "$persona_focused" "$mra_dir")
+
+    _render_review_json "$review_json" "$output_mode" "$project_dir" "$pr_number" "personas" || return 1
+    _review_pkb_auto_update "$project" "$project_dir" "$persona_changed" "$output_language" "$review_json" &
+    return
+  fi
+
   # ===================================================================
   # DEBATE MODE: multi-agent adversarial review
   # ===================================================================
@@ -192,35 +235,7 @@ review_project() {
       "$output_language" "$model" "$claude_add_dirs_str" "$claude_focused_dirs_str" \
       "$pkb_context")
 
-    if [[ -z "$review_json" ]]; then
-      log_error "debate review returned empty response" "review"
-      return 1
-    fi
-
-    review_json=$(extract_json "$review_json")
-
-    if [[ "$output_mode" == "terminal" ]]; then
-      # Print formatted output
-      if echo "$review_json" | jq . &>/dev/null; then
-        local status summary
-        status=$(echo "$review_json" | jq -r '.status')
-        summary=$(echo "$review_json" | jq -r '.summary')
-        echo ""
-        echo "Status: $status"
-        echo "Summary: $summary"
-        echo ""
-        echo "$review_json" | jq -r '.comments[]? | "- [\(.severity)] \(.path):\(.line) — \(.body)"'
-      else
-        echo "$review_json"
-      fi
-    else
-      if ! echo "$review_json" | jq . &>/dev/null; then
-        log_error "debate did not produce valid JSON. Raw output:" "review"
-        echo "$review_json"
-        return 1
-      fi
-      post_inline_review "$project_dir" "$pr_number" "$review_json"
-    fi
+    _render_review_json "$review_json" "$output_mode" "$project_dir" "$pr_number" "debate" || return 1
 
     # Auto-update PKB after debate review (background, non-blocking)
     _review_pkb_auto_update "$project" "$project_dir" "$changed_files_for_strategy" "$output_language" "$review_json" &
@@ -287,6 +302,41 @@ ${prompt}"
 
   # Auto-update PKB after single-pass review (background, non-blocking)
   _review_pkb_auto_update "$project" "$project_dir" "$changed_files_for_strategy" "$output_language" "${review_json:-}" &
+}
+
+# Render review JSON to terminal or post to GitHub PR — shared by debate & persona paths.
+# Returns 0 on success, 1 on empty/invalid response.
+_render_review_json() {
+  local review_json="$1" output_mode="$2" project_dir="$3" pr_number="$4" source_label="${5:-review}"
+
+  if [[ -z "$review_json" ]]; then
+    log_error "${source_label} review returned empty response" "review"
+    return 1
+  fi
+
+  review_json=$(extract_json "$review_json")
+
+  if [[ "$output_mode" == "terminal" ]]; then
+    if echo "$review_json" | jq . &>/dev/null; then
+      local status summary
+      status=$(echo "$review_json" | jq -r '.status')
+      summary=$(echo "$review_json" | jq -r '.summary')
+      echo ""
+      echo "Status: $status"
+      echo "Summary: $summary"
+      echo ""
+      echo "$review_json" | jq -r '.comments[]? | "- [\(.severity)] \(.path):\(.line) — \(.body)"'
+    else
+      echo "$review_json"
+    fi
+  else
+    if ! echo "$review_json" | jq . &>/dev/null; then
+      log_error "${source_label} did not produce valid JSON. Raw output:" "review"
+      echo "$review_json"
+      return 1
+    fi
+    post_inline_review "$project_dir" "$pr_number" "$review_json"
+  fi
 }
 
 # Background PKB update after review — only runs if PKB exists
