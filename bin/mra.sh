@@ -45,6 +45,7 @@ source "$MRA_DIR/lib/review.sh"
 source "$MRA_DIR/lib/review-debate.sh"
 source "$MRA_DIR/lib/personas.sh"
 source "$MRA_DIR/lib/review-personas.sh"
+source "$MRA_DIR/lib/plan-council.sh"
 source "$MRA_DIR/lib/pkb.sh"
 source "$MRA_DIR/lib/eval.sh"
 
@@ -83,6 +84,7 @@ Commands:
   notify [setup|status|test]    Manage notifications
   lint <project|--all>          Check JS/TS BLOCKER rules
   review <project> [--pr N] [--no-debate]  Code review (debate by default)
+  plan <project> "<task>" [--model M]  Multi-expert implementation plan
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -544,6 +546,42 @@ main() {
       output_language=$(config_get "outputLanguage" 2>/dev/null)
       [[ -z "$output_language" || "$output_language" == "null" ]] && output_language=""
       pkb_generate "$project" "$project_dir" "$model" "$output_language"
+      ;;
+
+    plan)
+      shift
+      local plan_project="" plan_task="" plan_model="sonnet"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --model)
+            [[ $# -lt 2 ]] && { log_error "--model requires a value" "plan"; exit 1; }
+            plan_model="$2"; shift 2 ;;
+          -*) log_error "unknown option: $1" "plan"; exit 1 ;;
+          *)
+            if [[ -z "$plan_project" ]]; then
+              plan_project="$1"
+            else
+              plan_task+="${plan_task:+ }$1"
+            fi
+            shift ;;
+        esac
+      done
+      if [[ -z "$plan_project" || -z "$plan_task" ]]; then
+        log_error "usage: mra plan <project> \"<task>\" [--model <model>]" "plan"; exit 1
+      fi
+      local workspace; workspace=$(resolve_workspace)
+      local project_dir="$workspace/$plan_project"
+      [[ ! -d "$project_dir" ]] && { log_error "$plan_project: not found" "plan"; exit 1; }
+
+      local lang=""
+      lang=$(config_get "outputLanguage" 2>/dev/null); [[ "$lang" == "null" ]] && lang=""
+      local lang_directive=""; [[ -n "$lang" ]] && lang_directive="Use ${lang} for all output."
+      local pkb_context=""
+      pkb_context=$(pkb_build_context "$project_dir" "" "standard" 2>/dev/null || echo "")
+
+      local add_dirs="--add-dir $project_dir"
+      run_plan_council "$plan_project" "$project_dir" "$plan_task" \
+        "$(default_plan_personas)" "$plan_model" "$add_dirs" "$pkb_context" "$lang_directive"
       ;;
 
     eval-review)
