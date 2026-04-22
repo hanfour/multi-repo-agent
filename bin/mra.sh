@@ -536,8 +536,7 @@ main() {
         exit 1
       fi
       local workspace; workspace=$(resolve_workspace)
-      export MRA_REVIEW_PERSONAS="$personas_flag"
-      review_project "$workspace" "${review_args[@]}"
+      MRA_REVIEW_PERSONAS="$personas_flag" review_project "$workspace" "${review_args[@]}"
       ;;
 
     analyze)
@@ -597,7 +596,7 @@ main() {
       local pkb_context=""
       pkb_context=$(pkb_build_context "$project_dir" "" "standard" 2>/dev/null || echo "")
 
-      local add_dirs="--add-dir $project_dir"
+      local add_dirs="--add-dir=$project_dir"
       run_plan_council "$plan_project" "$project_dir" "$plan_task" \
         "$(default_plan_personas)" "$plan_model" "$add_dirs" "$pkb_context" "$lang_directive"
       ;;
@@ -631,7 +630,7 @@ main() {
       lang=$(config_get "outputLanguage" 2>/dev/null); [[ "$lang" == "null" ]] && lang=""
       local lang_directive=""; [[ -n "$lang" ]] && lang_directive="Use ${lang} for all output."
 
-      local add_dirs="--add-dir $project_dir"
+      local add_dirs="--add-dir=$project_dir"
       run_test_audit "$audit_project" "$project_dir" "$audit_model" "$add_dirs" "$lang_directive"
       ;;
 

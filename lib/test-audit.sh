@@ -68,17 +68,22 @@ run_test_audit() {
   local pids=() results=() err_files=() file_list=()
   local active=0
 
+  # wait -n requires bash 4.3+; detect once.
+  local _wait_n_supported=false
+  if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) )); then
+    _wait_n_supported=true
+  fi
+
   local f
   while IFS= read -r f; do
     [[ -z "$f" ]] && continue
 
-    # Bound parallelism: if we already have max_parallel in flight,
-    # wait for any one to finish before dispatching another.
+    # Bound parallelism: wait for a slot to open before dispatching another.
     if (( active >= max_parallel )); then
-      if wait -n 2>/dev/null; then
-        :
+      if [[ "$_wait_n_supported" == "true" ]]; then
+        wait -n 2>/dev/null || true
       else
-        # Fallback for older bash: wait on any one (best-effort)
+        # Bash <4.3: block on the oldest pid.
         wait "${pids[0]}" 2>/dev/null || true
       fi
       active=$((active - 1))

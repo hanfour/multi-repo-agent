@@ -159,6 +159,7 @@ TEMPLATE
   synth_prompt="${synth_prompt//%EXPERTS%/$all}"
   synth_prompt="${synth_prompt//%LANG%/$lang_directive}"
 
+  local synth_out; synth_out=$(mktemp)
   local synth_err; synth_err=$(mktemp)
   local rc=0
   # shellcheck disable=SC2086
@@ -167,10 +168,21 @@ TEMPLATE
     --model "$model" \
     --max-turns 4 \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>"$synth_err" || rc=$?
+    --setting-sources "project" >"$synth_out" 2>"$synth_err" || rc=$?
+
   if [[ $rc -ne 0 ]]; then
     log_warn >&2 "[plan] synthesizer failed (rc=$rc) — stderr: $synth_err" "plan"
+    rm -f "$synth_out"
     return $rc
   fi
+
+  if [[ ! -s "$synth_out" ]]; then
+    log_warn >&2 "[plan] synthesizer returned empty output — see stderr: $synth_err" "plan"
+    rm -f "$synth_out"
+    return 1
+  fi
+
+  cat "$synth_out"
+  rm -f "$synth_out"
   [[ -s "$synth_err" ]] || rm -f "$synth_err"
 }

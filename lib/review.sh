@@ -185,6 +185,9 @@ review_project() {
 
   # ---- Persona-based review path (opt-in via --personas) ----
   # Reuses the debate path's post-synthesis rendering via the _render_review_json helper.
+  if [[ "$review_personas_flag" == "true" && -n "$force_strategy" ]]; then
+    log_warn "--strategy '$force_strategy' is ignored when --personas is set (persona path overrides strategy selection)" "review"
+  fi
   if [[ "$review_personas_flag" == "true" ]]; then
     # Resolve base + diff (same as debate path does internally)
     local resolved_base_p="$base_ref"
