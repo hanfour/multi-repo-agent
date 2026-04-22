@@ -8,6 +8,8 @@ FOCUS:
 - OpenAPI / JSON Schema / tRPC router drift vs implementation
 - Event payload contracts (pub/sub, webhooks)
 
+SCOPE NOTE: owns shape and identity of public contracts (API exports, response schemas, event payloads). Runtime cost belongs to `performance-hawk`.
+
 METHOD:
 1. Read diff — flag every signature-level change.
 2. Use provided CONSUMER list — grep each consumer repo for old identifiers.

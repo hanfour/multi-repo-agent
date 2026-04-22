@@ -8,6 +8,8 @@ FOCUS:
 - Client bundle bloat, missing code-splitting, render-blocking assets
 - Cache keys, TTLs, missing memoization
 
+SCOPE NOTE: owns runtime cost (CPU, I/O wait, memory, bundle size). Contract shape and identity belong to `api-contract-guardian`.
+
 METHOD:
 1. Read diff — mark every hot-path (request handler, loop, render).
 2. For each, check surrounding code for the above categories.
