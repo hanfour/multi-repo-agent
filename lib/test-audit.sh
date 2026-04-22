@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# mra test-audit: audits project tests against Kent Beck 11 principles
+# via the test-architect persona.
+
+# find_test_files <dir>: list test files (macOS/Linux compatible)
+find_test_files() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 0
+  find "$dir" \
+    \( -path '*/node_modules' -o -path '*/.git' -o -path '*/dist' -o -path '*/build' -o -path '*/vendor' \) -prune \
+    -o -type f \( \
+      -name '*.test.*' -o -name '*_test.*' -o -name '*.spec.*' \
+    \) -print 2>/dev/null
+}
+
+# build_audit_prompt <file_path> <file_contents> [lang_directive]
+# Uses safe placeholder substitution (no command eval on content)
+build_audit_prompt() {
+  local file_path="$1" file_contents="$2" lang_directive="${3:-}"
+
+  local persona_body
+  persona_body="$(load_persona "test-architect")" || return 1
+
+  local template
+  template=$(cat <<'TEMPLATE'
+%PERSONA_BODY%
+
+## File under audit: %FILE_PATH%
+
+```
+%FILE_CONTENTS%
+```
+
+## Your Task
+Audit this test file against the 11 PRINCIPLES listed in your role.
+For each violation, produce a finding with file:line and the principle number.
+
+%LANG%
+TEMPLATE
+)
+
+  template="${template//%PERSONA_BODY%/$persona_body}"
+  template="${template//%FILE_PATH%/$file_path}"
+  template="${template//%FILE_CONTENTS%/$file_contents}"
+  template="${template//%LANG%/$lang_directive}"
+  printf '%s\n' "$template"
+}
+
+# run_test_audit <project> <project_dir> <model> <add_dirs> [lang_directive]
+# Audits each discovered test file in parallel (bounded by MRA_AUDIT_PARALLEL, default 5)
+run_test_audit() {
+  local project="$1" project_dir="$2" model="$3" claude_add_dirs="$4" lang_directive="${5:-}"
+
+  log_progress >&2 "[test-audit] discovering tests in $project..." "test-audit"
+
+  local files
+  files=$(find_test_files "$project_dir")
+  if [[ -z "$files" ]]; then
+    log_warn >&2 "no test files found" "test-audit"
+    echo '{"status":"NO_TESTS","findings":[]}'
+    return
+  fi
+
+  local count; count=$(echo "$files" | wc -l | tr -d ' ')
+  log_info >&2 "[test-audit] auditing $count test files..." "test-audit"
+
+  local max_parallel="${MRA_AUDIT_PARALLEL:-5}"
+  local pids=() results=() err_files=() file_list=()
+  local running=0
+
+  local f
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    local out err
+    out=$(mktemp); err=$(mktemp)
+    results+=("$out")
+    err_files+=("$err")
+    file_list+=("$f")
+    (
+      local body
+      body=$(head -c 50000 "$f" 2>/dev/null || echo "")
+      local prompt
+      prompt=$(build_audit_prompt "$f" "$body" "$lang_directive")
+      # shellcheck disable=SC2086
+      claude -p "$prompt" \
+        $claude_add_dirs \
+        --model "$model" \
+        --max-turns 3 \
+        --disallowedTools "Write,Edit,NotebookEdit" \
+        --setting-sources "project"
+    ) > "$out" 2> "$err" &
+    pids+=("$!")
+    running=$((running + 1))
+    if [[ $running -ge $max_parallel ]]; then
+      # Wait for the first pid to finish to free a slot
+      if ! wait "${pids[0]}"; then
+        log_warn >&2 "[test-audit] ${file_list[0]} failed (stderr: ${err_files[0]})" "test-audit"
+      fi
+      pids=("${pids[@]:1}")
+      running=$((running - 1))
+    fi
+  done <<< "$files"
+
+  # Drain remaining
+  local pid
+  for pid in "${pids[@]}"; do wait "$pid" || true; done
+
+  local all=""
+  local i
+  for i in "${!results[@]}"; do
+    local content
+    content="$(cat "${results[$i]}")"
+    if [[ -n "$content" ]]; then
+      all+="## ${file_list[$i]}"$'\n\n'
+      all+="$content"$'\n\n'
+    fi
+    rm -f "${results[$i]}"
+  done
+
+  local e
+  for e in "${err_files[@]}"; do
+    [[ -s "$e" ]] || rm -f "$e"
+  done
+
+  echo "$all"
+}
