@@ -15,7 +15,7 @@
 
 > 在 repo A 修改一個 API。mra 自動找到 repos B、C、D 中所有的下游使用者 — 檢視影響範圍、更新程式碼，並建立 PR。全部只需一個指令。
 
-**v2.2.0** | 28 個 CLI 指令 | 6 個 AI 代理 | 9 個 MCP 工具 | 20 個測試套件
+**v2.2.0** | 31 個 CLI 指令 | 6 個 AI 代理 | 9 個 MCP 工具 | 24 個測試套件
 
 ---
 
@@ -99,6 +99,27 @@ mra review my-api --strategy debate  # 強制使用完整審查
 ```
 
 所有審查代理都是**唯讀模式**（`--disallowedTools "Write,Edit"`）— 只能讀取。
+
+### 2b. Persona 模式 Review（可選）
+
+當一般的「影響分析 / 品質稽核」分工不足以應付特定 PR 時，可改以五位具名領域專家平行審查：
+
+```bash
+mra review my-api --personas          # 啟用 5 位具名領域專家
+mra review my-api --pr 123 --personas # 帶 personas 的 PR 審查
+```
+
+| Persona | 聚焦領域 |
+|---------|-------|
+| `security-auditor` | 機密外洩、注入、身份驗證、反序列化（Troy Hunt 風格） |
+| `api-contract-guardian` | 跨倉庫簽章漂移、回應結構變更 |
+| `performance-hawk` | N+1 查詢、熱路徑 I/O、bundle 膨脹（Vercel 風格） |
+| `refactoring-sage` | 程式碼異味、命名、內聚（Martin Fowler 風格） |
+| `test-architect` | Kent Beck 的 11 條測試原則 |
+
+每個 persona 都有聚焦的檢視角度，且共用相同的嚴重度階層（CRITICAL/HIGH/MEDIUM）。所有發現會被合併並綜合為與辯論模式相同的 JSON — PR 行內評論行為一致。
+
+若要新增自訂 persona，只需在 `agents/personas/` 下放入一個 markdown 檔案。詳見 `agents/personas/README.md`。
 
 ### 3. 專案知識庫 (PKB)
 
@@ -278,6 +299,23 @@ mra review my-api --pr 123       # 行內 PR 審查
 mra rollback my-api              # 還原至最新快照
 ```
 
+#### 多專家計畫
+
+```bash
+mra plan my-api "Migrate session tokens to JWT"
+```
+
+五位領域專家各自獨立提出實作策略，接著由綜合器合併為一份統一計畫（合併後的檔案清單、依風險排序的疑慮、執行步驟）。輸出會寫到 stdout — 可透過管線導向檔案保存。
+
+#### 測試品質稽核
+
+```bash
+mra test-audit frontend-app        # 以 Kent Beck 11 條原則稽核所有測試檔
+MRA_AUDIT_PARALLEL=3 mra test-audit frontend-app  # 限制同時稽核的併發數
+```
+
+會自動尋找 `*.test.*`、`*_test.*`、`*.spec.*` 檔案（排除 `node_modules`、`dist`、`build`、`vendor`、`.git`），並透過 `test-architect` persona 針對 Kent Beck 的 11 條測試原則逐一稽核。
+
 </details>
 
 ### 程式碼審查
@@ -400,7 +438,9 @@ mra doctor
 
 | 指令 | 說明 |
 |---------|-------------|
-| `mra review <project> [--pr N] [--strategy S] [--base ref]` | 程式碼審查 |
+| `mra review <project> [--pr N] [--strategy S] [--base ref] [--personas]` | 程式碼審查（加上 --personas 啟用 5 位具名專家） |
+| `mra plan <project> "<task>" [--model M]` | 多專家實作計畫 |
+| `mra test-audit <project> [--model M]` | Kent Beck 11 條原則測試稽核 |
 | `mra analyze <project> [--model M]` | 產生 PKB |
 | `mra eval-review <project> --pr N [--baseline file]` | 評估審查品質 |
 
