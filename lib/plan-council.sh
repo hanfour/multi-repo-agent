@@ -13,18 +13,18 @@ build_plan_prompt() {
   persona_body="$(load_persona "$persona")" || return 1
 
   local pkb_section=""
-  [[ -n "$pkb_context" ]] && pkb_section="$pkb_context
+  if [[ -n "$pkb_context" ]]; then
+    pkb_section="${pkb_context}"$'\n\nUse the knowledge base above to ground every suggestion in the real code.\n'
+  fi
 
-Use the knowledge base above to ground every suggestion in the real code.
-"
+  local template
+  template=$(cat <<'TEMPLATE'
+%PERSONA_BODY%
 
-  cat <<PROMPT
-${persona_body}
-
-${pkb_section}
+%PKB_SECTION%
 
 ## Task
-${task}
+%TASK%
 
 ## Your Role in Council Plan
 You are ONE of several domain experts. Think independently. Do not defer to what another expert might say — your value is your unique lens.
@@ -43,7 +43,7 @@ Propose a concrete implementation strategy from YOUR domain's perspective:
 - <bullet list>
 
 **Files to touch**
-- \`path/to/file\` — <why>
+- `path/to/file` — <why>
 
 **Risks**
 - [CRITICAL] <risk + mitigation>
@@ -52,8 +52,16 @@ Propose a concrete implementation strategy from YOUR domain's perspective:
 **Required tests**
 - <test description>
 
-${lang_directive}
-PROMPT
+%LANG%
+TEMPLATE
+)
+
+  # Safe substitution via bash parameter expansion (no command evaluation)
+  template="${template//%PERSONA_BODY%/$persona_body}"
+  template="${template//%PKB_SECTION%/$pkb_section}"
+  template="${template//%TASK%/$task}"
+  template="${template//%LANG%/$lang_directive}"
+  printf '%s\n' "$template"
 }
 
 run_plan_council() {
@@ -94,10 +102,10 @@ run_plan_council() {
   done
 
   local all=""
-  local f
-  for f in "${result_files[@]}"; do
-    all+="$(cat "$f")"$'\n\n---\n\n'
-    rm -f "$f"
+  for i in "${!result_files[@]}"; do
+    all+="### ${persona_names[$i]}"$'\n\n'
+    all+="$(cat "${result_files[$i]}")"$'\n\n---\n\n'
+    rm -f "${result_files[$i]}"
   done
   local e
   for e in "${err_files[@]}"; do
@@ -105,15 +113,15 @@ run_plan_council() {
   done
 
   log_progress >&2 "[plan] synthesizing unified plan..." "plan"
-  local synth_prompt
-  synth_prompt=$(cat <<PROMPT
+  local synth_template
+  synth_template=$(cat <<'TEMPLATE'
 You are the council synthesizer. Below are independent plans from N domain experts for the same task.
 
 ## Task
-${task}
+%TASK%
 
 ## Expert Perspectives
-${all}
+%EXPERTS%
 
 ## Your Job
 Produce ONE unified implementation plan that:
@@ -123,14 +131,14 @@ Produce ONE unified implementation plan that:
 4. Lists required tests deduped across experts.
 5. Ends with a numbered step-by-step TODO list ready for execution.
 
-${lang_directive}
+%LANG%
 
 ## Output Format
 
 # Unified Plan: <task>
 
 ## Consolidated Files
-- \`path\` — <why, which expert raised it>
+- `path` — <why, which expert raised it>
 
 ## Risks (sorted)
 - [CRITICAL] [expert] <risk>
@@ -142,14 +150,27 @@ ${lang_directive}
 ## Execution Steps
 1. <step>
 2. <step>
-PROMPT
+TEMPLATE
 )
 
+  # Safe substitution via bash parameter expansion (no command evaluation)
+  local synth_prompt="$synth_template"
+  synth_prompt="${synth_prompt//%TASK%/$task}"
+  synth_prompt="${synth_prompt//%EXPERTS%/$all}"
+  synth_prompt="${synth_prompt//%LANG%/$lang_directive}"
+
+  local synth_err; synth_err=$(mktemp)
+  local rc=0
   # shellcheck disable=SC2086
   claude -p "$synth_prompt" \
     $claude_add_dirs \
     --model "$model" \
     --max-turns 4 \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project" 2>"$synth_err" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    log_warn >&2 "[plan] synthesizer failed (rc=$rc) — stderr: $synth_err" "plan"
+    return $rc
+  fi
+  [[ -s "$synth_err" ]] || rm -f "$synth_err"
 }
