@@ -4,6 +4,9 @@
     <strong>AI-powered development across multiple repositories — from a single terminal.</strong>
   </p>
   <p align="center">
+    <a href="https://hanfour.github.io/multi-repo-agent/">📖 Documentation Site</a>
+  </p>
+  <p align="center">
     <a href="./README.md">English</a> |
     <a href="./docs/README.zh-TW.md">繁體中文</a> |
     <a href="./docs/README.ja.md">日本語</a> |
@@ -41,7 +44,11 @@ Modern software lives across many repos. One API change can silently break three
 # Install
 git clone https://github.com/hanfour/multi-repo-agent.git ~/multi-repo-agent
 cd ~/multi-repo-agent && bash install.sh && source ~/.zshrc
+```
 
+> Full docs: https://hanfour.github.io/multi-repo-agent/
+
+```bash
 # Initialize workspace
 mra init ~/workspace --git-org git@github.com:my-org
 
