@@ -9,10 +9,10 @@ export default defineConfig({
   head: [
     ['meta', { name: 'theme-color', content: '#3b82f6' }],
   ],
-  ignoreDeadLinks: [/^\/features\//],
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
+      { text: 'Features', link: '/features/personas' },
       { text: 'Commands', link: '/commands/' },
       { text: 'GitHub', link: 'https://github.com/hanfour/multi-repo-agent' },
     ],
@@ -23,6 +23,15 @@ export default defineConfig({
           items: [
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Cross-Repo Development', link: '/guide/cross-repo-dev' },
+          ],
+        },
+      ],
+      '/features/': [
+        {
+          text: 'Features',
+          items: [
+            { text: 'Personas', link: '/features/personas' },
+            { text: 'Mailbox Debate', link: '/features/debate' },
           ],
         },
       ],
