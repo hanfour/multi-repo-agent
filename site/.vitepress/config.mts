@@ -14,6 +14,8 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Features', link: '/features/personas' },
       { text: 'Commands', link: '/commands/' },
+      { text: 'Architecture', link: '/architecture' },
+      { text: 'FAQ', link: '/faq' },
       { text: 'GitHub', link: 'https://github.com/hanfour/multi-repo-agent' },
     ],
     sidebar: {
