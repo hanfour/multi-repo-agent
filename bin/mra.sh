@@ -512,7 +512,6 @@ main() {
 
     review)
       shift
-      local workspace; workspace=$(resolve_workspace)
       local review_args=() personas_flag=false
       while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -520,6 +519,23 @@ main() {
           *) review_args+=("$1"); shift ;;
         esac
       done
+      # Check if user supplied a project name (first non-flag arg that isn't a value for --pr/--base/--model/--strategy)
+      local has_project=false
+      local skip_next=false
+      for a in "${review_args[@]}"; do
+        if [[ "$skip_next" == "true" ]]; then skip_next=false; continue; fi
+        case "$a" in
+          --pr|--base|--model|--strategy) skip_next=true ;;
+          --no-debate) ;;
+          -*) ;;
+          *) has_project=true; break ;;
+        esac
+      done
+      if [[ "$has_project" == "false" ]]; then
+        log_error "usage: mra review <project> [--pr <N>] [--base <ref>] [--personas] [--strategy S] [--no-debate]" "review"
+        exit 1
+      fi
+      local workspace; workspace=$(resolve_workspace)
       export MRA_REVIEW_PERSONAS="$personas_flag"
       review_project "$workspace" "${review_args[@]}"
       ;;

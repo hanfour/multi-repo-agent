@@ -14,34 +14,42 @@ build_persona_prompt() {
   persona_body="$(load_persona "$persona")" || return 1
 
   local pkb_section=""
-  [[ -n "$pkb_context" ]] && pkb_section="$pkb_context
-
-Use the knowledge base above. Only read source files to verify findings.
-"
+  if [[ -n "$pkb_context" ]]; then
+    pkb_section="${pkb_context}"$'\n\nUse the knowledge base above. Only read source files to verify findings.\n'
+  fi
 
   local consumer_section=""
-  [[ -n "$consumers" ]] && consumer_section="
-Consumer projects: $consumers
-Grep them for references to any changed/removed identifiers.
-"
+  if [[ -n "$consumers" ]]; then
+    consumer_section=$'\nConsumer projects: '"${consumers}"$'\nGrep them for references to any changed/removed identifiers.\n'
+  fi
 
-  cat <<PROMPT
-${persona_body}
+  local template
+  template=$(cat <<'TEMPLATE'
+%PERSONA_BODY%
 
-${pkb_section}${consumer_section}
+%PKB_SECTION%%CONSUMER_SECTION%
 
 ## Diff
-\`\`\`diff
-${diff}
-\`\`\`
+```diff
+%DIFF%
+```
 
 ## Changed Files
-${changed_files}
+%CHANGED_FILES%
 
-${lang_directive}
+%LANG%
 
 IMPORTANT: Every finding MUST include exact file:line evidence from the source.
-PROMPT
+TEMPLATE
+)
+
+  template="${template//%PERSONA_BODY%/$persona_body}"
+  template="${template//%PKB_SECTION%/$pkb_section}"
+  template="${template//%CONSUMER_SECTION%/$consumer_section}"
+  template="${template//%DIFF%/$diff}"
+  template="${template//%CHANGED_FILES%/$changed_files}"
+  template="${template//%LANG%/$lang_directive}"
+  printf '%s\n' "$template"
 }
 
 run_persona_review() {
