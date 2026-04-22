@@ -6,10 +6,10 @@ export default defineConfig({
   description: 'AI-powered development across multiple repositories — from a single terminal',
   lastUpdated: true,
   cleanUrls: true,
-  ignoreDeadLinks: [/^\/commands\//],
   head: [
     ['meta', { name: 'theme-color', content: '#3b82f6' }],
   ],
+  ignoreDeadLinks: [/^\/features\//],
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
@@ -23,6 +23,18 @@ export default defineConfig({
           items: [
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Cross-Repo Development', link: '/guide/cross-repo-dev' },
+          ],
+        },
+      ],
+      '/commands/': [
+        {
+          text: 'Commands',
+          items: [
+            { text: 'Overview', link: '/commands/' },
+            { text: 'mra review', link: '/commands/review' },
+            { text: 'mra plan', link: '/commands/plan' },
+            { text: 'mra test-audit', link: '/commands/test-audit' },
+            { text: 'mra analyze (PKB)', link: '/commands/pkb' },
           ],
         },
       ],
