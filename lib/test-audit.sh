@@ -66,21 +66,38 @@ run_test_audit() {
 
   local max_parallel="${MRA_AUDIT_PARALLEL:-5}"
   local pids=() results=() err_files=() file_list=()
-  local running=0
+  local active=0
 
   local f
   while IFS= read -r f; do
     [[ -z "$f" ]] && continue
+
+    # Bound parallelism: if we already have max_parallel in flight,
+    # wait for any one to finish before dispatching another.
+    if (( active >= max_parallel )); then
+      if wait -n 2>/dev/null; then
+        :
+      else
+        # Fallback for older bash: wait on any one (best-effort)
+        wait "${pids[0]}" 2>/dev/null || true
+      fi
+      active=$((active - 1))
+    fi
+
     local out err
     out=$(mktemp); err=$(mktemp)
     results+=("$out")
     err_files+=("$err")
     file_list+=("$f")
     (
-      local body
+      local raw_size body trunc_note=""
+      raw_size=$(wc -c < "$f" 2>/dev/null || echo 0)
       body=$(head -c 50000 "$f" 2>/dev/null || echo "")
+      if (( raw_size > 50000 )); then
+        trunc_note=$'\n\n[TRUNCATED at 50000 bytes; original size: '"$raw_size"$' bytes]'
+      fi
       local prompt
-      prompt=$(build_audit_prompt "$f" "$body" "$lang_directive")
+      prompt=$(build_audit_prompt "$f" "${body}${trunc_note}" "$lang_directive")
       # shellcheck disable=SC2086
       claude -p "$prompt" \
         $claude_add_dirs \
@@ -90,23 +107,24 @@ run_test_audit() {
         --setting-sources "project"
     ) > "$out" 2> "$err" &
     pids+=("$!")
-    running=$((running + 1))
-    if [[ $running -ge $max_parallel ]]; then
-      # Wait for the first pid to finish to free a slot
-      if ! wait "${pids[0]}"; then
-        log_warn >&2 "[test-audit] ${file_list[0]} failed (stderr: ${err_files[0]})" "test-audit"
-      fi
-      pids=("${pids[@]:1}")
-      running=$((running - 1))
-    fi
+    active=$((active + 1))
   done <<< "$files"
 
-  # Drain remaining
-  local pid
-  for pid in "${pids[@]}"; do wait "$pid" || true; done
+  # Drain remaining pids by index, warning on failures with correct file paths.
+  local i pid rc
+  for i in "${!pids[@]}"; do
+    pid="${pids[$i]}"
+    if ! wait "$pid" 2>/dev/null; then
+      rc=$?
+      # rc may be 127 if already reaped by `wait -n` — only warn when there's real stderr
+      if [[ -s "${err_files[$i]}" ]]; then
+        log_warn >&2 "[test-audit] ${file_list[$i]} failed (rc=$rc) — stderr: ${err_files[$i]}" "test-audit"
+      fi
+    fi
+  done
 
+  # Concatenate findings with file attribution; clean up.
   local all=""
-  local i
   for i in "${!results[@]}"; do
     local content
     content="$(cat "${results[$i]}")"
@@ -117,6 +135,7 @@ run_test_audit() {
     rm -f "${results[$i]}"
   done
 
+  # Keep stderr logs only when non-empty (operator evidence for failures)
   local e
   for e in "${err_files[@]}"; do
     [[ -s "$e" ]] || rm -f "$e"
