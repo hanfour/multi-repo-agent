@@ -25,6 +25,12 @@ if [[ "$output" != *"ROLE:"* ]]; then
   echo "FAIL: persona missing ROLE: header"; ((errors++))
 fi
 
+for p in security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect; do
+  if ! load_persona "$p" >/dev/null 2>&1; then
+    echo "FAIL: persona $p did not load"; ((errors++))
+  fi
+done
+
 if [[ $errors -eq 0 ]]; then
   echo "PASS: all persona tests passed"
 else
