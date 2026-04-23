@@ -4,6 +4,9 @@
     <strong>AI 驅動的多倉庫開發 — 只需一個終端機。</strong>
   </p>
   <p align="center">
+    <a href="https://hanfour.github.io/multi-repo-agent/">📖 文件網站</a>
+  </p>
+  <p align="center">
     <a href="../README.md">English</a> |
     **繁體中文** |
     <a href="./README.ja.md">日本語</a> |
@@ -41,7 +44,11 @@
 # 安裝
 git clone https://github.com/hanfour/multi-repo-agent.git ~/multi-repo-agent
 cd ~/multi-repo-agent && bash install.sh && source ~/.zshrc
+```
 
+> 完整文件：https://hanfour.github.io/multi-repo-agent/
+
+```bash
 # 初始化工作區
 mra init ~/workspace --git-org git@github.com:my-org
 

@@ -4,3 +4,6 @@
 mcp-server/node_modules/
 mcp-server/dist/
 .claude/
+site/node_modules/
+site/.vitepress/dist/
+site/.vitepress/cache/
