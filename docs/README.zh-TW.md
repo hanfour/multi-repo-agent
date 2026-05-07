@@ -556,6 +556,15 @@ claude mcp add mra node ~/multi-repo-agent/mcp-server/dist/index.js
 
 9 個工具：`mra_status`、`mra_deps`、`mra_ask`、`mra_export`、`mra_diff`、`mra_doctor`、`mra_graph`、`mra_scan`、`mra_test`
 
+**限制工作區存取（共用機器強烈建議）：**
+
+```bash
+# 將 MCP server 釘住特定工作區根目錄；不在清單中的呼叫會被拒絕。
+export MRA_ALLOWED_WORKSPACES="$HOME/workspace:$HOME/sandbox"
+```
+
+未設定時，任何路徑都會被接受（open mode）；server 啟動會印警示訊息提醒鎖定。
+
 ### GitHub Actions
 
 ```bash
@@ -594,8 +603,35 @@ mra notify test     # 傳送測試通知
 | `db.json` | 資料庫設定 | 是 |
 | `dep-graph.json` | 自動產生的相依性圖表 | 否 |
 | `manual-deps.json` | 手動相依性覆寫 | 是 |
+| `lint-profile.json` | 選擇 lint 規則集（`{"profile":"oneAD"}` 或內嵌 `rules`） | 是 |
 | `notify.json` | Webhook 設定 | 是 |
 | `eval/` | 審查評估報告 | 否 |
+
+`repos.json`、`db.json`、`dep-graph.json`、`manual-deps.json` 與 scanner JSONL 紀錄的 JSON Schema 放在 [`schemas/`](../schemas/)。在 `.collab/*.json` 頂層加 `"$schema"` 即可在 IDE 內取得即時驗證；`mra doctor` 會自動跑結構檢查。
+
+> **⚠ 遷移提示（lint 預設已變更）**：早期版本在 `lib/lint.sh` 寫死 OneAD BLOCKER 規則。lint 現在改為 profile 驅動，預設 profile 為空。要恢復原行為，在工作區建立一行檔案：
+> ```bash
+> echo '{"profile":"oneAD"}' > <workspace>/.collab/lint-profile.json
+> ```
+
+**Lint Profiles** 收錄於 [`templates/lint-profiles/`](../templates/lint-profiles/)：
+
+| Profile | 用途 |
+|---------|-----|
+| `default` | 不含任何規則 — lint 不報任何違規 |
+| `oneAD` | OneAD 前端 BLOCKER 規則（no-interface / no-enum / no-any / no-non-null / no-var） |
+
+啟用方式：在 `<workspace>/.collab/lint-profile.json` 寫：
+
+```json
+{ "profile": "oneAD" }
+```
+
+或內嵌自訂規則（每條須含 `id`、`severity`、`pattern`、`message`、`line_excludes`、`file_excludes`）：
+
+```json
+{ "rules": [{ "id": "no-todo", "severity": "warn", "pattern": "TODO", "message": "TODO 未處理", "line_excludes": [], "file_excludes": [] }] }
+```
 
 全域設定：`~/multi-repo-agent/config.json`
 
@@ -633,6 +669,19 @@ mra notify test     # 傳送測試通知
 - PKB 語意搜尋（基於嵌入向量的檢索）
 - 跨倉庫 PKB 連結（共用型別契約）
 - 評估趨勢儀表板
+
+---
+
+## 開發
+
+```bash
+make test         # 執行 tests/ 下所有 shell 測試 + mcp-server node 測試
+make build        # tsc 編譯 mcp-server（incremental）
+make lint         # 對 lib/、bin/、scanners/、tests/、test.sh 跑 shellcheck
+make clean        # 移除 mcp-server build artifacts
+```
+
+`bash test.sh` 與 `make test` 是同一個入口，CI 也跑這個（見 `.github/workflows/repo-tests.yml`）。
 
 ---
 
