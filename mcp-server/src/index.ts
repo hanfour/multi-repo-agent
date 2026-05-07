@@ -7,6 +7,13 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { TOOLS, findTool } from "./tools.js";
 import { executeMra, stripAnsi } from "./mra-executor.js";
+import {
+  loadWorkspacePolicy,
+  assertWorkspaceAllowed,
+  WorkspaceNotAllowedError,
+} from "./workspace-policy.js";
+
+const policy = loadWorkspacePolicy();
 
 const server = new Server(
   {
@@ -53,6 +60,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
+  try {
+    assertWorkspaceAllowed(workspace, policy);
+  } catch (error) {
+    if (error instanceof WorkspaceNotAllowedError) {
+      return {
+        content: [{ type: "text", text: error.message }],
+        isError: true,
+      };
+    }
+    throw error;
+  }
+
   const mraArgs = tool.mraArgs(input);
   const timeout = "timeout" in tool ? (tool as { timeout: number }).timeout : 180000;
 
@@ -92,7 +111,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("mra MCP server started on stdio");
+  if (policy.allowedRoots.length === 0) {
+    console.error(
+      "mra MCP server started on stdio — WARNING: MRA_ALLOWED_WORKSPACES is empty; any workspace path will be accepted. Set MRA_ALLOWED_WORKSPACES=<root1>:<root2> to restrict.",
+    );
+  } else {
+    console.error(
+      `mra MCP server started on stdio — workspace allowlist: ${policy.allowedRoots.join(", ")}`,
+    );
+  }
 }
 
 main().catch((error: unknown) => {
