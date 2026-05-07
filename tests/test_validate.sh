@@ -64,6 +64,19 @@ else
   fail_test "valid .collab/*.json incorrectly rejected"
 fi
 
+# Files carrying a top-level $schema (for IDE hints) must still validate.
+cat > "$WS/.collab/repos.json" <<'JSON'
+{
+  "$schema": "https://hanfour.github.io/multi-repo-agent/schemas/repos.schema.json",
+  "repos": [{ "name": "alpha", "clone": true, "branch": "main", "description": "", "archived": false }]
+}
+JSON
+if validate_collab_files "$WS" 2>/dev/null; then
+  pass_test "repos.json with \$schema property passes validation"
+else
+  fail_test "repos.json with \$schema property incorrectly rejected"
+fi
+
 # 1. Corrupt dep-graph (missing projects)
 cat > "$WS/.collab/dep-graph.json" <<'JSON'
 { "version": 1, "workspace": "x", "gitOrg": "", "lastScan": "now" }

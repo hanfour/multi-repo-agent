@@ -43,14 +43,14 @@ if [[ -f "$MRA_DIR/mcp-server/package.json" ]]; then
     echo "   skipped: run 'npm --prefix mcp-server install' first"
     NODE_NOTE="(skipped: deps not installed)"
   else
-    local_log=$(mktemp)
-    if (cd "$MRA_DIR/mcp-server" && npm test --silent) >"$local_log" 2>&1; then
-      tail -8 "$local_log" | sed 's/^/   /'
+    npm_log=$(mktemp)
+    if (cd "$MRA_DIR/mcp-server" && npm test --silent) >"$npm_log" 2>&1; then
+      tail -8 "$npm_log" | sed 's/^/   /'
     else
       NODE_RC=1
-      tail -20 "$local_log" | sed 's/^/   /'
+      tail -20 "$npm_log" | sed 's/^/   /'
     fi
-    rm -f "$local_log"
+    rm -f "$npm_log"
   fi
 fi
 

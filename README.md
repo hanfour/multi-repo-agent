@@ -609,6 +609,14 @@ All workspace config lives in `<workspace>/.collab/`:
 
 JSON Schemas for `repos.json`, `db.json`, `dep-graph.json`, `manual-deps.json`, and scanner JSONL records live under [`schemas/`](./schemas/). Add `"$schema"` to the top of each `.collab/*.json` to get inline IDE validation. `mra doctor` runs structural checks automatically.
 
+> **⚠ Migration note (lint default changed)**: Earlier versions hardcoded the
+> OneAD BLOCKER rules in `lib/lint.sh`. Lint is now profile-driven and the
+> default profile is empty. To keep the previous behavior, drop a one-line
+> file in your workspace:
+> ```bash
+> echo '{"profile":"oneAD"}' > <workspace>/.collab/lint-profile.json
+> ```
+
 **Lint profiles** ship under [`templates/lint-profiles/`](./templates/lint-profiles/):
 
 | Profile | Use |
