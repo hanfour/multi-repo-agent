@@ -48,7 +48,7 @@ _graph_mermaid() {
     while IFS= read -r project; do
       [[ -z "$project" ]] && continue
       local type; type=$(jq -r --arg p "$project" '.projects[$p].type // "?"' "$graph_file")
-      echo "  $project[\"$project<br/>$type\"]"
+      echo "  ${project}[\"${project}<br/>${type}\"]"
       # deps (non-infra)
       while IFS= read -r dep; do
         [[ -z "$dep" ]] && continue
