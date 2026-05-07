@@ -103,9 +103,10 @@ run_test_audit() {
       fi
       local prompt
       prompt=$(build_audit_prompt "$f" "${body}${trunc_note}" "$lang_directive")
-      # shellcheck disable=SC2086
+      local _ad_arr=()
+      expand_add_dir_string _ad_arr "$claude_add_dirs"
       claude -p "$prompt" \
-        $claude_add_dirs \
+        "${_ad_arr[@]}" \
         --model "$model" \
         --max-turns 3 \
         --disallowedTools "Write,Edit,NotebookEdit" \

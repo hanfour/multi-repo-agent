@@ -266,9 +266,10 @@ IMPORTANT: You MUST search the codebase using file reading/grep. Every finding m
 PROMPT
 )
 
-  # shellcheck disable=SC2086
+  local _ad_arr=()
+  expand_add_dir_string _ad_arr "$claude_add_dirs"
   claude -p "$prompt" \
-    $claude_add_dirs \
+    "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 8 \
     --disallowedTools "Write,Edit,NotebookEdit" \
@@ -334,9 +335,10 @@ IMPORTANT: Read actual source files. Base findings on code, not assumptions.
 PROMPT
 )
 
-  # shellcheck disable=SC2086
+  local _ad_arr=()
+  expand_add_dir_string _ad_arr "$claude_add_dirs"
   claude -p "$prompt" \
-    $claude_add_dirs \
+    "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 8 \
     --disallowedTools "Write,Edit,NotebookEdit" \
@@ -399,9 +401,10 @@ Only include findings with evidence from actual source code.
 PROMPT
 )
 
-  # shellcheck disable=SC2086
+  local _ad_arr=()
+  expand_add_dir_string _ad_arr "$claude_add_dirs"
   claude -p "$prompt" \
-    $claude_add_dirs \
+    "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 5 \
     --disallowedTools "Write,Edit,NotebookEdit" \
@@ -484,9 +487,10 @@ Be strict: only KEEP findings with real evidence. DROP anything speculative.
 PROMPT
 )
 
-  # shellcheck disable=SC2086
+  local _ad_arr=()
+  expand_add_dir_string _ad_arr "$claude_add_dirs"
   claude -p "$prompt" \
-    $claude_add_dirs \
+    "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 3 \
     --disallowedTools "Write,Edit,NotebookEdit" \
@@ -590,9 +594,10 @@ Rules for line numbers:
 - Use line numbers from the NEW (right-side) version of the diff.
 - Lines MUST be within a diff hunk. If the issue is on a deleted line, use the nearest remaining line in the same hunk."
 
-  # shellcheck disable=SC2086
+  local _ad_arr=()
+  expand_add_dir_string _ad_arr "$claude_add_dirs"
   claude -p "$prompt" \
-    $claude_add_dirs \
+    "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 3 \
     --disallowedTools "Write,Edit,NotebookEdit" \

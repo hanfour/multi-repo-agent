@@ -81,9 +81,10 @@ run_plan_council() {
     (
       local prompt
       prompt=$(build_plan_prompt "$p" "$task" "$pkb_context" "$lang_directive")
-      # shellcheck disable=SC2086
+      local _ad_arr=()
+      expand_add_dir_string _ad_arr "$claude_add_dirs"
       claude -p "$prompt" \
-        $claude_add_dirs \
+        "${_ad_arr[@]}" \
         --model "$model" \
         --max-turns 6 \
         --disallowedTools "Write,Edit,NotebookEdit" \
@@ -162,9 +163,10 @@ TEMPLATE
   local synth_out; synth_out=$(mktemp)
   local synth_err; synth_err=$(mktemp)
   local rc=0
-  # shellcheck disable=SC2086
+  local _ad_arr=()
+  expand_add_dir_string _ad_arr "$claude_add_dirs"
   claude -p "$synth_prompt" \
-    $claude_add_dirs \
+    "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 4 \
     --disallowedTools "Write,Edit,NotebookEdit" \

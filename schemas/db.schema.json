@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hanfour.github.io/multi-repo-agent/schemas/db.schema.json",
+  "title": "MRA Database Configuration",
+  "description": "Workspace database container layout. Stored at .collab/db.json.",
+  "type": "object",
+  "required": ["databases"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "databases": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["engine", "schemas"],
+        "additionalProperties": false,
+        "properties": {
+          "engine": { "enum": ["mysql", "postgres"] },
+          "version": { "type": "string" },
+          "platform": { "type": "string" },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "password": { "type": "string" },
+          "schemas": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["source", "usedBy"],
+              "additionalProperties": false,
+              "properties": {
+                "source": { "type": "string" },
+                "usedBy": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

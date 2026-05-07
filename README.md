@@ -556,6 +556,15 @@ claude mcp add mra node ~/multi-repo-agent/mcp-server/dist/index.js
 
 9 tools: `mra_status`, `mra_deps`, `mra_ask`, `mra_export`, `mra_diff`, `mra_doctor`, `mra_graph`, `mra_scan`, `mra_test`
 
+**Restrict workspace access (recommended for shared machines):**
+
+```bash
+# Pin the MCP server to specific workspace roots; calls outside the list are rejected.
+export MRA_ALLOWED_WORKSPACES="$HOME/workspace:$HOME/sandbox"
+```
+
+When unset, any path is accepted (open mode); the server logs a warning at startup so you remember to lock it down.
+
 ### GitHub Actions
 
 ```bash
@@ -594,8 +603,38 @@ All workspace config lives in `<workspace>/.collab/`:
 | `db.json` | Database configuration | Yes |
 | `dep-graph.json` | Auto-generated dependency graph | No |
 | `manual-deps.json` | Manual dependency overrides | Yes |
+| `lint-profile.json` | Selects a lint rule set (`{"profile":"oneAD"}` or inline `rules`) | Yes |
 | `notify.json` | Webhook config | Yes |
 | `eval/` | Review evaluation reports | No |
+
+JSON Schemas for `repos.json`, `db.json`, `dep-graph.json`, `manual-deps.json`, and scanner JSONL records live under [`schemas/`](./schemas/). Add `"$schema"` to the top of each `.collab/*.json` to get inline IDE validation. `mra doctor` runs structural checks automatically.
+
+> **⚠ Migration note (lint default changed)**: Earlier versions hardcoded the
+> OneAD BLOCKER rules in `lib/lint.sh`. Lint is now profile-driven and the
+> default profile is empty. To keep the previous behavior, drop a one-line
+> file in your workspace:
+> ```bash
+> echo '{"profile":"oneAD"}' > <workspace>/.collab/lint-profile.json
+> ```
+
+**Lint profiles** ship under [`templates/lint-profiles/`](./templates/lint-profiles/):
+
+| Profile | Use |
+|---------|-----|
+| `default` | No rules — lint passes silently |
+| `oneAD` | OneAD frontend BLOCKER rules (no-interface / no-enum / no-any / no-non-null / no-var) |
+
+Opt in by writing `<workspace>/.collab/lint-profile.json`:
+
+```json
+{ "profile": "oneAD" }
+```
+
+Or inline custom rules (each with `id`, `severity`, `pattern`, `message`, `line_excludes`, `file_excludes`):
+
+```json
+{ "rules": [{ "id": "no-todo", "severity": "warn", "pattern": "TODO", "message": "TODO left in code", "line_excludes": [], "file_excludes": [] }] }
+```
 
 Global config: `~/multi-repo-agent/config.json`
 
@@ -635,6 +674,16 @@ Global config: `~/multi-repo-agent/config.json`
 - Eval trend dashboard
 
 ---
+
+## Development
+
+```bash
+make test         # run all shell tests under tests/ + mcp-server node tests
+make build        # tsc-build the mcp-server
+make lint         # shellcheck (warnings only) over lib/, bin/, scanners/, tests/, test.sh
+```
+
+`bash test.sh` is the same entry point as `make test` and is what CI runs (see `.github/workflows/repo-tests.yml`).
 
 ## License
 

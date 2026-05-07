@@ -159,12 +159,14 @@ review_project() {
     # With PKB: only load changed-file directories (not full project)
     local focused_dirs
     focused_dirs=$(build_focused_context "$project_dir" "$changed_files_for_strategy")
-    claude_args+=($focused_dirs)
+    local _focused_arr=()
+    expand_add_dir_string _focused_arr "$focused_dirs"
+    claude_args+=("${_focused_arr[@]}")
     claude_add_dirs_str="$focused_dirs"
   else
     # Without PKB: load full project (original behavior)
     claude_args=("--add-dir" "$project_dir")
-    claude_add_dirs_str="--add-dir $project_dir"
+    claude_add_dirs_str=$(build_add_dir_string "$project_dir")
   fi
 
   # Always add consumer/dep repos if API change
@@ -172,7 +174,7 @@ review_project() {
     local repo_dir="$workspace/$repo"
     if [[ -d "$repo_dir" && "$repo" != "$project" ]]; then
       claude_args+=("--add-dir" "$repo_dir")
-      claude_add_dirs_str="$claude_add_dirs_str --add-dir $repo_dir"
+      append_add_dir_string claude_add_dirs_str "$repo_dir"
     fi
   done
 
@@ -370,16 +372,16 @@ build_focused_context() {
     [[ -d "$dir" ]] || continue
     if [[ -z "${seen_dirs[$dir]+x}" ]]; then
       seen_dirs["$dir"]=1
-      context_args="$context_args --add-dir $dir"
+      append_add_dir_string context_args "$dir"
     fi
   done <<< "$changed_files"
 
   # Always include project root for config files (package.json, tsconfig, etc.)
   if [[ -z "${seen_dirs[$project_dir]+x}" ]]; then
-    context_args="$context_args --add-dir $project_dir"
+    append_add_dir_string context_args "$project_dir"
   fi
 
-  echo "$context_args"
+  printf '%s' "$context_args"
 }
 
 # Extract JSON from Claude response (handles markdown fencing)

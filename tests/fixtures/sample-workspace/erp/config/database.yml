@@ -1,0 +1,13 @@
+default: &default
+  adapter: mysql2
+  host: mysql
+  username: root
+  password: 123456
+
+development:
+  <<: *default
+  database: gspadmin
+
+production:
+  <<: *default
+  database: gspadmin

@@ -2,7 +2,8 @@
 set -uo pipefail
 
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORKSPACE="${1:-/Users/hanfourhuang/OneAD}"
+# Default to the bundled fixture workspace; override with $1 for live runs.
+WORKSPACE="${1:-$MRA_DIR/tests/fixtures/sample-workspace}"
 
 errors=0
 pass=0

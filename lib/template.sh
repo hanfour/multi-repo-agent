@@ -9,6 +9,7 @@ generate_template() {
       if [[ ! -f "$collab_dir/repos.json" ]]; then
         cat > "$collab_dir/repos.json.template" <<'TMPL'
 {
+  "$schema": "https://hanfour.github.io/multi-repo-agent/schemas/repos.schema.json",
   "repos": [
     { "name": "example-api", "clone": true, "branch": "main", "description": "Backend API", "archived": false },
     { "name": "example-ui", "clone": true, "branch": "main", "description": "Frontend app", "archived": false },
@@ -25,6 +26,7 @@ TMPL
       if [[ ! -f "$collab_dir/db.json" ]]; then
         cat > "$collab_dir/db.json.template" <<'TMPL'
 {
+  "$schema": "https://hanfour.github.io/multi-repo-agent/schemas/db.schema.json",
   "databases": {
     "mysql": {
       "engine": "mysql",
