@@ -5,6 +5,8 @@ MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Source all libs
 source "$MRA_DIR/lib/colors.sh"
+source "$MRA_DIR/lib/args.sh"
+source "$MRA_DIR/lib/validate.sh"
 source "$MRA_DIR/lib/config.sh"
 source "$MRA_DIR/lib/preflight.sh"
 source "$MRA_DIR/lib/detect-type.sh"
@@ -596,7 +598,8 @@ main() {
       local pkb_context=""
       pkb_context=$(pkb_build_context "$project_dir" "" "standard" 2>/dev/null || echo "")
 
-      local add_dirs="--add-dir=$project_dir"
+      local add_dirs
+      add_dirs=$(build_add_dir_string "$project_dir")
       run_plan_council "$plan_project" "$project_dir" "$plan_task" \
         "$(default_plan_personas)" "$plan_model" "$add_dirs" "$pkb_context" "$lang_directive"
       ;;
@@ -630,7 +633,8 @@ main() {
       lang=$(config_get "outputLanguage" 2>/dev/null); [[ "$lang" == "null" ]] && lang=""
       local lang_directive=""; [[ -n "$lang" ]] && lang_directive="Use ${lang} for all output."
 
-      local add_dirs="--add-dir=$project_dir"
+      local add_dirs
+      add_dirs=$(build_add_dir_string "$project_dir")
       run_test_audit "$audit_project" "$project_dir" "$audit_model" "$add_dirs" "$lang_directive"
       ;;
 

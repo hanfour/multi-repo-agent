@@ -71,9 +71,10 @@ run_persona_review() {
     (
       local prompt
       prompt=$(build_persona_prompt "$p" "$diff" "$changed_files" "$consumers" "$pkb_context" "$lang_directive")
-      # shellcheck disable=SC2086
+      local _ad_arr=()
+      expand_add_dir_string _ad_arr "$claude_add_dirs"
       claude -p "$prompt" \
-        $claude_add_dirs \
+        "${_ad_arr[@]}" \
         --model "$model" \
         --max-turns 8 \
         --disallowedTools "Write,Edit,NotebookEdit" \

@@ -409,6 +409,16 @@ run_doctor() {
   ((total_pass += basic_pass)) || true
   ((total_fail += basic_fail)) || true
 
+  # Level 1.5: schema validation for .collab/*.json
+  log_info "=== Schema Checks ===" "doctor"
+  if validate_collab_files "$workspace"; then
+    log_success ".collab/*.json: structure ok" "doctor"
+    ((total_pass++)) || true
+  else
+    log_error ".collab/*.json: schema validation failed" "doctor"
+    ((total_fail++)) || true
+  fi
+
   # Level 2: Databases
   local db_result
   db_result=$(doctor_databases "$workspace")

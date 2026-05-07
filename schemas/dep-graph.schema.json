@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hanfour.github.io/multi-repo-agent/schemas/dep-graph.schema.json",
+  "title": "MRA Dependency Graph",
+  "description": "Generated workspace dependency graph stored at .collab/dep-graph.json.",
+  "type": "object",
+  "required": ["version", "workspace", "gitOrg", "lastScan", "projects"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "workspace": { "type": "string" },
+    "gitOrg": { "type": "string" },
+    "lastScan": { "type": "string", "format": "date-time" },
+    "projects": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/project" }
+    }
+  },
+  "definitions": {
+    "project": {
+      "type": "object",
+      "required": ["type", "deps", "consumedBy", "confidence"],
+      "properties": {
+        "type": { "type": "string" },
+        "port": { "type": ["integer", "null"] },
+        "dockerImage": { "type": ["string", "null"] },
+        "dockerCompose": { "type": ["string", "null"] },
+        "lastCommit": { "type": "string" },
+        "deps": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "consumedBy": { "type": "array", "items": { "type": "string" } },
+        "confidence": {
+          "type": "object",
+          "additionalProperties": { "enum": ["high", "medium", "low"] }
+        }
+      }
+    }
+  }
+}
