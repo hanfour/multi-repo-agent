@@ -14,6 +14,12 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Configure git identity (several legacy tests run `git commit`)
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
