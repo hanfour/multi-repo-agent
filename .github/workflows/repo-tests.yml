@@ -1,0 +1,40 @@
+name: Repo Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  shell-and-mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+
+      - name: Install mcp-server deps
+        run: npm --prefix mcp-server ci || npm --prefix mcp-server install
+
+      - name: Build mcp-server
+        run: npm --prefix mcp-server run build
+
+      - name: Run shell + mcp-server tests
+        run: bash test.sh
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Run shellcheck (warnings only, non-blocking)
+        continue-on-error: true
+        run: shellcheck -S warning lib/*.sh bin/*.sh scanners/*.sh tests/*.sh test.sh
