@@ -40,11 +40,19 @@ merge_scan_results() {
     return 1
   fi
 
-  # Read current dep-graph
+  # Scanner-owned edges: rebuild deps/consumedBy/confidence from scratch each
+  # scan so removed dependencies don't linger as stale graph edges.
+  # Project-level metadata (type/port/lastCommit/etc.) is preserved.
   local updated_graph
-  updated_graph=$(cat "$graph_file")
+  updated_graph=$(jq '
+    .projects |= map_values(
+      .deps = {}
+      | .consumedBy = []
+      | .confidence = {}
+    )
+  ' "$graph_file")
 
-  # Process each scanner result line
+  # First pass: apply scanner records (skip low confidence unless manually confirmed).
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     local source target dep_type confidence
@@ -53,38 +61,55 @@ merge_scan_results() {
     dep_type=$(echo "$line" | jq -r '.type')
     confidence=$(echo "$line" | jq -r '.confidence')
 
-    # Skip low confidence unless manually confirmed
     if [[ "$confidence" == "low" ]]; then
       if [[ -f "$manual_deps" ]] && jq -e --arg s "$source" --arg t "$target" \
         '.[] | select(.source == $s and .target == $t)' "$manual_deps" &>/dev/null; then
-        confidence="high"  # manually confirmed
+        confidence="high"
       else
-        continue  # skip low confidence
+        continue
       fi
     fi
 
-    # Update dep-graph: add target to source's deps
-    if echo "$updated_graph" | jq -e --arg s "$source" '.projects[$s]' &>/dev/null; then
-      updated_graph=$(echo "$updated_graph" | jq \
-        --arg s "$source" --arg t "$target" --arg type "$dep_type" --arg conf "$confidence" \
-        '.projects[$s].deps[$type] = ((.projects[$s].deps[$type] // []) + [$t] | unique) |
-         .projects[$s].confidence[$t] = $conf')
-    fi
-
-    # Update consumedBy on target
-    if echo "$updated_graph" | jq -e --arg t "$target" '.projects[$t]' &>/dev/null; then
-      updated_graph=$(echo "$updated_graph" | jq \
-        --arg s "$source" --arg t "$target" \
-        '.projects[$t].consumedBy = ((.projects[$t].consumedBy // []) + [$s] | unique)')
-    fi
+    updated_graph=$(echo "$updated_graph" | jq \
+      --arg s "$source" --arg t "$target" --arg type "$dep_type" --arg conf "$confidence" '
+        (if .projects[$s] then
+          .projects[$s].deps[$type] = ((.projects[$s].deps[$type] // []) + [$t] | unique)
+          | .projects[$s].confidence[$t] = $conf
+        else . end)
+        | (if .projects[$t] then
+            .projects[$t].consumedBy = ((.projects[$t].consumedBy // []) + [$s] | unique)
+          else . end)
+      ')
   done < "$results_file"
 
-  # Update lastScan timestamp
+  # Second pass: manual overrides act like high-confidence scanner edges, even
+  # if the scanner missed them this run. Honors --include-manual semantics
+  # without forcing a specific scanner to emit them.
+  if [[ -f "$manual_deps" ]]; then
+    while IFS= read -r entry; do
+      [[ -z "$entry" ]] && continue
+      local source target dep_type
+      source=$(echo "$entry" | jq -r '.source')
+      target=$(echo "$entry" | jq -r '.target')
+      dep_type=$(echo "$entry" | jq -r '.type // "api"')
+
+      updated_graph=$(echo "$updated_graph" | jq \
+        --arg s "$source" --arg t "$target" --arg type "$dep_type" '
+          (if .projects[$s] then
+            .projects[$s].deps[$type] = ((.projects[$s].deps[$type] // []) + [$t] | unique)
+            | .projects[$s].confidence[$t] = "high"
+          else . end)
+          | (if .projects[$t] then
+              .projects[$t].consumedBy = ((.projects[$t].consumedBy // []) + [$s] | unique)
+            else . end)
+        ')
+    done < <(jq -c '.[]' "$manual_deps" 2>/dev/null || true)
+  fi
+
   updated_graph=$(echo "$updated_graph" | jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.lastScan = $ts')
 
-  # Write updated graph
   echo "$updated_graph" | jq '.' > "$graph_file"
-  log_success "dep-graph.json updated" "scan"
+  log_success "dep-graph.json rebuilt from scanners" "scan"
 }
 
 # Diff scan: only re-scan projects with changed git hash
