@@ -1,0 +1,46 @@
+{
+  "name": "oneAD",
+  "description": "OneAD frontend JS/TS BLOCKER rules historically baked into lib/lint.sh. Opt in by setting workspace .collab/lint-profile.json to {\"profile\": \"oneAD\"}.",
+  "rules": [
+    {
+      "id": "no-interface",
+      "severity": "blocker",
+      "pattern": "^\\s*(export\\s+)?interface\\s+\\w+",
+      "message": "BLOCKER: 'interface' found — use 'type' instead",
+      "line_excludes": ["// eslint-disable"],
+      "file_excludes": []
+    },
+    {
+      "id": "no-enum",
+      "severity": "blocker",
+      "pattern": "^\\s*(export\\s+)?enum\\s+\\w+",
+      "message": "BLOCKER: 'enum' found — use 'as const' object instead",
+      "line_excludes": ["// eslint-disable"],
+      "file_excludes": []
+    },
+    {
+      "id": "no-any-type",
+      "severity": "blocker",
+      "pattern": ":\\s*any\\b",
+      "message": "BLOCKER: 'any' type found — use 'unknown' with type guards",
+      "line_excludes": ["// eslint-disable", "// @ts-"],
+      "file_excludes": ["*.d.ts"]
+    },
+    {
+      "id": "no-non-null-assertion",
+      "severity": "warn",
+      "pattern": "\\w+!\\.",
+      "message": "WARN: non-null assertion '!' found — prefer type guards",
+      "line_excludes": ["// eslint-disable"],
+      "file_excludes": ["*.test.*", "*.spec.*"]
+    },
+    {
+      "id": "no-var",
+      "severity": "warn",
+      "pattern": "^\\s*var\\s+",
+      "message": "WARN: 'var' found — use 'const' or 'let'",
+      "line_excludes": [],
+      "file_excludes": []
+    }
+  ]
+}
