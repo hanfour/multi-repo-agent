@@ -509,6 +509,15 @@ claude mcp add mra node ~/multi-repo-agent/mcp-server/dist/index.js
 
 9개 도구: `mra_status`, `mra_deps`, `mra_ask`, `mra_export`, `mra_diff`, `mra_doctor`, `mra_graph`, `mra_scan`, `mra_test`
 
+**워크스페이스 접근 제한 (공유 머신에서 강력 권장):**
+
+```bash
+# MCP 서버를 특정 워크스페이스 루트로 고정. 목록 외 경로는 거부됩니다.
+export MRA_ALLOWED_WORKSPACES="$HOME/workspace:$HOME/sandbox"
+```
+
+설정하지 않으면 모든 경로가 허용됩니다 (open mode). 서버는 시작 시 명시적인 잠금을 권유하는 경고를 출력합니다.
+
 ### GitHub Actions
 
 ```bash
@@ -547,8 +556,35 @@ mra notify test     # 테스트 알림 전송
 | `db.json` | 데이터베이스 설정 | 예 |
 | `dep-graph.json` | 자동 생성된 의존성 그래프 | 아니오 |
 | `manual-deps.json` | 수동 의존성 오버라이드 | 예 |
+| `lint-profile.json` | lint 규칙 세트 선택 (`{"profile":"oneAD"}` 또는 인라인 `rules`) | 예 |
 | `notify.json` | Webhook 설정 | 예 |
 | `eval/` | 리뷰 평가 보고서 | 아니오 |
+
+`repos.json`、`db.json`、`dep-graph.json`、`manual-deps.json` 및 scanner JSONL 레코드의 JSON Schema는 [`schemas/`](../schemas/)에 포함되어 있습니다. `.collab/*.json` 최상단에 `"$schema"`를 추가하면 IDE 내에서 실시간 검증이 가능합니다. `mra doctor`는 구조 검사를 자동 실행합니다.
+
+> **⚠ 마이그레이션 안내 (lint 기본값 변경)**: 이전 버전은 `lib/lint.sh`에 OneAD BLOCKER 규칙이 하드코딩되어 있었습니다. 이제 lint는 profile 기반이며 기본 profile은 비어 있습니다. 이전 동작을 유지하려면 워크스페이스에 한 줄 파일을 추가하세요:
+> ```bash
+> echo '{"profile":"oneAD"}' > <workspace>/.collab/lint-profile.json
+> ```
+
+**Lint Profiles**는 [`templates/lint-profiles/`](../templates/lint-profiles/)에 포함되어 있습니다:
+
+| Profile | 용도 |
+|---------|------|
+| `default` | 규칙 없음 — lint가 조용히 통과 |
+| `oneAD` | OneAD 프론트엔드 BLOCKER 규칙 (no-interface / no-enum / no-any / no-non-null / no-var) |
+
+`<workspace>/.collab/lint-profile.json`로 활성화:
+
+```json
+{ "profile": "oneAD" }
+```
+
+또는 사용자 정의 규칙을 인라인으로 작성 (각 규칙은 `id`、`severity`、`pattern`、`message`、`line_excludes`、`file_excludes` 포함):
+
+```json
+{ "rules": [{ "id": "no-todo", "severity": "warn", "pattern": "TODO", "message": "코드에 TODO 남음", "line_excludes": [], "file_excludes": [] }] }
+```
 
 전역 설정: `~/multi-repo-agent/config.json`
 
@@ -586,6 +622,19 @@ mra notify test     # 테스트 알림 전송
 - PKB 시맨틱 검색 (임베딩 기반 검색)
 - 크로스 리포지토리 PKB 링킹 (공유 타입 컨트랙트)
 - 평가 추세 대시보드
+
+---
+
+## 개발
+
+```bash
+make test         # tests/ 하의 모든 shell 테스트 + mcp-server node 테스트 실행
+make build        # mcp-server를 tsc로 빌드 (incremental)
+make lint         # lib/、bin/、scanners/、tests/、test.sh에 shellcheck 실행
+make clean        # mcp-server 빌드 산출물 제거
+```
+
+`bash test.sh`와 `make test`는 동일한 진입점이며, CI에서도 이를 실행합니다 (`.github/workflows/repo-tests.yml`).
 
 ---
 

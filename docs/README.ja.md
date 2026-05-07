@@ -509,6 +509,15 @@ claude mcp add mra node ~/multi-repo-agent/mcp-server/dist/index.js
 
 9ツール: `mra_status`, `mra_deps`, `mra_ask`, `mra_export`, `mra_diff`, `mra_doctor`, `mra_graph`, `mra_scan`, `mra_test`
 
+**ワークスペースアクセスの制限（共有マシンでは強く推奨）:**
+
+```bash
+# MCP サーバーを特定のワークスペースルートに固定。リスト外のパスは拒否される。
+export MRA_ALLOWED_WORKSPACES="$HOME/workspace:$HOME/sandbox"
+```
+
+未設定の場合は任意のパスが許可される（オープンモード）。サーバーは起動時に警告を出して、明示的なロックダウンを促す。
+
 ### GitHub Actions
 
 ```bash
@@ -547,8 +556,35 @@ mra notify test     # テスト通知を送信
 | `db.json` | データベース設定 | はい |
 | `dep-graph.json` | 自動生成された依存関係グラフ | いいえ |
 | `manual-deps.json` | 手動の依存関係オーバーライド | はい |
+| `lint-profile.json` | lint ルールセット選択（`{"profile":"oneAD"}` またはインライン `rules`） | はい |
 | `notify.json` | Webhook設定 | はい |
 | `eval/` | レビュー評価レポート | いいえ |
+
+`repos.json`、`db.json`、`dep-graph.json`、`manual-deps.json` および scanner JSONL レコードの JSON Schema は [`schemas/`](../schemas/) に同梱されています。`.collab/*.json` の先頭に `"$schema"` を追加すると IDE 内でリアルタイム検証が効きます。`mra doctor` は構造チェックを自動実行します。
+
+> **⚠ 移行のお知らせ（lint デフォルトが変更されました）**: 以前のバージョンは `lib/lint.sh` に OneAD BLOCKER ルールがハードコードされていました。lint は profile 駆動になり、デフォルト profile は空です。以前の挙動を維持するには、ワークスペースに 1 行のファイルを置いてください:
+> ```bash
+> echo '{"profile":"oneAD"}' > <workspace>/.collab/lint-profile.json
+> ```
+
+**Lint Profiles** は [`templates/lint-profiles/`](../templates/lint-profiles/) に同梱:
+
+| Profile | 用途 |
+|---------|------|
+| `default` | ルールなし — lint は黙って合格 |
+| `oneAD` | OneAD フロントエンド BLOCKER ルール（no-interface / no-enum / no-any / no-non-null / no-var） |
+
+`<workspace>/.collab/lint-profile.json` で有効化:
+
+```json
+{ "profile": "oneAD" }
+```
+
+または独自ルールをインラインで記述（各ルールは `id`、`severity`、`pattern`、`message`、`line_excludes`、`file_excludes` を持つ）:
+
+```json
+{ "rules": [{ "id": "no-todo", "severity": "warn", "pattern": "TODO", "message": "TODO がコードに残っています", "line_excludes": [], "file_excludes": [] }] }
+```
 
 グローバル設定: `~/multi-repo-agent/config.json`
 
@@ -586,6 +622,19 @@ mra notify test     # テスト通知を送信
 - PKBセマンティック検索（エンベディングベースの検索）
 - クロスリポジトリPKBリンキング（共有型コントラクト）
 - 評価トレンドダッシュボード
+
+---
+
+## 開発
+
+```bash
+make test         # tests/ 配下の全 shell テスト + mcp-server node テストを実行
+make build        # mcp-server を tsc でビルド（インクリメンタル）
+make lint         # lib/、bin/、scanners/、tests/、test.sh に shellcheck を実行
+make clean        # mcp-server のビルド成果物を削除
+```
+
+`bash test.sh` と `make test` は同じエントリーポイントで、CI もこれを実行します（`.github/workflows/repo-tests.yml`）。
 
 ---
 
