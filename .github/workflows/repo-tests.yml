@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # Opt into Node 24 ahead of the June 2026 forced switch.
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   shell-and-mcp:
     runs-on: ubuntu-latest
