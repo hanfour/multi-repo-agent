@@ -45,7 +45,11 @@ lint_load_profile() {
 }
 
 # _lint_run_rule <files-multiline> <project_dir> <rule-json> -> echoes violation count.
+# file_excludes patterns use bash glob syntax; extglob is enabled locally so
+# patterns like `*.@(test|spec).*` and `?(integration|e2e).*` are accepted.
 _lint_run_rule() {
+  shopt -s extglob 2>/dev/null || true
+
   local files="$1" project_dir="$2" rule="$3"
 
   local rule_id severity pattern message

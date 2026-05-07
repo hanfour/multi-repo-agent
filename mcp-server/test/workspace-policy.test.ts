@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import {
   loadWorkspacePolicy,
@@ -16,10 +16,20 @@ function makeTempRoot(): string {
   return realpathSync(dir);
 }
 
-test("empty allowlist accepts any workspace", () => {
+test("empty allowlist accepts any workspace (open mode)", () => {
   const policy = loadWorkspacePolicy({});
   assert.equal(policy.allowedRoots.length, 0);
+  assert.equal(policy.envHadValue, false);
   assert.equal(isWorkspaceAllowed("/anything", policy), true);
+});
+
+test("env set but all entries empty denies everything (no silent downgrade)", () => {
+  const policy = loadWorkspacePolicy({
+    MRA_ALLOWED_WORKSPACES: `${delimiter}${delimiter}  ${delimiter}`,
+  });
+  assert.equal(policy.allowedRoots.length, 0);
+  assert.equal(policy.envHadValue, true);
+  assert.equal(isWorkspaceAllowed("/anything", policy), false);
 });
 
 test("populated allowlist rejects outside paths", () => {
@@ -57,12 +67,12 @@ test("path traversal cannot escape the allowed root", () => {
   }
 });
 
-test("multiple roots are colon-separated", () => {
+test("multiple roots are platform-delimiter separated", () => {
   const a = makeTempRoot();
   const b = makeTempRoot();
   try {
     const policy = loadWorkspacePolicy({
-      MRA_ALLOWED_WORKSPACES: `${a}:${b}`,
+      MRA_ALLOWED_WORKSPACES: `${a}${delimiter}${b}`,
     });
     assert.equal(policy.allowedRoots.length, 2);
     assert.equal(isWorkspaceAllowed(a, policy), true);
@@ -70,6 +80,23 @@ test("multiple roots are colon-separated", () => {
   } finally {
     rmSync(a, { recursive: true, force: true });
     rmSync(b, { recursive: true, force: true });
+  }
+});
+
+test("sibling directory with shared prefix is rejected", () => {
+  // Guards against the old `startsWith(root + "/")` bug where /foo-bar
+  // would match a root of /foo. With path.relative() the sibling fails.
+  const parent = makeTempRoot();
+  const root = join(parent, "foo");
+  const sibling = join(parent, "foo-bar");
+  mkdirSync(root);
+  mkdirSync(sibling);
+  try {
+    const policy = loadWorkspacePolicy({ MRA_ALLOWED_WORKSPACES: root });
+    assert.equal(isWorkspaceAllowed(root, policy), true);
+    assert.equal(isWorkspaceAllowed(sibling, policy), false);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
   }
 });
 

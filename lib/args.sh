@@ -37,13 +37,20 @@ append_add_dir_string() {
 
 # expand_add_dir_string <out-array-name> <quoted-string>
 # Parse a string produced by build_add_dir_string back into a bash array.
-# Uses eval but only on output we generated via printf %q.
+# Uses eval, so the input must come from build_add_dir_string /
+# append_add_dir_string. As defence in depth we reject anything containing
+# shell metacharacters that printf %q output never produces unescaped.
 expand_add_dir_string() {
   local -n _out_arr="$1"
   local _str="$2"
   if [[ -z "$_str" ]]; then
     _out_arr=()
     return
+  fi
+  if [[ "$_str" =~ \;|\&\&|\|\||\`|\$\( ]]; then
+    echo "expand_add_dir_string: refusing suspicious input: $_str" >&2
+    _out_arr=()
+    return 1
   fi
   eval "_out_arr=( $_str )"
 }
