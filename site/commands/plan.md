@@ -38,6 +38,17 @@ mra plan my-api "Migrate session tokens to JWT"
 | Flag | Effect |
 |------|--------|
 | `--model sonnet` | Default; use `opus` for deeper reasoning |
+| `--dual` | Run each persona through both claude and codex, then reconcile |
+
+## --dual (multi-model council)
+
+With `--dual`, every persona is run through **both** the `claude` and `codex` CLIs. The synthesiser then reconciles the two models' proposals — highlighting where they agree and surfacing where they disagree — so you get a cross-model consensus rather than a single model's view.
+
+```bash
+mra plan my-api "Migrate session tokens to JWT" --dual
+```
+
+Requires the `codex` CLI on `PATH`.
 
 Pipe to a file to save:
 
