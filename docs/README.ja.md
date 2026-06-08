@@ -15,7 +15,7 @@
 
 > リポジトリAのAPIを変更すると、mraが自動的にリポジトリB、C、Dのすべての下流コンシューマーを検出し、影響を分析し、コードを更新し、PRを作成します。すべて1つのコマンドで。
 
-**v2.2.0** | 28 CLIコマンド | 6 AIエージェント | 9 MCPツール | 20テストスイート
+**v2.3.0** | 32 CLIコマンド | 6 AIエージェント | 9 MCPツール | 35テストスイート | 10 TM追跡セキュリティ制御
 
 ---
 
@@ -68,6 +68,27 @@ mra --all                    # すべてを読み込み
 
 オーケストレーターはリポジトリごとにサブエージェントを配置し、依存順序に従って変更を調整し、各コミット後にコードレビューを実行します。
 
+### 1b. ブランチ対応の同期 & クロスリポジトリPR (Branch-Aware Sync & Cross-Repo PRs)
+
+複数のリポジトリを同じフィーチャーブランチに揃え、まとめて出荷します。すべてのコマンドは依存順序で実行され、リポジトリのサブセットを対象にできます。
+
+```bash
+mra branch status                 # Repos needing attention (ahead/behind/dirty/PR state)
+mra branch new feature/login      # Create the same branch across repos
+mra branch pr                     # Push branches + open PRs (deps first)
+mra branch merge --wait-ci        # Merge open PRs once CI is green
+```
+
+| コマンド | 動作 |
+|---------|--------------|
+| `mra sync [--safe] [--push] [--review] [--json]` | すべてのリポジトリをクローン/プル。`--safe` は ff-only、`--push` はプッシュ、`--review` は自動レビュー、`--json` はリポジトリごとの `{repo, action, ok}` を出力 |
+| `mra branch status [--all] [--fetch] [--json]` | クロスリポジトリのブランチ概要（デフォルト: 注意が必要なリポジトリ。`--json`: すべてのリポジトリ） |
+| `mra branch new\|switch <name>` | すべてのリポジトリで同じブランチを作成/切り替え |
+| `mra branch pr [--base <ref>] [--dry-run] [repos…]` | フィーチャーブランチをプッシュしてPRを作成（依存関係が先。任意の `[repos…]` サブセット） |
+| `mra branch merge [--strategy S] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [--dry-run] [repos…]` | mergeable + CI を条件にオープンなPRをマージ。`--wait-ci` はマージ前にCIをポーリング |
+
+`--json`（`sync` と `branch status` で使用可能）は他のツールへのパイプ用に設計されています。ワーカーのログは stderr に出力されるため、stdout は有効なJSONのまま保たれます。
+
 ### 2. ディベートによるAIコードレビュー (AI Code Review with Debate)
 
 差分サイズによって自動選択される3つのレビュー戦略：
@@ -99,6 +120,27 @@ mra review my-api --strategy debate  # 徹底的なレビューを強制
 ```
 
 すべてのレビューエージェントは**書き込み保護** (`--disallowedTools "Write,Edit"`) されており、読み取り専用です。
+
+### 2b. ペルソナベースのレビュー（オプトイン） (Persona-Based Review (opt-in))
+
+汎用的な影響分析/品質分析だけでは不十分なPRに対しては、5人の名前付きドメインエキスパートを並行して実行できます：
+
+```bash
+mra review my-api --personas          # Use 5 named domain experts
+mra review my-api --pr 123 --personas # PR review with personas
+```
+
+| ペルソナ | 焦点 |
+|---------|-------|
+| `security-auditor` | シークレット、インジェクション、認証、デシリアライゼーション（Troy Hunt スタイル） |
+| `api-contract-guardian` | クロスリポジトリのシグネチャのずれ、レスポンス形状の変更 |
+| `performance-hawk` | N+1 クエリ、ホットパスのI/O、バンドル肥大化（Vercel スタイル） |
+| `refactoring-sage` | コードスメル、命名、凝集度（Martin Fowler スタイル） |
+| `test-architect` | Kent Beck の11原則 |
+
+各ペルソナはフォーカスされたレンズを持ち、同じ重大度ラダー（CRITICAL/HIGH/MEDIUM）に書き込みます。発見は統合され、ディベートパスが生成するのと同じJSONに合成されます -- PRインラインコメントも同一に機能します。
+
+`agents/personas/` にマークダウンファイルを置くだけで独自のペルソナを追加できます。`agents/personas/README.md` を参照してください。
 
 ### 3. プロジェクト知識ベース (Project Knowledge Base / PKB)
 
@@ -266,6 +308,12 @@ mra my-api --with-deps           # オーケストレーターを起動
 mra ask my-api "list all order-related API endpoints"
 mra ask my-api --with-deps "API dependencies between my-api and frontend"
 
+# リポジトリ横断の同期 & フィーチャーブランチ
+mra sync --safe                  # Fast-forward pull every repo
+mra branch status                # Which repos need attention
+mra branch pr                    # Open PRs across repos (deps first)
+mra branch merge --wait-ci       # Merge each PR once its CI is green
+
 # コード品質
 mra lint frontend-app            # BLOCKERルールをチェック
 mra lint --all                   # すべてのフロントエンドプロジェクト
@@ -277,6 +325,26 @@ mra review my-api --pr 123       # インラインPRレビュー
 # 何か壊れた？
 mra rollback my-api              # 最新のスナップショットに復元
 ```
+
+#### マルチエキスパートプランニング (Multi-Expert Planning)
+
+```bash
+mra plan my-api "Migrate session tokens to JWT"
+mra plan my-api "Migrate session tokens to JWT" --dual   # claude + codex council
+```
+
+5人のドメインエキスパートがそれぞれ独立して実装戦略を提案し、シンセサイザーがそれらを1つの統合プラン（統合されたファイル、リスク順にランク付けされた懸念事項、実行ステップ）にまとめます。出力はstdoutに送られます。ファイルにパイプして保存できます。
+
+`--dual` を付けると、各ペルソナが `claude` と `codex` の**両方**のCLIを通して実行され、シンセサイザーが2つのモデルの提案を調整します（一致点を強調し、相違点を表面化）。`PATH` 上に `codex` CLIが必要です。
+
+#### テスト品質監査 (Test Quality Audit)
+
+```bash
+mra test-audit frontend-app        # Kent Beck 11-principles audit of all test files
+MRA_AUDIT_PARALLEL=3 mra test-audit frontend-app  # Cap concurrent audits
+```
+
+`*.test.*`、`*_test.*`、`*.spec.*` ファイル（`node_modules`、`dist`、`build`、`vendor`、`.git` を除外）を検出し、`test-architect` ペルソナを通じて Kent Beck の11のテスト原則に照らして各ファイルを監査します。
 
 </details>
 
@@ -375,7 +443,7 @@ mra doctor
 ## コマンドリファレンス
 
 <details>
-<summary><strong>全28コマンド</strong></summary>
+<summary><strong>全コマンド</strong></summary>
 
 ### コア (Core)
 
@@ -387,6 +455,16 @@ mra doctor
 | `mra status` | ワークスペース概要 |
 | `mra diff` | クロスリポジトリ差分サマリー |
 | `mra log [project]` | 操作履歴 |
+
+### ブランチ & 同期 (Branch & Sync)
+
+| コマンド | 説明 |
+|---------|-------------|
+| `mra sync [--safe] [--push] [--review] [--json]` | すべてのリポジトリをクローン/プル（`--json`: リポジトリごとの `{repo, action, ok}`） |
+| `mra branch status [--all] [--fetch] [--json]` | クロスリポジトリのブランチ概要 |
+| `mra branch new\|switch <name>` | すべてのリポジトリで同じブランチを作成/切り替え |
+| `mra branch pr [--base <ref>] [--dry-run] [repos…]` | ブランチをプッシュしてPRを作成（依存関係が先。任意のサブセット） |
+| `mra branch merge [--strategy S] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [--dry-run] [repos…]` | オープンなPRをマージ（mergeable + CI を条件） |
 
 ### AI & 開発 (AI & Development)
 
@@ -400,7 +478,9 @@ mra doctor
 
 | コマンド | 説明 |
 |---------|-------------|
-| `mra review <project> [--pr N] [--strategy S] [--base ref]` | コードレビュー |
+| `mra review <project> [--pr N] [--strategy S] [--base ref] [--personas]` | コードレビュー（--personas で5人の名前付きエキスパートを追加） |
+| `mra plan <project> "<task>" [--model M] [--dual]` | マルチエキスパートプラン（`--dual`: claude + codex council） |
+| `mra test-audit <project> [--model M]` | Kent Beck の11原則によるテスト監査 |
 | `mra analyze <project> [--model M]` | PKBの生成 |
 | `mra eval-review <project> --pr N [--baseline file]` | レビュー品質の評価 |
 
@@ -605,6 +685,11 @@ mra notify test     # テスト通知を送信
 
 ### 最近追加された機能
 
+- ブランチ対応の同期 & クロスリポジトリPR（`mra sync`、`mra branch status|new|switch|pr|merge`）
+- CIポーリングによる自動マージ（`branch merge --wait-ci [--ci-timeout]`）
+- `branch pr|merge` のリポジトリ単位のサブセット指定（`[repos…]`）
+- マシン可読なJSON出力（`sync --json`、`branch status --json`）
+- マルチモデルプランニングカウンシル（`mra plan --dual` — claude + codex）
 - 自動戦略レビュー（light/standard/debate）
 - メールボックス投票ディベートシステム
 - L0-L3メモリスタック付きプロジェクト知識ベース
