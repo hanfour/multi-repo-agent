@@ -1,0 +1,11 @@
+{
+  "autoScan": true,
+  "depthDefault": 1,
+  "outputLanguage": "繁體中文台灣用語",
+  "aliases": {},
+  "subAgentWorkflow": {
+    "reviewLoopMax": 3,
+    "autoCommit": true,
+    "autoPR": true
+  }
+}

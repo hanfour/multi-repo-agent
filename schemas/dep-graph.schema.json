@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hanfour.github.io/multi-repo-agent/schemas/dep-graph.schema.json",
+  "title": "MRA Dependency Graph",
+  "description": "Generated workspace dependency graph stored at .collab/dep-graph.json.",
+  "type": "object",
+  "required": ["version", "workspace", "gitOrg", "lastScan", "projects"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "type": "integer", "minimum": 1 },
+    "workspace": { "type": "string" },
+    "gitOrg": { "type": "string" },
+    "lastScan": { "type": "string", "format": "date-time" },
+    "projects": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/definitions/identifier" },
+      "additionalProperties": { "$ref": "#/definitions/project" }
+    }
+  },
+  "definitions": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "description": "Project / repo / dep identifier. Same regex as lib/project-path.sh and MCP tool schemas (TM-003)."
+    },
+    "project": {
+      "type": "object",
+      "required": ["type", "deps", "consumedBy", "confidence"],
+      "properties": {
+        "type": { "type": "string" },
+        "port": { "type": ["integer", "null"] },
+        "dockerImage": { "type": ["string", "null"] },
+        "dockerCompose": { "type": ["string", "null"] },
+        "lastCommit": { "type": "string" },
+        "deps": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "$ref": "#/definitions/identifier" }
+          }
+        },
+        "consumedBy": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/identifier" }
+        },
+        "confidence": {
+          "type": "object",
+          "additionalProperties": { "enum": ["high", "medium", "low"] }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Verify lib/review.sh validates Claude output and caps APPROVE (TM-007).
+set -euo pipefail
+
+MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$MRA_DIR/lib/colors.sh"
+# review.sh sources several other libs at top of file via load order
+# from bin/mra.sh; for unit testing we only need the two helper
+# functions, which the file defines at the top.
+source "$MRA_DIR/lib/review.sh"
+
+errors=0
+pass=0
+pass_test() { echo "PASS: $1"; ((pass++)) || true; }
+fail_test() { echo "FAIL: $1"; errors=$((errors+1)) || true; }
+
+GOOD_JSON='{"status":"CHANGES_REQUESTED","summary":"x","comments":[{"path":"a.ts","line":1,"body":"b","severity":"HIGH"}]}'
+APPROVED_JSON='{"status":"APPROVED","summary":"x","comments":[]}'
+
+# --- _validate_review_json accepts a well-formed object ---
+if _validate_review_json "$GOOD_JSON"; then
+  pass_test "valid review JSON accepted"
+else
+  fail_test "valid review JSON wrongly rejected"
+fi
+
+# --- Reject malformed JSONs ---
+for label_payload in \
+    'missing status:{"summary":"x","comments":[]}' \
+    'unknown status:{"status":"YOLO","summary":"x","comments":[]}' \
+    'missing summary:{"status":"COMMENT","comments":[]}' \
+    'comments not array:{"status":"COMMENT","summary":"x","comments":{}}' \
+    'comment bad severity:{"status":"COMMENT","summary":"x","comments":[{"path":"a","line":1,"body":"b","severity":"WHATEVER"}]}' \
+    'comment missing path:{"status":"COMMENT","summary":"x","comments":[{"line":1,"body":"b","severity":"HIGH"}]}' \
+    'empty string:'; do
+  label="${label_payload%%:*}"
+  payload="${label_payload#*:}"
+  if _validate_review_json "$payload"; then
+    fail_test "should reject ($label): $payload"
+  else
+    pass_test "rejected ($label)"
+  fi
+done
+
+# --- Status cap: APPROVED -> COMMENT by default ---
+unset MRA_REVIEW_ALLOW_APPROVE || true
+event=$(_review_event_for_status "APPROVED" 2>/dev/null)
+if [[ "$event" == "COMMENT" ]]; then
+  pass_test "APPROVED downgraded to COMMENT by default"
+else
+  fail_test "expected COMMENT, got '$event'"
+fi
+
+# --- Override flag re-enables APPROVE ---
+event=$(MRA_REVIEW_ALLOW_APPROVE=1 _review_event_for_status "APPROVED" 2>/dev/null)
+if [[ "$event" == "APPROVE" ]]; then
+  pass_test "MRA_REVIEW_ALLOW_APPROVE=1 keeps APPROVE"
+else
+  fail_test "expected APPROVE, got '$event'"
+fi
+
+# --- CHANGES_REQUESTED maps to REQUEST_CHANGES regardless of flag ---
+event=$(_review_event_for_status "CHANGES_REQUESTED" 2>/dev/null)
+if [[ "$event" == "REQUEST_CHANGES" ]]; then
+  pass_test "CHANGES_REQUESTED maps to REQUEST_CHANGES"
+else
+  fail_test "expected REQUEST_CHANGES, got '$event'"
+fi
+
+# --- Unknown status falls back to COMMENT ---
+event=$(_review_event_for_status "GARBAGE" 2>/dev/null)
+if [[ "$event" == "COMMENT" ]]; then
+  pass_test "unknown status falls back to COMMENT"
+else
+  fail_test "unknown status expected COMMENT, got '$event'"
+fi
+
+echo "---"
+echo "Passed: $pass"
+echo "Failed: $errors"
+exit $((errors > 0 ? 1 : 0))

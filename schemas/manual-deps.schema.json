@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hanfour.github.io/multi-repo-agent/schemas/manual-deps.schema.json",
+  "title": "MRA Manual Dependency Overrides",
+  "description": "Manual edges that act like high-confidence scanner output. Stored at .collab/manual-deps.json.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["source", "target"],
+    "additionalProperties": false,
+    "properties": {
+      "source": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "description": "Project identifier (TM-003)." },
+      "target": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "description": "Project identifier (TM-003)." },
+      "type": { "type": "string", "default": "api" }
+    }
+  }
+}

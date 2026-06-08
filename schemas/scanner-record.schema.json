@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hanfour.github.io/multi-repo-agent/schemas/scanner-record.schema.json",
+  "title": "MRA Scanner JSONL Record",
+  "description": "One JSON object per JSONL line emitted by scanners/*.sh and consumed by lib/scan.sh.",
+  "type": "object",
+  "required": ["source", "target", "type", "confidence", "scanner"],
+  "additionalProperties": false,
+  "properties": {
+    "source": { "type": "string", "minLength": 1 },
+    "target": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "minLength": 1 },
+    "confidence": { "enum": ["high", "medium", "low"] },
+    "scanner": { "type": "string", "minLength": 1 }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hanfour.github.io/multi-repo-agent/schemas/review-result.schema.json",
+  "title": "MRA Review Result",
+  "description": "JSON shape that lib/review.sh expects from Claude before posting to GitHub. Mirrored by _validate_review_json in lib/review.sh (TM-007).",
+  "type": "object",
+  "required": ["status", "summary", "comments"],
+  "additionalProperties": true,
+  "properties": {
+    "status": {
+      "enum": ["APPROVED", "CHANGES_REQUESTED", "COMMENT"],
+      "description": "Model-produced verdict. Note: APPROVED is downgraded to COMMENT at post time unless the operator sets MRA_REVIEW_ALLOW_APPROVE=1; the closed enum here is about format, not authority."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "comments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "line", "body", "severity"],
+        "additionalProperties": true,
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "line": { "type": "integer", "minimum": 1 },
+          "body": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"] }
+        }
+      }
+    }
+  }
+}

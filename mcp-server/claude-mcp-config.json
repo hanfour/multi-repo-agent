@@ -1,0 +1,12 @@
+{
+  "_comment": "Sample MCP client config for the mra server. The MCP server defaults to DENY: every tool call is rejected unless either (a) MRA_ALLOWED_WORKSPACES lists the workspaces you authorize, or (b) MRA_MCP_OPEN_MODE=1 is set explicitly. Open mode is intended only for single-user trusted setups; allowlist is strongly preferred. On POSIX separate paths with ':' (delimiter shown below); on Windows use ';'.",
+  "mcpServers": {
+    "mra": {
+      "command": "node",
+      "args": ["/Users/you/multi-repo-agent/mcp-server/dist/index.js"],
+      "env": {
+        "MRA_ALLOWED_WORKSPACES": "/Users/you/work/myorg:/Users/you/work/sandbox"
+      }
+    }
+  }
+}

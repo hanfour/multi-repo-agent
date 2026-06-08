@@ -1,0 +1,326 @@
+name: 'MRA Code Review'
+description: 'Context-aware code review using Claude Code CLI with cross-repo dependency analysis'
+inputs:
+  workspace:
+    description: 'Workspace root path'
+    required: true
+  project:
+    description: 'Project being reviewed'
+    required: true
+  mra-path:
+    description: 'Path to multi-repo-agent installation'
+    required: false
+    default: '${{ github.workspace }}/.mra'
+  git-org:
+    description: 'Git org URL for cloning dependency repos'
+    required: true
+  base-ref:
+    description: 'Base branch for diff (default: main)'
+    required: false
+    default: 'main'
+  anthropic-api-key:
+    description: 'Anthropic API key for Claude Code CLI'
+    required: true
+  model:
+    description: 'Claude model to use'
+    required: false
+    default: 'sonnet'
+  max-turns:
+    description: 'Max conversation turns for Claude'
+    required: false
+    default: '3'
+  output-language:
+    description: 'Language for review output'
+    required: false
+    default: ''
+
+outputs:
+  review:
+    description: 'Review result text'
+    value: ${{ steps.review.outputs.review }}
+  status:
+    description: 'Review status: approved, changes_requested, error'
+    value: ${{ steps.review.outputs.status }}
+  has-api-change:
+    description: 'Whether API surface changes were detected'
+    value: ${{ steps.context.outputs.has_api_change }}
+
+# Security note (TM-006):
+# - All caller-controlled inputs are passed via step-level `env:` blocks and
+#   referenced as quoted "$VAR" inside shell. Direct ${{ inputs.* }} expansion
+#   inside `run:` bodies is forbidden — it permits shell injection via PR or
+#   workflow inputs.
+# - Numeric/enum-like inputs (model, max-turns, base-ref, project) are validated
+#   against an allowlist regex before they reach the Claude CLI.
+# - `--add-dir` args are built as a bash array, not concatenated into a string.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        IN_PROJECT: ${{ inputs.project }}
+        IN_MODEL: ${{ inputs.model }}
+        IN_MAX_TURNS: ${{ inputs.max-turns }}
+        IN_BASE_REF: ${{ inputs.base-ref }}
+        IN_WORKSPACE: ${{ inputs.workspace }}
+        IN_MRA_PATH: ${{ inputs.mra-path }}
+        IN_GIT_ORG: ${{ inputs.git-org }}
+      run: |
+        set -euo pipefail
+
+        die() { echo "::error::mra-code-review: $*"; exit 1; }
+        validate() {
+          local label="$1" value="$2" regex="$3"
+          [[ "$value" =~ $regex ]] || die "$label '$value' does not match $regex"
+        }
+
+        validate project    "$IN_PROJECT"    '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+        validate model      "$IN_MODEL"      '^[A-Za-z0-9._-]{1,64}$'
+        validate max-turns  "$IN_MAX_TURNS"  '^[0-9]{1,3}$'
+        validate base-ref   "$IN_BASE_REF"   '^[A-Za-z0-9._/-]{1,128}$'
+        validate workspace  "$IN_WORKSPACE"  '^[A-Za-z0-9._/-]{1,255}$'
+        validate mra-path   "$IN_MRA_PATH"   '^[A-Za-z0-9._/-]{1,255}$'
+        # git-org is a URL prefix used as "$GIT_ORG/$repo.git"; restrict to
+        # https/git URL characters and forbid shell metacharacters.
+        validate git-org    "$IN_GIT_ORG"    '^[A-Za-z0-9:@._/-]{1,255}$'
+
+        echo "Inputs validated: project=$IN_PROJECT model=$IN_MODEL turns=$IN_MAX_TURNS base=$IN_BASE_REF"
+
+    - name: Build review context
+      id: context
+      shell: bash
+      env:
+        IN_WORKSPACE: ${{ inputs.workspace }}
+        IN_MRA_PATH: ${{ inputs.mra-path }}
+        IN_PROJECT: ${{ inputs.project }}
+      run: |
+        set -euo pipefail
+        export MRA_WORKSPACE="$IN_WORKSPACE"
+        MRA_DIR="$IN_MRA_PATH"
+
+        source "$MRA_DIR/lib/colors.sh"
+        source "$MRA_DIR/lib/config.sh"
+        source "$MRA_DIR/lib/detect-type.sh"
+        source "$MRA_DIR/lib/sync.sh"
+        source "$MRA_DIR/lib/deps.sh"
+        source "$MRA_DIR/lib/change-detector.sh"
+
+        PROJECT="$IN_PROJECT"
+        PROJECT_DIR="$IN_WORKSPACE/$PROJECT"
+        GRAPH_FILE="$IN_WORKSPACE/.collab/dep-graph.json"
+
+        # --- Detect project type ---
+        PROJECT_TYPE="unknown"
+        if [[ -f "$GRAPH_FILE" ]]; then
+          PROJECT_TYPE=$(jq -r --arg p "$PROJECT" '.projects[$p].type // "unknown"' "$GRAPH_FILE")
+        fi
+        if [[ "$PROJECT_TYPE" == "unknown" ]]; then
+          PROJECT_TYPE=$(detect_project_type "$PROJECT_DIR")
+        fi
+        echo "project_type=$PROJECT_TYPE" >> "$GITHUB_OUTPUT"
+
+        # --- Detect API changes ---
+        HAS_API_CHANGE="false"
+        if [[ -d "$PROJECT_DIR" ]]; then
+          CHANGE_RESULT=$(is_api_change "$PROJECT_DIR" "$PROJECT_TYPE" 2>/dev/null || echo "low")
+          CHANGE_LEVEL="${CHANGE_RESULT%%|*}"
+          if [[ "$CHANGE_LEVEL" == "high" ]]; then
+            HAS_API_CHANGE="true"
+          fi
+        fi
+        echo "has_api_change=$HAS_API_CHANGE" >> "$GITHUB_OUTPUT"
+
+        # --- Resolve consumer/dependency repos ---
+        CONSUMER_REPOS=""
+        DEP_REPOS=""
+        if [[ -f "$GRAPH_FILE" ]]; then
+          CONSUMER_REPOS=$(jq -r --arg p "$PROJECT" \
+            '.projects[$p].consumedBy // [] | .[]' "$GRAPH_FILE" 2>/dev/null | tr '\n' ' ')
+          DEP_REPOS=$(jq -r --arg p "$PROJECT" \
+            '[.projects[$p].deps // {} | to_entries[].value[] ] | unique | .[]' "$GRAPH_FILE" 2>/dev/null | tr '\n' ' ')
+        fi
+        echo "consumers=$CONSUMER_REPOS" >> "$GITHUB_OUTPUT"
+        echo "deps=$DEP_REPOS" >> "$GITHUB_OUTPUT"
+
+        # --- List related repos to clone ---
+        # Filter consumer/dep repo names against the same identifier regex
+        # used for `project`. Anything that doesn't match is dropped — this
+        # protects the later `git clone "$GIT_ORG/$repo.git"` step.
+        ALL_RELATED=""
+        for repo in $CONSUMER_REPOS $DEP_REPOS; do
+          [[ "$repo" == "$PROJECT" ]] && continue
+          [[ "$repo" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || {
+            echo "::warning::dropping unsafe repo name from dep-graph: $repo"
+            continue
+          }
+          ALL_RELATED="$ALL_RELATED $repo"
+        done
+        ALL_RELATED=$(echo "$ALL_RELATED" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+        echo "related_repos=$ALL_RELATED" >> "$GITHUB_OUTPUT"
+        echo "Context: type=$PROJECT_TYPE, api_change=$HAS_API_CHANGE, consumers=[$CONSUMER_REPOS], deps=[$DEP_REPOS]"
+
+    - name: Clone related repos for context
+      shell: bash
+      env:
+        IN_GIT_ORG: ${{ inputs.git-org }}
+        IN_WORKSPACE: ${{ inputs.workspace }}
+        RELATED_REPOS: ${{ steps.context.outputs.related_repos }}
+      run: |
+        set -euo pipefail
+        for repo in $RELATED_REPOS; do
+          # Defence in depth: the previous step already filtered names, but
+          # re-validate here in case GITHUB_OUTPUT was tampered with.
+          [[ "$repo" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || {
+            echo "::warning::refusing to clone unsafe repo: $repo"
+            continue
+          }
+          REPO_DIR="$IN_WORKSPACE/$repo"
+          if [[ ! -d "$REPO_DIR" ]]; then
+            echo "Cloning $repo for review context..."
+            git clone --depth 1 "$IN_GIT_ORG/$repo.git" "$REPO_DIR" 2>/dev/null || \
+              echo "::warning::Could not clone $repo — review will proceed without consumer context"
+          fi
+        done
+
+    - name: Assemble review prompt and run Claude
+      id: review
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        IN_WORKSPACE: ${{ inputs.workspace }}
+        IN_MRA_PATH: ${{ inputs.mra-path }}
+        IN_PROJECT: ${{ inputs.project }}
+        IN_BASE_REF: ${{ inputs.base-ref }}
+        IN_MODEL: ${{ inputs.model }}
+        IN_MAX_TURNS: ${{ inputs.max-turns }}
+        IN_OUTPUT_LANGUAGE: ${{ inputs.output-language }}
+        CTX_PROJECT_TYPE: ${{ steps.context.outputs.project_type }}
+        CTX_CONSUMERS: ${{ steps.context.outputs.consumers }}
+        CTX_DEPS: ${{ steps.context.outputs.deps }}
+        CTX_HAS_API_CHANGE: ${{ steps.context.outputs.has_api_change }}
+        CTX_RELATED_REPOS: ${{ steps.context.outputs.related_repos }}
+      run: |
+        set -euo pipefail
+        MRA_DIR="$IN_MRA_PATH"
+        WORKSPACE="$IN_WORKSPACE"
+        PROJECT="$IN_PROJECT"
+        PROJECT_DIR="$WORKSPACE/$PROJECT"
+        GRAPH_FILE="$WORKSPACE/.collab/dep-graph.json"
+        BASE_REF="$IN_BASE_REF"
+
+        # --- Build prompt ---
+        source "$MRA_DIR/lib/review-prompt.sh"
+        PROMPT=$(build_review_prompt \
+          "$PROJECT" \
+          "$PROJECT_DIR" \
+          "$GRAPH_FILE" \
+          "$BASE_REF" \
+          "$CTX_PROJECT_TYPE" \
+          "$CTX_CONSUMERS" \
+          "$CTX_DEPS" \
+          "$CTX_HAS_API_CHANGE" \
+          "$IN_OUTPUT_LANGUAGE")
+
+        # --- Build --add-dir args as a bash array (no string concat) ---
+        ADD_DIR_ARGS=(--add-dir "$PROJECT_DIR")
+        for repo in $CTX_RELATED_REPOS; do
+          [[ "$repo" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || continue
+          REPO_DIR="$WORKSPACE/$repo"
+          [[ -d "$REPO_DIR" ]] && ADD_DIR_ARGS+=(--add-dir "$REPO_DIR")
+        done
+
+        # --- Run Claude Code CLI ---
+        REVIEW_FILE=$(mktemp)
+        claude -p "$PROMPT" \
+          "${ADD_DIR_ARGS[@]}" \
+          --append-system-prompt-file "$MRA_DIR/agents/code-reviewer.md" \
+          --model "$IN_MODEL" \
+          --max-turns "$IN_MAX_TURNS" \
+          --setting-sources "project" \
+          > "$REVIEW_FILE" 2>/dev/null || true
+
+        REVIEW_TEXT=$(cat "$REVIEW_FILE")
+
+        # --- Detect status from review output ---
+        STATUS="changes_requested"
+        if echo "$REVIEW_TEXT" | grep -qi "Status: APPROVED"; then
+          STATUS="approved"
+        fi
+
+        if [[ -z "$REVIEW_TEXT" ]]; then
+          REVIEW_TEXT="Code review could not be completed. Please review manually."
+          STATUS="error"
+        fi
+
+        # --- Write outputs ---
+        # Use file-based output for multiline text
+        echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+        {
+          echo "review<<MRA_REVIEW_EOF"
+          echo "$REVIEW_TEXT"
+          echo "MRA_REVIEW_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "Review status: $STATUS"
+        rm -f "$REVIEW_FILE"
+
+    - name: Post review as PR comment
+      if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        GH_REPO_OWNER: ${{ github.repository_owner }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        IN_PROJECT: ${{ inputs.project }}
+        IN_MODEL: ${{ inputs.model }}
+        REVIEW_STATUS: ${{ steps.review.outputs.status }}
+        REVIEW_BODY: ${{ steps.review.outputs.review }}
+        CTX_HAS_API: ${{ steps.context.outputs.has_api_change }}
+        CTX_CONSUMERS: ${{ steps.context.outputs.consumers }}
+      run: |
+        set -euo pipefail
+
+        # --- Build comment body ---
+        ICON="🔍"
+        [[ "$REVIEW_STATUS" == "approved" ]] && ICON="✅"
+        [[ "$REVIEW_STATUS" == "changes_requested" ]] && ICON="⚠️"
+        [[ "$REVIEW_STATUS" == "error" ]] && ICON="❌"
+
+        BODY="## ${ICON} MRA Code Review — ${IN_PROJECT}
+
+        **Status:** \`${REVIEW_STATUS}\`
+        **Model:** \`${IN_MODEL}\`
+        **API Change Detected:** \`${CTX_HAS_API}\`"
+
+        if [[ -n "$CTX_CONSUMERS" && "$CTX_HAS_API" == "true" ]]; then
+          BODY="$BODY
+        **Affected Consumers:** \`${CTX_CONSUMERS}\`
+
+        > This PR modifies API surface code. Consumer projects were loaded for cross-repo analysis."
+        fi
+
+        BODY="$BODY
+
+        ---
+
+        ${REVIEW_BODY}
+
+        ---
+        <sub>Generated by <a href=\"https://github.com/${GH_REPO_OWNER}/multi-repo-agent\">multi-repo-agent</a></sub>"
+
+        # --- Post or update comment ---
+        EXISTING_COMMENT_ID=$(gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+          --jq '.[] | select(.body | contains("MRA Code Review")) | .id' 2>/dev/null | head -1)
+
+        if [[ -n "$EXISTING_COMMENT_ID" ]]; then
+          gh api "repos/${GH_REPO}/issues/comments/${EXISTING_COMMENT_ID}" \
+            -X PATCH -f body="$BODY" > /dev/null
+          echo "Updated existing review comment #$EXISTING_COMMENT_ID"
+        else
+          gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+            -f body="$BODY" > /dev/null
+          echo "Posted new review comment on PR #$PR_NUMBER"
+        fi

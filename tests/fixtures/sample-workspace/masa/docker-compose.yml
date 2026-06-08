@@ -1,0 +1,10 @@
+version: "3.8"
+services:
+  masa:
+    image: masa:local
+    ports:
+      - "4001:4001"
+    depends_on:
+      - mysql
+  mysql:
+    image: mysql:5.7

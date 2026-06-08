@@ -1,0 +1,19 @@
+version: "3.8"
+services:
+  erp:
+    image: erp:local
+    ports:
+      - "4000:4000"
+    depends_on:
+      - mysql
+      - redis
+    environment:
+      DATABASE_NAME: gspadmin
+  mysql:
+    image: mysql:5.7
+    ports:
+      - "3306:3306"
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
