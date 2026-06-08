@@ -1,0 +1,1637 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Branch-aware Sync & Review — Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-title">Branch-aware Sync & Review — Design</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#1-problem">1. Problem</a></li>
+<li><a href="#2-goals-non-goals">2. Goals / Non-goals</a></li>
+<li><a href="#3-command-surface-full-blueprint-phased">3. Command surface (full blueprint, phased)</a></li>
+<li><a href="#4-architecture">4. Architecture</a><ul>
+<li><a href="#41-branchstate-data-model">4.1 BranchState (data model)</a></li>
+<li><a href="#42-decision-engine-branch_sync_action">4.2 Decision engine branch_sync_action()</a></li>
+<li><a href="#43-module-responsibilities">4.3 Module responsibilities</a></li>
+</ul>
+</li>
+<li><a href="#5-data-flow">5. Data flow</a></li>
+<li><a href="#6-error-handling">6. Error handling</a></li>
+<li><a href="#7-testing">7. Testing</a></li>
+<li><a href="#8-out-of-scope-of-phase-0-deferred">8. Out of scope of Phase 0 (deferred)</a><ul>
+<li><a href="#81-known-limitations-follow-ups-from-phase-0-final-review">8.1 Known limitations &amp; follow-ups (from Phase 0 final review)</a></li>
+</ul>
+</li>
+<li><a href="#9-phase-1-cross-repo-branch-lifecycle">9. Phase 1 — Cross-repo branch lifecycle</a><ul>
+<li><a href="#91-command-surface">9.1 Command surface</a></li>
+<li><a href="#92-push-decision-engine-branch_push_action">9.2 Push decision engine branch_push_action()</a></li>
+<li><a href="#93-architecture-module-responsibilities">9.3 Architecture / module responsibilities</a></li>
+<li><a href="#94-data-flow">9.4 Data flow</a></li>
+<li><a href="#95-error-handling">9.5 Error handling</a></li>
+<li><a href="#96-testing">9.6 Testing</a></li>
+<li><a href="#97-phase-1-known-limitations-follow-ups-from-final-review-deferred-to-phase-3">9.7 Phase 1 known limitations &amp; follow-ups (from final review, deferred to Phase 3)</a></li>
+</ul>
+</li>
+<li><a href="#10-phase-2-cross-repo-pr-workflow">10. Phase 2 — Cross-repo PR workflow</a><ul>
+<li><a href="#101-command-surface">10.1 Command surface</a></li>
+<li><a href="#102-architecture-module-responsibilities">10.2 Architecture / module responsibilities</a></li>
+<li><a href="#103-data-flow">10.3 Data flow</a></li>
+<li><a href="#104-order_repos_by_deps-kahn-best-effort">10.4 order_repos_by_deps (Kahn best-effort)</a></li>
+<li><a href="#105-error-handling">10.5 Error handling</a></li>
+<li><a href="#106-testing">10.6 Testing</a></li>
+<li><a href="#107-out-of-scope-phase-3">10.7 Out of scope (Phase 3)</a></li>
+<li><a href="#108-phase-2-known-limitations-follow-ups-from-final-review-deferred-to-phase-3">10.8 Phase 2 known limitations &amp; follow-ups (from final review, deferred to Phase 3)</a></li>
+</ul>
+</li>
+<li><a href="#11-phase-3-hardening-sweep">11. Phase 3 — Hardening sweep</a><ul>
+<li><a href="#111-groups-exact-behavior">11.1 Groups &amp; exact behavior</a></li>
+<li><a href="#112-architecture-module-responsibilities">11.2 Architecture / module responsibilities</a></li>
+<li><a href="#113-error-handling">11.3 Error handling</a></li>
+<li><a href="#114-testing">11.4 Testing</a></li>
+<li><a href="#115-out-of-scope-phase-4">11.5 Out of scope (Phase 4)</a></li>
+<li><a href="#116-phase-3-follow-ups-from-final-review-deferred-to-phase-4">11.6 Phase 3 follow-ups (from final review, deferred to Phase 4)</a></li>
+</ul>
+</li>
+<li><a href="#12-phase-4-review-rangehead-diff-acquisition-unification">12. Phase 4 — Review range/head + diff-acquisition unification</a><ul>
+<li><a href="#121-command-surface-mra-review">12.1 Command surface (mra review)</a></li>
+<li><a href="#122-diff-model-mode-range_expr">12.2 Diff model — (mode, range_expr)</a></li>
+<li><a href="#123-threading-mode-range_expr-through-all-paths-retires-815">12.3 Threading (mode, range_expr) through all paths (retires §8.1.5)</a></li>
+<li><a href="#124-architecture-module-responsibilities">12.4 Architecture / module responsibilities</a></li>
+<li><a href="#125-error-handling">12.5 Error handling</a></li>
+<li><a href="#126-known-limitation-deferred-811-family">12.6 Known limitation (deferred, §8.1.1 family)</a></li>
+<li><a href="#127-testing">12.7 Testing</a></li>
+<li><a href="#128-out-of-scope-phase-5">12.8 Out of scope (Phase 5)</a></li>
+</ul>
+</li>
+<li><a href="#13-phase-5-review-correctness-group">13. Phase 5 — Review correctness group</a><ul>
+<li><a href="#131-items-exact-behavior">13.1 Items &amp; exact behavior</a></li>
+<li><a href="#132-architecture-module-responsibilities">13.2 Architecture / module responsibilities</a></li>
+<li><a href="#133-error-handling">13.3 Error handling</a></li>
+<li><a href="#134-testing">13.4 Testing</a></li>
+<li><a href="#135-out-of-scope-phase-6">13.5 Out of scope (Phase 6)</a></li>
+</ul>
+</li>
+<li><a href="#14-phase-6-cleanup-backlog">14. Phase 6 — Cleanup backlog</a><ul>
+<li><a href="#141-items-exact-behavior">14.1 Items &amp; exact behavior</a></li>
+<li><a href="#142-architecture-module-responsibilities">14.2 Architecture / module responsibilities</a></li>
+<li><a href="#143-error-handling">14.3 Error handling</a></li>
+<li><a href="#144-testing">14.4 Testing</a></li>
+<li><a href="#145-out-of-scope-phase-7">14.5 Out of scope (Phase 7)</a></li>
+</ul>
+</li>
+<li><a href="#15-phase-7-cross-repo-pr-merge-orchestration">15. Phase 7 — Cross-repo PR merge orchestration</a><ul>
+<li><a href="#151-command-surface">15.1 Command surface</a></li>
+<li><a href="#152-gating-per-pr-before-merging">15.2 Gating (per PR, before merging)</a></li>
+<li><a href="#153-stop-on-first-failure">15.3 Stop-on-first-failure</a></li>
+<li><a href="#154-data-flow">15.4 Data flow</a></li>
+<li><a href="#155-architecture-module-responsibilities">15.5 Architecture / module responsibilities</a></li>
+<li><a href="#156-error-handling">15.6 Error handling</a></li>
+<li><a href="#157-testing">15.7 Testing</a></li>
+<li><a href="#158-out-of-scope">15.8 Out of scope</a></li>
+</ul>
+</li>
+<li><a href="#16-phase-8-final-polish">16. Phase 8 — Final polish</a><ul>
+<li><a href="#161-items-exact-behavior">16.1 Items &amp; exact behavior</a></li>
+<li><a href="#162-architecture-module-responsibilities">16.2 Architecture / module responsibilities</a></li>
+<li><a href="#163-error-handling">16.3 Error handling</a></li>
+<li><a href="#164-testing">16.4 Testing</a></li>
+<li><a href="#165-out-of-scope-closed">16.5 Out of scope / closed</a></li>
+</ul>
+</li>
+<li><a href="#17-phase-9-branch-prbranch-merge-repo-subset">17. Phase 9 — branch pr/branch merge repo subset</a><ul>
+<li><a href="#171-goal-command-surface">17.1 Goal &amp; command surface</a></li>
+<li><a href="#172-exact-behavior">17.2 Exact behavior</a></li>
+<li><a href="#173-architecture-module-responsibilities">17.3 Architecture / module responsibilities</a></li>
+<li><a href="#174-error-handling">17.4 Error handling</a></li>
+<li><a href="#175-testing-extend-teststest_pr_opssh-existing-passfail-harness">17.5 Testing (extend tests/test_pr_ops.sh, existing PASS/FAIL harness)</a></li>
+<li><a href="#176-out-of-scope-phase-9">17.6 Out of scope (Phase 9)</a></li>
+</ul>
+</li>
+<li><a href="#18-phase-10-ci-polling-auto-merge">18. Phase 10 — CI-polling auto-merge</a><ul>
+<li><a href="#181-goal-command-surface">18.1 Goal &amp; command surface</a></li>
+<li><a href="#182-exact-behavior">18.2 Exact behavior</a></li>
+<li><a href="#183-architecture-module-responsibilities">18.3 Architecture / module responsibilities</a></li>
+<li><a href="#184-error-handling">18.4 Error handling</a></li>
+<li><a href="#185-testing">18.5 Testing</a></li>
+<li><a href="#186-out-of-scope-phase-10">18.6 Out of scope (Phase 10)</a></li>
+</ul>
+</li>
+<li><a href="#19-phase-11-branch-status-json">19. Phase 11 — branch status --json</a><ul>
+<li><a href="#191-goal-command-surface">19.1 Goal &amp; command surface</a></li>
+<li><a href="#192-output-shape">19.2 Output shape</a></li>
+<li><a href="#193-stdout-discipline">19.3 stdout discipline</a></li>
+<li><a href="#194-architecture-module-responsibilities">19.4 Architecture / module responsibilities</a></li>
+<li><a href="#195-error-handling">19.5 Error handling</a></li>
+<li><a href="#196-testing">19.6 Testing</a></li>
+<li><a href="#197-out-of-scope-phase-11">19.7 Out of scope (Phase 11)</a></li>
+</ul>
+</li>
+<li><a href="#20-phase-12-sync-json-default-safe-push">20. Phase 12 — sync --json (default / --safe / --push)</a><ul>
+<li><a href="#201-goal-command-surface">20.1 Goal &amp; command surface</a></li>
+<li><a href="#202-shared-per-repo-result-model">20.2 Shared per-repo result model</a></li>
+<li><a href="#203-per-mode-action-vocabulary">20.3 Per-mode action vocabulary</a></li>
+<li><a href="#204-mechanism-json-without-disturbing-text-mode">20.4 Mechanism — JSON without disturbing text mode</a></li>
+<li><a href="#205-architecture-module-responsibilities">20.5 Architecture / module responsibilities</a></li>
+<li><a href="#206-error-handling-consumer-contract">20.6 Error handling &amp; consumer contract</a></li>
+<li><a href="#207-testing">20.7 Testing</a></li>
+<li><a href="#208-out-of-scope-phase-12">20.8 Out of scope (Phase 12)</a></li>
+</ul>
+</li>
+<li><a href="#21-phase-13-mra-plan-dual-claude-codex-multi-model-council">21. Phase 13 — mra plan --dual (claude + codex multi-model council)</a><ul>
+<li><a href="#211-goal-command-surface">21.1 Goal &amp; command surface</a></li>
+<li><a href="#212-safety-no-working-tree-mutation-from-planning">21.2 Safety (no working-tree mutation from planning)</a></li>
+<li><a href="#213-provider-abstraction">21.3 Provider abstraction</a></li>
+<li><a href="#214-dual-run-flow-synthesizer-decision-format">21.4 Dual-run flow &amp; synthesizer decision format</a></li>
+<li><a href="#215-architecture-module-responsibilities">21.5 Architecture / module responsibilities</a></li>
+<li><a href="#216-error-handling">21.6 Error handling</a></li>
+<li><a href="#217-testing">21.7 Testing</a></li>
+<li><a href="#218-out-of-scope-phase-13">21.8 Out of scope (Phase 13)</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">技術詳規格</div>
+      <h1>Branch-aware Sync & Review — Design</h1>
+      <div class="meta"></div>
+    </div>
+    <p><strong>Date:</strong> 2026-05-29 (last updated 2026-06-01)
+<strong>Status:</strong> Cumulative spec. Phases 0–4 designed (§3–§12); Phases 0–3 implemented and merged, Phase 4 designed/pending implementation. Phase 5 deferred (§12.8).
+<strong>Scope:</strong> Add branch-aware remote/local sync and review extensions to <code>mra</code>, delivered in phases. This is one accumulating document — §3–§8 describe the Phase 0 skeleton and the authoritative phase map (§8); §9–§12 are the approved designs for Phases 1–4. The Phase 0 sections below are preserved as written; later sections supersede their "deferred to later phases" notes.</p>
+<hr />
+<h2 id="1-problem">1. Problem</h2>
+<p><code>mra</code> already has <strong>internal sync helpers</strong> (<code>lib/sync.sh</code>: <code>sync_repo</code>, <code>sync_workspace</code>, <code>sync_from_repos_json</code>) and a public <code>review</code> command (light/standard/debate, personas, <code>--pr</code>). Two gaps remain:</p>
+<ul>
+<li><strong>Sync is internal and default-branch only.</strong> There is no public <code>mra sync</code> command today — the helpers run inside <code>init</code>/launch flows (and can be skipped with <code>--no-sync</code>). Those helpers pull a repo only when it is on its default branch (<code>main</code>/<code>master</code>); a repo on a feature branch is skipped with a warning. There is no cross-repo view of where each repo stands (branch, ahead/behind, dirty), no safe pull on feature branches, no push, no cross-repo branch coordination, and no PR chaining.</li>
+<li><strong>Review cannot see local work.</strong> <code>mra review</code> always diffs <code>base...HEAD</code>. It cannot review uncommitted working-tree changes, and there is no integration that auto-reviews the repos a sync touched.</li>
+</ul>
+<p>This spec adds <strong>branch-aware sync</strong> and <strong>review extensions</strong> as one cohesive workflow, built skeleton-first.</p>
+<h2 id="2-goals-non-goals">2. Goals / Non-goals</h2>
+<p><strong>Goals</strong>
+- A cross-repo branch status overview.
+- Safe pull on feature branches (fast-forward only; never mutate a dirty or diverged working tree).
+- Review of local uncommitted changes without a PR.
+- A shared, unit-testable decision engine that later phases (push, PR chaining, auto-review) reuse.</p>
+<p><strong>Non-goals of the Phase 0 skeleton</strong> (note: items later designed in §9–§12 are marked)
+- Auto merge/rebase of diverged branches (<code>--safe</code> only ever fast-forwards) — still a non-goal.
+- Push, cross-repo branch create/switch, PR chaining — were Phase 0 non-goals; now designed in §9 (push, branch new/switch) and §10 (PR chaining).
+- Any write to a repo from the status or review paths (read-only guarantee preserved) — still holds for <code>branch status</code> and all review paths.</p>
+<h2 id="3-command-surface-full-blueprint-phased">3. Command surface (full blueprint, phased)</h2>
+<p>All <code>branch</code> and <code>sync</code> entries below are <strong>new public commands</strong>. <code>mra sync</code> does not exist today; Phase 0 introduces it. Positional/flag order follows the existing <code>review</code> parser convention — <strong>repo/project is a positional argument, options are <code>--flags</code> after it</strong> — unless a phase-specific command surface says otherwise (e.g. §17 lets <code>branch pr</code>/<code>branch merge</code> interleave flags with their trailing <code>[repos…]</code> positionals).</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Capability</th>
+<th>Phase</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mra branch status [--all] [--fetch] [--json]</code></td>
+<td>Cross-repo overview: branch / ahead·behind / dirty (default: only repos needing attention; <code>--all</code>: every repo; <code>--json</code>: machine-readable array of all repos)</td>
+<td>0, <strong>11</strong></td>
+</tr>
+<tr>
+<td><code>mra review &lt;repo&gt; --working</code></td>
+<td>Review working-tree (staged + unstaged) changes</td>
+<td><strong>0</strong></td>
+</tr>
+<tr>
+<td><code>mra sync [--safe] [--json]</code></td>
+<td>Public sync; <code>--safe</code> pulls feature branches ff-only, else skip+warn; <code>--json</code>: per-repo <code>{repo,action,ok}</code> array (default/<code>--safe</code>/<code>--push</code> only)</td>
+<td>0, <strong>12</strong></td>
+</tr>
+<tr>
+<td><code>mra sync --push [--dry-run] [--json]</code></td>
+<td>Push local branch to origin; <code>--json</code>: per-repo <code>{repo,action,ok}</code> array</td>
+<td>1, <strong>12</strong></td>
+</tr>
+<tr>
+<td><code>mra branch new &lt;name&gt; [repos…]</code> / <code>switch &lt;name&gt;</code></td>
+<td>Create/switch same-named branch across repos</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>mra review &lt;repo&gt; --range A..B</code> / <code>--head &lt;ref&gt;</code></td>
+<td>Review a specific branch / commit range</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>mra sync --review</code></td>
+<td>Auto-review repos that a sync touched</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>mra branch pr [--base] [--dry-run] [repos…]</code></td>
+<td>Open PRs across repos in dependency order (<code>[repos…]</code> = subset)</td>
+<td>2, <strong>9</strong></td>
+</tr>
+<tr>
+<td><code>mra branch merge [--strategy] [--dry-run] [--delete-branch] [--wait-ci] [--ci-timeout &lt;sec&gt;] [repos…]</code></td>
+<td>Dependency-ordered cross-repo PR merge with mergeable+CI gating (<code>[repos…]</code> = subset; <code>--wait-ci</code> polls CI until done before merging)</td>
+<td>7, 8, <strong>9, 10</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>mra sync</code> default behavior (Phase 0):</strong> with no flags, <code>mra sync</code> exposes the existing helper behavior as a public command — clone missing repos, pull repos on their default branch, skip feature branches with a warning (a regression-safe wrapper over today's helpers). <code>--safe</code> adds the branch-aware fast-forward path described in §4.2.</p>
+<p><strong>Phase 0 (this implementation)</strong> walks one end-to-end journey:</p>
+<blockquote>
+<p>Working across several repos on feature branches → <code>mra branch status</code> shows each repo's state → <code>mra sync --safe</code> fast-forwards the repos it safely can (skipping the rest with a warning) → <code>mra review &lt;repo&gt; --working</code> reviews local uncommitted changes.</p>
+</blockquote>
+<p>This slice touches both subsystems thinly and establishes the <code>BranchState</code> model and decision engine that every later phase reuses. Phases 1–2 are explicitly out of scope here.</p>
+<h2 id="4-architecture">4. Architecture</h2>
+<p>Follows existing <code>mra</code> conventions: many small files, immutable functions (return new values, never mutate globals or repos), <code>KEY=VALUE</code> flat-string returns parseable by callers.</p>
+<h3 id="41-branchstate-data-model">4.1 <code>BranchState</code> (data model)</h3>
+<p><code>lib/branch.sh</code> computes, per repo, a snapshot returned as flat <code>KEY=VALUE</code> lines:</p>
+<div class="highlight"><pre><span></span><code>repo=my-api
+branch=feat/new-auth          # current branch; &quot;(detached)&quot; when detached HEAD
+upstream=origin/feat/new-auth # &quot;(none)&quot; when no tracking branch
+ahead=2                       # commits ahead of upstream
+behind=0                      # commits behind upstream (drives ff eligibility)
+dirty=3                       # uncommitted file count (tracked: staged + unstaged)
+sync_action=fast-forward      # computed by the decision engine (below)
+</code></pre></div>
+
+<p><strong>Fetch semantics (important).</strong> <code>ahead</code>/<code>behind</code> are only accurate if remote-tracking refs are current. To keep the read-only guarantee meaningful, <code>get_branch_state()</code> does <strong>not</strong> fetch by default — it reads local refs only, so <code>ahead</code>/<code>behind</code> may be stale relative to <code>origin</code>. Fetch is opt-in / contextual:</p>
+<ul>
+<li><code>mra branch status</code> — no fetch; local refs only. Output notes that ahead/behind reflect the last fetch.</li>
+<li><code>mra branch status --fetch</code> — runs <code>git fetch --quiet</code> first for fresh counts.</li>
+<li><code>mra sync --safe</code> — fetches internally before computing state (a fast-forward needs current refs to be correct anyway).</li>
+</ul>
+<p>A fetch updates remote-tracking refs and <code>.git/FETCH_HEAD</code> but never touches the working tree or local branches; "read-only" in this spec means <strong>the working tree and local branches are never modified</strong>. <code>branch status</code> without <code>--fetch</code> writes nothing at all.</p>
+<h3 id="42-decision-engine-branch_sync_action">4.2 Decision engine <code>branch_sync_action()</code></h3>
+<p>A pure function: inputs <code>ahead</code>, <code>behind</code>, <code>dirty</code>, <code>upstream</code> → returns exactly one action string. This is the testability anchor of Phase 0 and the shared judgement source for Phase 1 (push) and Phase 2 (which repos changed → auto-review).</p>
+<p><strong>Evaluation is strictly ordered — the first matching rule wins</strong> (this removes overlap between <code>dirty</code>, <code>diverged</code>, and <code>no-upstream</code>):</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Condition</th>
+<th><code>sync_action</code></th>
+<th><code>--safe</code> behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>upstream = (none)</code></td>
+<td><code>no-upstream</code></td>
+<td>skip (hint: no tracking branch set)</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>behind = 0</code> and <code>ahead = 0</code></td>
+<td><code>up-to-date</code></td>
+<td>no-op</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>behind = 0</code> and <code>ahead &gt; 0</code></td>
+<td><code>ahead-only</code></td>
+<td>no-op (ahead is left for Phase 1 push)</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>behind &gt; 0</code> and <code>ahead &gt; 0</code></td>
+<td><code>diverged</code></td>
+<td>skip + warn (needs rebase/merge — deferred)</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>behind &gt; 0</code> and <code>ahead = 0</code> and <code>dirty &gt; 0</code></td>
+<td><code>dirty-skip</code></td>
+<td>skip + warn (a ff would touch a dirty tree)</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>behind &gt; 0</code> and <code>ahead = 0</code> and <code>dirty = 0</code></td>
+<td><code>fast-forward</code></td>
+<td><code>git pull --ff-only</code></td>
+</tr>
+</tbody>
+</table>
+<p>Notes on the ordering: <code>no-upstream</code> is checked first because ahead/behind are undefined without an upstream. <code>diverged</code> (rule 4) is reported regardless of <code>dirty</code> — a diverged branch is skipped either way, and reporting <code>diverged</code> is more informative than <code>dirty-skip</code>. <code>dirty-skip</code> (rule 5) only matters for the one case where a ff <em>would</em> otherwise run. This makes <code>dirty + diverged</code> → <code>diverged</code> and <code>dirty + no-upstream</code> → <code>no-upstream</code> deterministic.</p>
+<h3 id="43-module-responsibilities">4.3 Module responsibilities</h3>
+<ul>
+<li><strong><code>lib/branch.sh</code> (new)</strong> — <code>get_branch_state()</code>, <code>branch_sync_action()</code>, <code>render_branch_table()</code>. Read-only introspection and formatting.</li>
+<li><strong><code>lib/sync.sh</code> (extended)</strong> — new public <code>mra sync</code> entrypoint wrapping the existing helpers (default behavior unchanged) plus a <code>--safe</code> path: fetch → per repo, get <code>BranchState</code> → ask the decision engine → execute (<code>git pull --ff-only</code>) or skip. <code>--safe</code> is opt-in.</li>
+<li><strong><code>lib/review.sh</code> (extended)</strong> — new <code>--working</code> path: when <code>--working</code> is passed, diff source switches from <code>base...HEAD</code> to the working tree via <code>git diff HEAD</code> (tracked staged + unstaged changes). Strategy selection, debate, and output reuse existing code. <strong>Untracked files are out of scope for Phase 0</strong> — <code>git diff HEAD</code> excludes them; if the working tree contains only untracked files, the path reports "no uncommitted changes to review" (handling <code>git ls-files --others --exclude-standard</code> is deferred).</li>
+<li><strong><code>bin/mra.sh</code></strong> — new <code>branch</code> subcommand dispatch (<code>status</code>); new <code>sync</code> command dispatch with <code>--safe</code>/<code>--fetch</code>-style flag parsing; <code>review</code> parser gains a <code>--working</code> flag (repo stays positional, matching the existing convention).</li>
+</ul>
+<h2 id="5-data-flow">5. Data flow</h2>
+<ol>
+<li><strong><code>mra branch status</code></strong> → (if <code>--fetch</code>, <code>git fetch --quiet</code> per repo first) → for each repo in workspace: <code>get_branch_state()</code> → collect → filter (default keeps only repos <strong>needing attention</strong>: <code>dirty&gt;0</code>, <code>ahead&gt;0</code>, <code>behind&gt;0</code>, or not on the default branch; <code>--all</code> keeps every repo) → <code>render_branch_table()</code> → print. When the filtered set is empty (and not <code>--all</code>), print "all repos clean and up to date". Read-only (no working-tree/branch writes; no fetch unless <code>--fetch</code>).</li>
+<li><strong><code>mra sync --safe</code></strong> → for each repo: <code>git fetch --quiet</code> → <code>get_branch_state()</code> → <code>branch_sync_action()</code> → if <code>fast-forward</code>, run <code>git pull --ff-only</code>; otherwise log a skip reason. Each repo independent.</li>
+<li><strong><code>mra review &lt;repo&gt; --working</code></strong> → resolve repo dir → <code>git diff HEAD</code> (tracked staged + unstaged) → if empty, print "no uncommitted changes to review" and exit 0 → else feed into existing strategy-selection + review pipeline.</li>
+</ol>
+<h2 id="6-error-handling">6. Error handling</h2>
+<p>Per project rules: explicit handling at every level, no silent swallowing, user-friendly UI messages with detailed server-side logs.</p>
+<ul>
+<li><strong>Boundary validation:</strong> <code>branch</code> subcommands validate the workspace exists and each dir is a git repo (non-git dirs reuse <code>should_skip_dir</code>). <code>review &lt;repo&gt; --working</code> requires a present, existing repo argument; fail fast with a clear message.</li>
+<li><strong>Per-repo isolation:</strong> in <code>branch status</code> and <code>sync --safe</code>, a single repo failing (fetch failure, detached HEAD, no upstream) marks that row as failed via <code>log_error</code> and continues to the next repo. The command returns non-zero if any repo failed.</li>
+<li><strong>Detached HEAD / no upstream:</strong> surfaced as <code>branch=(detached)</code> / <code>upstream=(none)</code> in <code>BranchState</code>; the decision engine returns <code>no-upstream</code> (rule 1) and <code>--safe</code> skips — never an error that aborts the batch.</li>
+<li><strong>Safety first:</strong> <code>--safe</code> only runs <code>--ff-only</code>. It never auto-merges/rebases and never touches a repo with uncommitted changes — it skips with a warning rather than risk the user's working tree.</li>
+<li><strong>Read-only guarantee:</strong> <code>branch status</code> (without <code>--fetch</code>) writes nothing; <code>--fetch</code> and <code>sync --safe</code> may update remote-tracking refs + <code>.git/FETCH_HEAD</code> but never the working tree or local branches. The review path never writes to a repo; review agents keep the existing <code>--disallowedTools "Write,Edit"</code>.</li>
+<li><strong>Empty <code>--working</code> diff:</strong> a clean working tree (or one with only untracked files, which are out of scope) prints "no uncommitted changes to review" and exits 0 — the agent is not invoked on an empty diff.</li>
+</ul>
+<h2 id="7-testing">7. Testing</h2>
+<p>Reuses repo conventions: <code>tests/test_*.sh</code> plain-bash asserts with error counters, <code>tests/fixtures</code> git repos, registered in <code>test.sh</code>. Target ≥80% coverage; the decision engine approaches full coverage.</p>
+<ol>
+<li><strong><code>tests/test_branch.sh</code> (new, unit-focused)</strong> — exhaustively test the pure <code>branch_sync_action()</code> across ahead/behind/dirty/upstream combinations, asserting the correct action per the strictly-ordered rules in §4.2. Explicitly cover the overlap cases the ordering disambiguates: <code>dirty + diverged</code> → <code>diverged</code>, <code>dirty + no-upstream</code> → <code>no-upstream</code>, <code>behind&gt;0 + ahead=0 + dirty&gt;0</code> → <code>dirty-skip</code>. Validate <code>get_branch_state()</code> parsing (including <code>(detached)</code> / <code>(none)</code>) against a fixture repo using local refs only (no fetch).</li>
+<li><strong><code>tests/test_sync.sh</code> (extended)</strong> — fixture a behind feature branch → <code>sync --safe</code> fast-forwards; fixture diverged / dirty → skips and leaves the working tree untouched (assert <code>git rev-parse HEAD</code> unchanged before/after). Assert plain <code>mra sync</code> (no flags) reproduces the existing helper behavior (regression-safe no-change).</li>
+<li><strong><code>tests/test_review_working.sh</code> (new)</strong> — with tracked uncommitted changes, <code>review &lt;repo&gt; --working</code> captures a diff containing them; with a clean tree (and with only untracked files present) returns the "no changes" message and exits 0. To avoid real Claude calls, follow existing review tests: exercise diff acquisition and strategy selection, mock/skip the agent-invocation layer.</li>
+</ol>
+<h2 id="8-out-of-scope-of-phase-0-deferred">8. Out of scope of Phase 0 (deferred)</h2>
+<ul>
+<li><strong>Phase 1 (designed in §9):</strong> <code>branch new</code>/<code>switch</code> (cross-repo branch lifecycle), <code>sync --push</code> (+ <code>--dry-run</code>).</li>
+<li><strong>Phase 2 (designed in §10):</strong> <code>sync --review</code> (auto-review changed repos), <code>branch pr</code> (cross-repo PR chaining).</li>
+<li><strong>Phase 3 (designed in §11):</strong> hardening sweep — the §9.7 and §10.8 follow-ups (no new commands).</li>
+<li><strong>Phase 4 (designed in §12):</strong> <code>review --range</code>/<code>--head</code> + diff-acquisition unification (retires §8.1.5 — debate/persona use <code>review-diff.sh</code>).</li>
+<li><strong>Phase 5 (designed in §13):</strong> review-correctness group — <code>is_api_change</code> mode-aware (§8.1.1/§12.6/§12.8.3), <code>--working + --pr</code> guard (§8.1.2), mode-aware prompt preamble (§8.1.3), eval PKB via <code>review_diff_files</code> (§12.8.1), remove legacy <code>base</code> mode (§12.8.2).</li>
+<li><strong>Phase 6 (designed in §14):</strong> cleanup backlog — controller-detection grep bug (§13.5.1), §8.1.4 dead <code>action</code> lookup, eval <code>is_api_change</code> consistency (§13.5.3), §13.5.2 test gaps, §11.6.1 <code>set -euo pipefail</code> sweep (13 files).</li>
+<li><strong>Phase 7 (designed in §15):</strong> <code>mra branch merge</code> — cross-repo dependency-ordered PR merging with mergeable+CI gating, stop-on-first-failure, <code>--strategy</code>/<code>--dry-run</code>.</li>
+<li><strong>Phase 8 (designed in §16):</strong> final polish — <code>branch merge --delete-branch</code> (§15.8.2), <code>integration-test.sh</code> <code>is_api_change</code> consistency (§14.5.1), concerns-only negative test (§14.5.2), <code>merge_repo</code> skip log-level alignment (§15.8.1).</li>
+<li><strong>Phase 9 (designed in §17):</strong> <code>branch pr</code>/<code>branch merge</code> optional <code>[repos...]</code> subset (reactivates §11.6.2) — mirrors <code>branch new</code>; fail-fast subset validation, default-branch repos skipped, excluded-dependency warning.</li>
+<li><strong>Phase 10 (designed in §18):</strong> <code>branch merge --wait-ci [--ci-timeout &lt;sec&gt;]</code> — opt-in CI-polling auto-merge; poll each PR's checks until they finish (fail-fast on red, stop on timeout) then merge. New <code>wait_for_pr_checks</code> in <code>lib/ci.sh</code>.</li>
+<li><strong>Phase 11 (designed in §19):</strong> <code>branch status --json</code> — machine-readable JSON array of all repos' branch state (each object carries <code>needs_attention</code>). New pure <code>branch_state_json</code> in <code>lib/branch.sh</code>; on the JSON emit path stdout stays JSON-only (fetch failures → stderr; pre-emit fatal errors exit non-zero with no JSON — see §19.3).</li>
+<li><strong>Phase 12 (designed in §20):</strong> <code>sync --json</code> for the default / <code>--safe</code> / <code>--push</code> modes — per-repo <code>{repo, action, ok}</code> JSON array via a shared result model (<code>sync_result_json</code> + a <code>SYNC_RESULT_FILE</code> sink in <code>lib/sync.sh</code>); text mode untouched; <code>--review --json</code> rejected. Stdout JSON-only (human logs → stderr in JSON mode).</li>
+<li><strong>Phase 13 (designed in §21):</strong> <code>mra plan --dual</code> — opt-in multi-model council; each persona runs on <strong>claude AND codex</strong> (dual-run), synthesizer marks cross-model agreement vs disagreement for human decision. New <code>lib/model-provider.sh</code> (<code>call_model</code> provider abstraction, codex via <code>codex exec -s read-only</code>); default (no <code>--dual</code>) = current claude-only council, unchanged.</li>
+<li><strong>Won't fix / N/A:</strong> §15.8.3 (malformed-JSON message — not a real risk; <code>gh</code> returns valid JSON or non-zero); <code>sync --review --json</code> (review output is freeform LLM prose — no clean JSON contract, same reason <code>review --json</code> was declined).</li>
+</ul>
+<p>Each later phase reuses <code>BranchState</code> and <code>branch_sync_action()</code> from Phase 0.</p>
+<h3 id="81-known-limitations-follow-ups-from-phase-0-final-review">8.1 Known limitations &amp; follow-ups (from Phase 0 final review)</h3>
+<p>Phase 0 shipped with these intentional gaps, captured here so they are not lost. §8.1.5 is retired in Phase 4 (§12, diff unification); §8.1.1–§8.1.4 are deferred to Phase 5:</p>
+<ol>
+<li><strong><code>--working</code> + <code>is_api_change</code>:</strong> in working mode, API-change detection still reads the committed diff (<code>&lt;default&gt;...HEAD</code>), so uncommitted API-surface changes do not trigger consumer-context loading. This is the only place <code>diff_mode</code> is not yet threaded through. Fix: pass <code>diff_mode</code>/<code>resolved_base</code> into <code>is_api_change</code> (or a <code>_working</code> variant).</li>
+<li><strong><code>--working</code> + <code>--pr</code> not guarded:</strong> combining them is semantically incoherent (posting a review of uncommitted local changes as a PR inline review — line numbers won't match). Fix: reject with a clear error, consistent with the existing <code>--working + --personas</code> / <code>--working + --strategy debate</code> guards.</li>
+<li><strong>Review prompt preamble in <code>--working</code> mode:</strong> <code>build_review_prompt</code> still says "reviewing a pull request" regardless of mode. Fix: switch the preamble to "reviewing uncommitted working-tree changes" when <code>diff_mode == working</code>.</li>
+<li><strong>Dead <code>action</code> lookup in <code>branch_format_row</code>:</strong> it reads key <code>action</code> (always empty) then falls back to <code>sync_action</code>. Works correctly but the first lookup is dead. Fix: read <code>sync_action</code> directly.</li>
+<li><strong><code>review-diff.sh</code> not yet used by debate/persona paths:</strong> correct Phase-0 boundary (<code>--working</code> forces single-pass). When <code>--working</code> scope expands, migrate those paths too to avoid re-divergence.</li>
+</ol>
+<h2 id="9-phase-1-cross-repo-branch-lifecycle">9. Phase 1 — Cross-repo branch lifecycle</h2>
+<p><strong>Status:</strong> Approved (design) — 2026-05-29. Implementation scope for the next plan. Builds on Phase 0; reuses <code>BranchState</code>, <code>get_branch_state</code>, <code>branch_state_get</code>, and the <code>failed</code>-counter per-repo-isolation convention.</p>
+<h3 id="91-command-surface">9.1 Command surface</h3>
+<p>All are new public commands / flags. <code>branch</code> subcommands and <code>sync</code> flags follow the Phase 0 conventions (positional first, <code>--flags</code> after).</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Capability</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mra branch new &lt;name&gt; [repos…]</code></td>
+<td>Create + checkout a same-named branch across the workspace (or the listed repos)</td>
+</tr>
+<tr>
+<td><code>mra branch switch &lt;name&gt;</code></td>
+<td>Switch repos that already have <code>&lt;name&gt;</code> to it</td>
+</tr>
+<tr>
+<td><code>mra sync --push [--dry-run]</code></td>
+<td>Push local branches per the push decision engine; <code>--dry-run</code> previews only</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>branch new &lt;name&gt; [repos…]</code>:</strong> with no repos listed, acts on every git repo in the workspace; otherwise only the listed repos (each validated; missing/non-git → log_error that item, continue). Per repo: if <code>&lt;name&gt;</code> already exists → <code>git checkout &lt;name&gt;</code> (switch) + <code>log_warn "branch already exists, switched"</code>; else <code>git checkout -b &lt;name&gt;</code> with base = the repo's current HEAD. Per-repo isolation; any failure → non-zero exit.</p>
+<p><strong><code>branch switch &lt;name&gt;</code>:</strong> per repo, if <code>&lt;name&gt;</code> exists (<code>git show-ref --verify --quiet refs/heads/&lt;name&gt;</code>) → <code>git checkout &lt;name&gt;</code> (a dirty tree that blocks checkout makes git fail → skip + warn, never force, never discard changes); else skip + warn. Does NOT create (that is <code>branch new</code>). Per-repo isolation.</p>
+<p><strong><code>sync --push [--dry-run]</code>:</strong> per repo: <code>git fetch --quiet</code> (read-only refresh) → <code>get_branch_state</code> → <code>branch_push_action</code> → act per §9.2. Never <code>--force</code>/<code>--force-with-lease</code>. <code>--dry-run</code> performs the fetch but prints <code>would push …</code> instead of pushing (zero writes beyond remote-tracking refs). Default-branch is not specially protected — the decision engine governs by ahead/behind only (a deliberate choice). A detached HEAD is skipped (<code>skip-detached</code>, §9.2).</p>
+<p><strong>Dirty and push (note vs. <code>sync --safe</code>):</strong> unlike <code>sync --safe</code>, which has a <code>dirty-skip</code> action, <code>sync --push</code> does NOT consider the working tree — only committed refs are pushed, so a dirty tree never blocks a push. To avoid confusion with the <code>--safe</code> semantics, the push output still surfaces the repo's <code>dirty</code> count (e.g. <code>pushed (3 uncommitted files remain local)</code>) so users know uncommitted work stays local-only.</p>
+<h3 id="92-push-decision-engine-branch_push_action">9.2 Push decision engine <code>branch_push_action()</code></h3>
+<p>Pure function in <code>lib/branch.sh</code>, sibling to <code>branch_sync_action</code>. Inputs <code>ahead</code>, <code>behind</code>, <code>upstream</code>, <code>branch</code> (push does NOT consider <code>dirty</code> — uncommitted files don't affect pushing commits). <code>branch</code> is needed to distinguish a real unpublished branch from a detached HEAD, since both surface as <code>upstream=(none)</code> in the Phase 0 model. First matching rule wins:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Condition</th>
+<th>Result</th>
+<th><code>sync --push</code> behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>branch = (detached)</code></td>
+<td><code>skip-detached</code></td>
+<td>skip + warn (no branch to push; check out a branch first)</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>upstream = (none)</code></td>
+<td><code>push-new</code></td>
+<td><code>git push -u origin &lt;branch&gt;</code> (publish + set tracking)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>ahead = 0</code> &amp; <code>behind = 0</code></td>
+<td><code>up-to-date</code></td>
+<td>no-op</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>ahead &gt; 0</code> &amp; <code>behind = 0</code></td>
+<td><code>push</code></td>
+<td><code>git push</code> (non-force)</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>ahead &gt; 0</code> &amp; <code>behind &gt; 0</code></td>
+<td><code>skip-diverged</code></td>
+<td>skip + warn (pull/reconcile first)</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>ahead = 0</code> &amp; <code>behind &gt; 0</code></td>
+<td><code>skip-behind</code></td>
+<td>skip + warn (behind; pull first)</td>
+</tr>
+</tbody>
+</table>
+<p>Rule 1 is checked first so a detached HEAD can never reach the <code>push-new</code> path and attempt <code>git push -u origin "(detached)"</code>.</p>
+<h3 id="93-architecture-module-responsibilities">9.3 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/branch.sh</code> (extended)</strong> — add the pure <code>branch_push_action()</code>. Still zero writes.</li>
+<li><strong><code>lib/branch-ops.sh</code> (new)</strong> — mutating cross-repo branch operations: <code>create_branch_in_repo()</code>, <code>switch_branch_in_repo()</code>, <code>create_branch_workspace()</code>, <code>switch_branch_workspace()</code>. Isolating writes here keeps <code>branch.sh</code> read-only/pure.</li>
+<li><strong><code>lib/sync.sh</code> (extended)</strong> — <code>push_repo()</code> and <code>push_workspace()</code> (sibling to <code>safe_sync_repo</code>/<code>safe_sync_workspace</code>); both accept a dry-run flag.</li>
+<li><strong><code>bin/mra.sh</code></strong> — <code>branch)</code> dispatch gains <code>new</code>/<code>switch</code> subcommands; <code>sync)</code> gains <code>--push</code> and <code>--dry-run</code>; usage updated. Source <code>lib/branch-ops.sh</code> after <code>lib/branch.sh</code>.</li>
+</ul>
+<h3 id="94-data-flow">9.4 Data flow</h3>
+<ol>
+<li><code>mra branch new &lt;name&gt; [repos…]</code> → validate <code>&lt;name&gt;</code> (§9.5; fail fast before touching repos) → resolve repo set → per repo <code>create_branch_in_repo</code> (checkout -b, or checkout + warn if exists) → tally failures.</li>
+<li><code>mra branch switch &lt;name&gt;</code> → validate <code>&lt;name&gt;</code> (§9.5) → per repo <code>switch_branch_in_repo</code> (checkout if ref exists, else skip + warn) → tally failures.</li>
+<li><code>mra sync --push [--dry-run]</code> → <code>push_workspace</code> → per repo <code>push_repo</code> (fetch → state → <code>branch_push_action</code> → push/<code>-u</code>/skip, or <code>would push</code> when dry-run) → tally failures.</li>
+</ol>
+<h3 id="95-error-handling">9.5 Error handling</h3>
+<p>Same principles as Phase 0: explicit per-level handling, no silent swallowing, per-repo isolation with a <code>failed</code> counter (any failure → non-zero exit), user-friendly messages.</p>
+<ul>
+<li><code>&lt;name&gt;</code> is required for <code>branch new</code>/<code>switch</code>; empty → usage error.</li>
+<li><strong>Branch name validation (fail fast, before touching any repo):</strong> validate <code>&lt;name&gt;</code> with <code>git check-ref-format --branch "&lt;name&gt;"</code>; reject invalid names with a clear error. Additionally reject any <code>&lt;name&gt;</code> beginning with <code>-</code> (would be parsed as a git option). In every <code>git</code> invocation, pass the name after a <code>--</code> separator and/or as a quoted positional (<code>git checkout -b -- "&lt;name&gt;"</code> where supported, <code>git push origin -- "&lt;name&gt;"</code>) so a crafted name can never inject options. This makes <code>branch new</code>/<code>switch</code> error behavior deterministic and testable.</li>
+<li>Listed repos for <code>branch new</code> are validated; a missing/non-git repo logs an error for that item and continues.</li>
+<li><code>sync --push</code> never force-pushes; <code>skip-diverged</code>/<code>skip-behind</code> warn and leave the remote untouched. A detached HEAD → <code>skip-detached</code> (warn, no push). <code>--dry-run</code> guarantees no push.</li>
+<li><code>branch switch</code> delegates the dirty/conflict decision to <code>git checkout</code>; a non-zero checkout → skip + warn, never <code>-f</code>, never discard changes.</li>
+<li>Empty workspace / no git repos → informational message, exit 0.</li>
+</ul>
+<h3 id="96-testing">9.6 Testing</h3>
+<p>Reuses <code>tests/test_*.sh</code> plain-bash asserts + bare-repo fixtures (auto-discovered by <code>test.sh</code>).</p>
+<ol>
+<li><strong><code>tests/test_branch.sh</code> (extended)</strong> — <code>branch_push_action(ahead, behind, upstream, branch)</code> across all combinations: <code>skip-detached</code> (branch <code>(detached)</code>, even with <code>upstream=(none)</code>), <code>push-new</code> (no-upstream, real branch), <code>up-to-date</code>, <code>push</code> (ahead-only), <code>skip-diverged</code> (ahead+behind), <code>skip-behind</code> (behind-only). Assert rule 1 (detached) wins over rule 2 (no-upstream).</li>
+<li><strong><code>tests/test_branch_ops.sh</code> (new)</strong> — multi-repo fixture: <code>create_branch_workspace feat/x</code> puts every repo on <code>feat/x</code> (<code>git rev-parse --abbrev-ref HEAD</code>); a repo that already has <code>feat/x</code> is switched without fatal error. <code>switch_branch_workspace feat/x</code> switches repos that have the branch and leaves repos without it on their original branch (assert unchanged). <strong>Name validation:</strong> an invalid name (e.g. <code>feat/x..y</code> or <code>feat~1</code>) and a leading-dash name (e.g. <code>--foo</code>) are rejected before any repo is modified (assert non-zero return and that no repo changed branch).</li>
+<li><strong><code>tests/test_sync.sh</code> (extended)</strong> — bare-upstream + clone fixtures: local-ahead → <code>push_repo</code> (non-dry-run) makes the bare ref advance; no-upstream new branch → <code>push -u</code> then <code>@{upstream}</code> resolves; behind/diverged → <code>push_repo</code> leaves the bare ref unchanged; <code>--dry-run</code> with local-ahead leaves the bare ref unchanged (proves zero push).</li>
+</ol>
+<p>Target ≥80% coverage; both decision engines approach full coverage.</p>
+<h3 id="97-phase-1-known-limitations-follow-ups-from-final-review-deferred-to-phase-3">9.7 Phase 1 known limitations &amp; follow-ups (from final review, deferred to Phase 3)</h3>
+<p>Phase 1 shipped with these intentional gaps, captured so they are not lost:</p>
+<ol>
+<li><strong>Test harness <code>((errors++))</code> under <code>set -e</code>:</strong> the repo-wide test convention uses <code>((errors++))</code>, which (when a counter is 0) returns exit 1 and, under <code>set -euo pipefail</code>, aborts the test on the FIRST failing assertion instead of accumulating all failures. Harmless while tests pass; it weakens diagnostics when they don't. Pre-existing across all <code>tests/test_*.sh</code> (not introduced by Phase 1). Fix repo-wide: <code>errors=$((errors+1))</code>.</li>
+<li><strong><code>mra sync --dry-run</code> without <code>--push</code>:</strong> silently performs a normal clone/pull (dry-run only applies to <code>--push</code>). Fix: warn, or extend dry-run to the pull path.</li>
+<li><strong><code>mra sync --safe --push</code>:</strong> <code>--push</code> silently wins (checked first). Fix: document as mutually exclusive or error on both.</li>
+<li><strong>Diverged push integration fixture:</strong> the <code>diverged</code> push case is covered at the unit level (<code>branch_push_action</code>) but lacks a bare-remote integration fixture in <code>test_sync.sh</code> (the <code>behind</code> case has one). Add a two-clone diverged fixture asserting the remote ref is unchanged.</li>
+<li><strong><code>branch new &lt;repos…&gt;</code> path traversal:</strong> a repo-name arg like <code>../../x</code> is joined to <code>$workspace/</code> without containment validation. Low risk for a local CLI, but a <code>basename</code>/<code>realpath</code> containment check would close it.</li>
+</ol>
+<h2 id="10-phase-2-cross-repo-pr-workflow">10. Phase 2 — Cross-repo PR workflow</h2>
+<p><strong>Status:</strong> Approved (design) — 2026-05-29. Implementation scope for the next plan. Completes the original headline asks ("auto-review after sync", "PR chaining"). Builds on Phase 0/1; reuses <code>BranchState</code>, <code>safe_sync_repo</code>, <code>push_repo</code>, <code>review_project</code>, and <code>lib/deps.sh</code> relationship queries.</p>
+<h3 id="101-command-surface">10.1 Command surface</h3>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Capability</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mra sync --review</code></td>
+<td>Run safe-sync, then auto-review repos with changes (terminal review, no PR)</td>
+</tr>
+<tr>
+<td><code>mra branch pr [--base &lt;ref&gt;] [--dry-run]</code></td>
+<td>Push feature-branch repos and open PRs across them in dependency order</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>sync --review</code>:</strong> runs the safe-sync loop while recording which repos' HEAD actually moved (<code>changed</code>). The review target set = <code>changed</code> ∪ { repos with <code>ahead&gt;0</code> OR not on the default branch } (i.e. upstream commits just pulled in, plus your own local work). Each target is reviewed via <code>review_project</code> in terminal mode (no GitHub/<code>gh</code> needed). Empty target set → "no repos to review", exit 0. Does NOT require <code>gh</code>.</p>
+<p><strong><code>branch pr [--base &lt;ref&gt;] [--dry-run]</code>:</strong> requires <code>gh</code>. Collects repos on a feature branch (not the default branch, not detached), orders them dependency-first, and for each: first checks <strong>PR eligibility</strong> — if the feature branch has no commits relative to base (<code>git rev-list --count &lt;base&gt;..&lt;branch&gt;</code> is 0, i.e. no diff to propose), skip with an info message and do NOT push (an empty branch would otherwise push and then make <code>gh pr create</code> fail, misreporting "nothing to PR" as an error); this is not a failure. Otherwise reuse Phase 1 <code>push_repo</code> (publishing with <code>-u</code> if needed; <code>behind</code>/<code>diverged</code> → skip + warn, no PR), then <code>gh pr create --base &lt;default-or-</code>--base<code>&gt; --head &lt;current&gt;</code>. An already-existing PR for the head → skip + report its URL (not a failure). <code>--dry-run</code> prints <code>would open PR: &lt;repo&gt; &lt;branch&gt; → &lt;base&gt;</code> and performs no push and no PR.</p>
+<h3 id="102-architecture-module-responsibilities">10.2 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/review-select.sh</code> (new)</strong> — pure <code>review_targets(workspace, changed…)</code> returning the union (changed ∪ ahead&gt;0 ∪ off-default) using <code>get_branch_state</code>. No writes.</li>
+<li><strong><code>lib/sync.sh</code> (extended)</strong> — <code>sync_review_workspace(workspace)</code>: per repo capture HEAD before/after a <code>safe_sync_repo</code>, collect <code>changed</code>, compute <code>review_targets</code>, then <code>review_project</code> (terminal) each. Returns non-zero if any review failed.</li>
+<li><strong><code>lib/pr-ops.sh</code> (new)</strong> — <code>order_repos_by_deps(graph_file, repos…)</code> (Kahn best-effort; un-orderable remainder falls back to workspace/alpha order with a logged note), <code>pr_repo(repo_dir, base, dry_run)</code> (push + existing-PR detect + <code>gh pr create</code>), <code>pr_workspace(workspace, base, dry_run)</code>. Isolates PR/<code>gh</code> interaction, mirroring <code>branch-ops.sh</code>.</li>
+<li><strong><code>bin/mra.sh</code></strong> — <code>sync)</code> gains <code>--review</code>; <code>branch)</code> gains a <code>pr</code> subcommand (<code>--base</code>/<code>--dry-run</code>); <code>gh auth status</code> preflight for <code>branch pr</code>; usage. Source <code>lib/review-select.sh</code> and <code>lib/pr-ops.sh</code>.</li>
+</ul>
+<h3 id="103-data-flow">10.3 Data flow</h3>
+<ol>
+<li><code>mra sync --review</code> → per repo: <code>before=HEAD</code> → <code>safe_sync_repo</code> → <code>after=HEAD</code>; <code>before!=after</code> → add to <code>changed</code>. → <code>targets = review_targets(workspace, changed…)</code> → per target <code>review_project</code> (terminal). Empty → info + exit 0.</li>
+<li><code>mra branch pr [--base] [--dry-run]</code> → <code>gh auth status</code> (fail fast if unauth) → collect feature-branch repos → <code>order_repos_by_deps</code> → per repo: <code>pr_repo</code> (skip default-branch/detached; skip + info if no commits vs base — no push; else push via <code>push_repo</code>; skip-on-behind/diverged; existing-PR → report URL; else <code>gh pr create</code>). <code>--dry-run</code> → preview only.</li>
+</ol>
+<h3 id="104-order_repos_by_deps-kahn-best-effort">10.4 <code>order_repos_by_deps</code> (Kahn best-effort)</h3>
+<p>Orders ONLY the repos in the to-PR set (dependencies before consumers, so a consumer's PR can reference its upstream):</p>
+<div class="highlight"><pre><span></span><code>remaining = set; ordered = []
+loop:
+  ready = { r in remaining : every in-set dep of r is already in ordered }
+  if ready empty: append remaining (workspace/alpha order) to ordered, log a note, break
+  append ready (alpha order) to ordered; remove from remaining
+until remaining empty
+</code></pre></div>
+
+<p>Pure function; testable with a graph fixture (a depends on b ⇒ b before a; unrelated/cyclic ⇒ stable fallback, no error).</p>
+<h3 id="105-error-handling">10.5 Error handling</h3>
+<p>Same principles: per-repo isolation with a <code>failed</code> counter (any failure → non-zero exit), no silent swallowing.</p>
+<ul>
+<li><code>branch pr</code> preflight <code>gh auth status</code>; unauth → log_error + exit 1 before touching repos.</li>
+<li><code>gh pr create</code> failure: distinguish already-exists (detect via <code>gh pr view --json url</code>; skip + report URL; NOT a failure) from a real error (log_error + count failure).</li>
+<li>No feature-branch repos → info, exit 0. <code>sync --review</code> empty target set → info, exit 0.</li>
+<li><strong>PR eligibility:</strong> a feature branch with no commits relative to base (<code>rev-list --count &lt;base&gt;..&lt;branch&gt;</code> = 0) → skip + info, NO push, not a failure. Prevents pushing a just-created empty branch only to have <code>gh pr create</code> fail.</li>
+<li><code>push_repo</code> never force-pushes (Phase 1 guarantee); <code>behind</code>/<code>diverged</code>/<code>detached</code> → skip + warn, no PR.</li>
+<li><code>--dry-run</code> (branch pr) performs no push and no <code>gh</code> write.</li>
+</ul>
+<h3 id="106-testing">10.6 Testing</h3>
+<p>Reuses <code>tests/test_*.sh</code> + bare-repo fixtures. <code>gh pr create</code> and <code>review_project</code> (Claude) are NOT executed in tests — coverage targets the pure decisions, <code>--dry-run</code> zero-write, and the sync-detection half; the <code>gh</code>/Claude call layers are isolated per existing repo convention. <strong>This boundary is stated so coverage is not mistaken for end-to-end <code>gh</code> testing.</strong></p>
+<ol>
+<li><strong><code>tests/test_review_select.sh</code> (new)</strong> — <code>review_targets</code>: multi-repo fixture; given a <code>changed</code> set, assert the union is correct (changed ∪ ahead&gt;0 ∪ off-default); a clean on-default repo not in <code>changed</code> is NOT selected.</li>
+<li><strong><code>tests/test_pr_ops.sh</code> (new)</strong> — <code>order_repos_by_deps</code>: graph fixture where a depends on b ⇒ assert b precedes a; unrelated/cyclic ⇒ fallback order, no error. <code>pr_repo --dry-run</code>: bare-remote + feature-branch fixture ⇒ prints would-open AND the remote gains no ref / no PR (proves zero write; no real <code>gh</code>). A default-branch repo ⇒ <code>pr_repo</code> skips (no push, no <code>gh</code>). A feature branch with NO commits vs base ⇒ <code>pr_repo</code> skips + info, the bare remote gains no ref (proves no push), not a failure.</li>
+<li><strong><code>tests/test_sync.sh</code> (extended)</strong> — <code>sync_review_workspace</code> sync half: a behind fixture ⇒ after the run the repo's HEAD advanced and it is counted in <code>changed</code> (the review call layer is mocked/skipped, matching existing review tests — not a real Claude call).</li>
+</ol>
+<p>Target ≥80% coverage; pure functions approach full coverage.</p>
+<h3 id="107-out-of-scope-phase-3">10.7 Out of scope (Phase 3)</h3>
+<p><code>review --range</code>/<code>--head</code>; the §8.1 review follow-ups; the §9.7 hardening follow-ups; any auto-merge or PR-merge orchestration.</p>
+<h3 id="108-phase-2-known-limitations-follow-ups-from-final-review-deferred-to-phase-3">10.8 Phase 2 known limitations &amp; follow-ups (from final review, deferred to Phase 3)</h3>
+<p>Phase 2 shipped with these intentional gaps, captured so they are not lost:</p>
+<ol>
+<li><strong><code>sync --review --dry-run</code> silently ignores <code>--dry-run</code>:</strong> <code>--dry-run</code> is parsed but not forwarded when <code>--review</code> is the active mode, so the safe-sync runs for real. Spec §10.1 only defines <code>--dry-run</code> for <code>branch pr</code>. Fix: reject the <code>--review --dry-run</code> combination with a usage error, or define and implement a preview mode for <code>sync --review</code>.</li>
+<li><strong><code>pr_workspace</code> candidate collection vs <code>--base</code>:</strong> candidates are repos where <code>branch != default_branch</code>. When <code>--base</code> names a non-default ref, repos sitting on that ref are collected then skipped in <code>pr_repo</code> (harmless but wasteful). Fix: exclude the resolved base ref from candidates.</li>
+<li><strong><code>pr_repo</code> invalid <code>base_ref</code> is silent:</strong> <code>git rev-list --count &lt;base&gt;..&lt;branch&gt; || echo 0</code> treats an unknown base as "no commits → skip" without surfacing the misconfiguration. Fix: <code>log_warn</code> when the base ref cannot be resolved.</li>
+<li><strong><code>sync</code> flag silent-win ordering:</strong> the mode chain is <code>--review</code> &gt; <code>--push</code> &gt; <code>--safe</code> &gt; default; combining flags silently ignores the lower-priority ones (extends §9.7.3). Fix: document as mutually exclusive or error on multiple modes.</li>
+</ol>
+<p>(The repo-wide <code>((errors++))</code> test-harness fix from §9.7.1 also applies to the Phase 2 test files <code>test_review_select.sh</code> / <code>test_pr_ops.sh</code>.)</p>
+<h2 id="11-phase-3-hardening-sweep">11. Phase 3 — Hardening sweep</h2>
+<p><strong>Status:</strong> Approved (design) — 2026-05-30. Implementation scope for the next plan. No new commands; targeted robustness/UX/test fixes that retire the §9.7 and §10.8 follow-ups. Review extensions (<code>review --range</code>/<code>--head</code>) and the §8.1 review follow-ups are deferred to Phase 4.</p>
+<h3 id="111-groups-exact-behavior">11.1 Groups &amp; exact behavior</h3>
+<p><strong>① sync flag discipline</strong> (<code>bin/mra.sh</code> <code>sync)</code> dispatch; retires §9.7.2, §9.7.3, §10.8.1, §10.8.4)
+- <code>--safe</code> / <code>--push</code> / <code>--review</code> are <strong>mutually exclusive</strong>: after parsing, if more than one is true → <code>log_error "sync: choose only one of --safe / --push / --review" "sync"</code> + <code>exit 1</code>.
+- <code>--dry-run</code> applies <strong>only</strong> to <code>--push</code>: if <code>--dry-run</code> is set without <code>--push</code> (alone, or with <code>--safe</code>/<code>--review</code>/default) → <code>log_error "sync: --dry-run only applies to --push" "sync"</code> + <code>exit 1</code>.
+- After these gates, behavior is unchanged (single mode or default).</p>
+<p><strong>② <code>branch pr</code> base/eligibility polish</strong> (<code>lib/pr-ops.sh</code>; retires §10.8.2, §10.8.3)
+- <code>pr_workspace</code> collects a repo as a candidate when its branch is NOT detached AND not equal to the <strong>resolved base</strong> (the <code>--base</code> value if given, else the repo's default branch) — so a repo sitting on the base ref is never collected then skipped.
+- <code>pr_repo</code>: if <code>git rev-list --count "&lt;base&gt;..&lt;branch&gt;"</code> fails because the base ref cannot be resolved (distinguish from a real 0-count), <code>log_warn "$repo_name: base '&lt;base&gt;' not found — skipping" "branch"</code> + <code>return 0</code>, rather than silently treating it as "0 commits".</p>
+<p><strong>③ <code>branch new</code> path-traversal</strong> (<code>lib/branch-ops.sh</code>; retires §9.7.5)
+- New pure <code>validate_repo_name(name)</code>: rejects (returns non-zero) a name that contains <code>/</code>, equals <code>.</code> or <code>..</code>, or begins with <code>-</code>. <code>create_branch_workspace</code> validates each explicitly-listed repo name before touching the filesystem; an invalid name → <code>log_error</code> for that item + count it as a failure (no fs access for that item).</p>
+<p><strong>④ diverged push integration fixture</strong> (<code>tests/test_sync.sh</code>, test-only; retires §9.7.4)
+- A two-clone diverged fixture (A and B each commit and push; A is both ahead and behind) → <code>push_repo</code> on A leaves the bare remote ref unchanged (integration-level evidence to complement the unit-level <code>branch_push_action</code> coverage).</p>
+<p><strong>⑤ test harness <code>((errors++))</code> repo-wide</strong> (all <code>tests/test_*.sh</code>; retires §9.7.1)
+- Mechanically replace <code>((errors++))</code> with <code>errors=$((errors+1))</code> so a failing assertion accumulates all failures instead of aborting on the first under <code>set -euo pipefail</code>.</p>
+<h3 id="112-architecture-module-responsibilities">11.2 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/branch-ops.sh</code></strong> — add pure <code>validate_repo_name()</code>; call it inside <code>create_branch_workspace</code> for listed repos.</li>
+<li><strong><code>lib/pr-ops.sh</code></strong> — <code>pr_workspace</code> candidate filter uses the resolved base; <code>pr_repo</code> distinguishes unresolved base from 0-count.</li>
+<li><strong><code>bin/mra.sh</code></strong> — <code>sync)</code> dispatch adds the mutual-exclusion + <code>--dry-run</code>-requires-<code>--push</code> gates before mode selection.</li>
+<li><strong><code>tests/</code></strong> — new <code>test_sync_flags.sh</code>; extend <code>test_pr_ops.sh</code>, <code>test_branch_ops.sh</code>, <code>test_sync.sh</code>; the <code>((errors++))</code> sweep touches every <code>test_*.sh</code>.</li>
+</ul>
+<h3 id="113-error-handling">11.3 Error handling</h3>
+<ul>
+<li>sync flag conflicts → hard <code>log_error</code> + <code>exit 1</code> (deterministic, no silent mode-win).</li>
+<li><code>validate_repo_name</code> failure → <code>log_error</code> for that repo + failure count; never touches the filesystem for an invalid name.</li>
+<li><code>pr_repo</code> unresolved base → <code>log_warn</code> + skip (return 0), surfacing the misconfiguration without aborting the batch.</li>
+<li>All per-repo isolation and <code>failed</code>-counter conventions from earlier phases are preserved.</li>
+</ul>
+<h3 id="114-testing">11.4 Testing</h3>
+<p>Reuses <code>tests/test_*.sh</code> + fixtures (auto-discovered by <code>test.sh</code>).</p>
+<ol>
+<li><strong><code>tests/test_sync_flags.sh</code> (new)</strong> — subprocess calls <code>MRA_WORKSPACE=&lt;tmp&gt; bash bin/mra.sh sync &lt;flags&gt;</code> asserting exit code + message: <code>--safe --push</code> → exit 1 + "choose only one"; <code>--review --push</code> → exit 1; <code>--dry-run</code> (no <code>--push</code>) → exit 1 + "only applies to --push"; <code>--push --dry-run</code> → exit 0 (valid, runs through an empty/clean workspace); a single mode flag → not rejected by the discipline gate.</li>
+<li><strong><code>tests/test_pr_ops.sh</code> (extended)</strong> — a repo on the <code>--base</code> ref is NOT a candidate (no would-open in dry-run with <code>--base</code>); <code>pr_repo</code> with an unresolvable <code>--base</code> (e.g. <code>nosuchref</code>) → output contains "not found", skips, bare remote unchanged.</li>
+<li><strong><code>tests/test_branch_ops.sh</code> (extended)</strong> — <code>validate_repo_name</code>: valid (<code>api</code>, <code>my-repo</code>, <code>repo123</code>); invalid (<code>a/b</code>, <code>.</code>, <code>..</code>, <code>-foo</code>, <code>../x</code>). Integration: <code>create_branch_workspace WS feat/x "../evil"</code> → that item errors, returns non-zero, and nothing is created outside the workspace (assert <code>../evil</code> does not exist).</li>
+<li><strong><code>tests/test_sync.sh</code> (extended)</strong> — the diverged two-clone fixture: <code>push_repo</code> on the diverged clone leaves the bare ref unchanged.</li>
+<li><strong><code>((errors++))</code> sweep</strong> — verified by <code>bash test.sh</code> staying green after the change; multi-failure accumulation is confirmed manually during implementation (a temporary injected failure shows a count, then removed — not committed).</li>
+</ol>
+<h3 id="115-out-of-scope-phase-4">11.5 Out of scope (Phase 4)</h3>
+<p><code>review --range</code>/<code>--head</code>; the §8.1 review follow-ups (<code>is_api_change</code> working-mode, <code>--working + --pr</code> guard, working-mode prompt preamble, dead <code>action</code> lookup cleanup, debate/persona <code>review-diff</code> migration); any auto-merge / PR-merge orchestration.</p>
+<h3 id="116-phase-3-follow-ups-from-final-review-deferred-to-phase-4">11.6 Phase 3 follow-ups (from final review, deferred to Phase 4)</h3>
+<p>Captured so they are not lost:</p>
+<ol>
+<li><strong>Pre-existing test files lacking <code>set -euo pipefail</code>:</strong> ~13 <code>tests/test_*.sh</code> (e.g. <code>test_db_safety.sh</code>, <code>test_docker_trust.sh</code>, <code>test_doctor_security.sh</code>) never enabled strict mode. Out of scope for Phase 3; a dedicated cleanup commit could standardize them.</li>
+<li><strong><code>validate_repo_name</code> for a future <code>branch pr</code> repo-subset:</strong> if a later phase adds a per-repo subset to <code>branch pr</code> (like <code>branch new</code>'s), it should reuse <code>validate_repo_name</code>. Not a gap today (no such CLI path exists).</li>
+</ol>
+<h2 id="12-phase-4-review-rangehead-diff-acquisition-unification">12. Phase 4 — Review range/head + diff-acquisition unification</h2>
+<p><strong>Status:</strong> Approved (design) — 2026-06-01. Implementation scope for the next plan. Adds <code>review --range</code>/<code>--head</code> and unifies diff acquisition so single-pass, debate, and persona paths all use <code>lib/review-diff.sh</code> (retiring §8.1.5).</p>
+<h3 id="121-command-surface-mra-review">12.1 Command surface (<code>mra review</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Semantics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mra review &lt;repo&gt; --head &lt;ref&gt;</code></td>
+<td>Review <code>&lt;base&gt;...&lt;ref&gt;</code> (the tip becomes <code>&lt;ref&gt;</code> instead of <code>HEAD</code>; pairs with <code>--base</code>)</td>
+</tr>
+<tr>
+<td><code>mra review &lt;repo&gt; --range &lt;R&gt;</code></td>
+<td>Review the raw git range <code>&lt;R&gt;</code> (e.g. <code>A..B</code>, <code>v1..v2</code>), passed straight to <code>git diff &lt;R&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>--range</code> is interpreted as a raw git range (the user's two-dot/three-dot choice is respected). <code>--head</code> uses three-dot (<code>base...ref</code>), matching the existing default <code>base...HEAD</code>.</p>
+<p><strong>Mutual exclusion (hard error + <code>return 1</code>, mirroring Phase 3 flag discipline):</strong>
+- <code>--range</code> and <code>--head</code> are mutually exclusive.
+- <code>--range</code>/<code>--head</code> are incompatible with <code>--pr</code> (a PR supplies its own base/head).
+- <code>--range</code>/<code>--head</code> are incompatible with <code>--working</code> (the working tree has no commit range).
+- The existing <code>--working + --personas</code> and <code>--working + --strategy debate</code> guards remain.</p>
+<h3 id="122-diff-model-mode-range_expr">12.2 Diff model — <code>(mode, range_expr)</code></h3>
+<p><code>lib/review-diff.sh</code> is generalized to a single source of truth:</p>
+<div class="highlight"><pre><span></span><code>review_diff_text(project_dir, mode, range_expr):
+  working → git diff HEAD                 # staged + unstaged tracked changes
+  range   → git diff &quot;$range_expr&quot;        # any range: base...HEAD / base...ref / A..B
+  (on failure → echo &quot;&quot;)
+review_diff_files(project_dir, mode, range_expr):  # same with --name-only
+</code></pre></div>
+
+<p><code>mode=range</code> subsumes default / <code>--head</code> / <code>--range</code> — they differ only in the <code>range_expr</code> string the caller builds.</p>
+<p><code>review.sh</code> computes <code>range_expr</code> at one decision point (after resolving <code>base_ref</code> as today):</p>
+<div class="highlight"><pre><span></span><code>if working:          mode=working; range_expr=&quot;&quot;
+elif range_arg set:  mode=range;   range_expr=&quot;$range_arg&quot;               # raw
+elif head_arg set:   mode=range;   range_expr=&quot;${resolved_base}...${head_arg}&quot;
+else:                mode=range;   range_expr=&quot;${resolved_base}...HEAD&quot;  # = current default
+</code></pre></div>
+
+<p><strong>Validation of an EXPLICIT <code>--range</code>/<code>--head</code> (fail loud, never silently empty):</strong> when the user supplied <code>--range</code>/<code>--head</code>, <code>review.sh</code> validates the range resolves <em>before</em> running the review — <code>git -C "$dir" rev-list "$range_expr" -- &gt;/dev/null 2&gt;&amp;1</code> (rev-list errors on an unknown ref/range, succeeds on a valid one even when empty). Two distinct outcomes:
+- <strong>Invalid ref/range</strong> (rev-list fails — e.g. the typo <code>maim..HEAD</code>) → <code>log_error "review: invalid range/ref '&lt;range_expr&gt;'"</code> + <code>return 1</code> (non-zero exit; NO review, NO <code>(diff unavailable)</code> run).
+- <strong>Valid but empty</strong> (rev-list succeeds, diff is empty) → <code>log_info "review: no changes in '&lt;range_expr&gt;' — nothing to review"</code> + <code>return 0</code>.</p>
+<p>This validation+empty-check applies ONLY to explicit <code>--range</code>/<code>--head</code> (and is a clean addition for <code>--working</code>, which already early-returns "no uncommitted changes"). The <strong>default</strong> <code>base...HEAD</code> path keeps its current behavior (no pre-validation, no empty early-return) for byte-for-byte backward compatibility.</p>
+<h3 id="123-threading-mode-range_expr-through-all-paths-retires-815">12.3 Threading <code>(mode, range_expr)</code> through all paths (retires §8.1.5)</h3>
+<ul>
+<li><strong>single-pass:</strong> <code>build_review_prompt</code> takes <code>(mode, range_expr)</code> (replacing the <code>${11:-base}</code> diff_mode param) and calls <code>review_diff_text</code> internally.</li>
+<li><strong>debate:</strong> <code>run_debate_review</code> takes <code>(mode, range_expr)</code> (replacing the <code>base_ref</code>-derived inline diff) and calls <code>review_diff_text</code>.</li>
+<li><strong>persona:</strong> the persona block in <code>review.sh</code> replaces its inline <code>git diff "${resolved_base_p}...HEAD"</code> with <code>review_diff_text "$project_dir" "$mode" "$range_expr"</code>.</li>
+</ul>
+<p>The four previously-duplicated diff-acquisition sites converge on <code>review-diff.sh</code>. <code>--range</code>/<code>--head</code> therefore take effect in light, standard, debate, and persona modes.</p>
+<h3 id="124-architecture-module-responsibilities">12.4 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/review-diff.sh</code></strong> — generalize to <code>(mode, range_expr)</code>.</li>
+<li><strong><code>lib/review.sh</code></strong> — parse <code>--head</code>/<code>--range</code>; mutual-exclusion gates; build <code>range_expr</code>; thread <code>(mode, range_expr)</code> to all three paths.</li>
+<li><strong><code>lib/review-prompt.sh</code></strong> — <code>build_review_prompt</code> accepts <code>(mode, range_expr)</code>; uses <code>review_diff_text</code>.</li>
+<li><strong><code>lib/review-debate.sh</code></strong> — <code>run_debate_review</code> accepts <code>(mode, range_expr)</code>; uses <code>review_diff_text</code>.</li>
+<li><strong><code>bin/mra.sh</code></strong> — <code>review)</code> dispatch forwards <code>--head</code>/<code>--range</code>; usage updated.</li>
+</ul>
+<h3 id="125-error-handling">12.5 Error handling</h3>
+<ul>
+<li>Mutual-exclusion violations → <code>log_error</code> with a clear message + <code>return 1</code> (so <code>review_project</code> is non-zero and the dispatch exits 1), checked after parsing and before the review flow.</li>
+<li><strong>Explicit <code>--range</code>/<code>--head</code> that is an invalid ref/range</strong> → <code>log_error</code> + <code>return 1</code> (per §12.2 validation) — it never silently degrades to <code>(diff unavailable)</code> and never exits 0. A typo like <code>--range maim..HEAD</code> fails loudly.</li>
+<li><strong>Explicit <code>--range</code>/<code>--head</code> that is valid but empty</strong> → <code>log_info "no changes …"</code> + <code>return 0</code> (the agent is not invoked on an empty range).</li>
+<li>The DEFAULT <code>base...HEAD</code> path keeps current behavior: an unavailable/empty default diff still falls through to <code>(diff unavailable)</code> in the single-pass prompt (regression-safe; not changed by this phase). Review agents keep <code>--disallowedTools "Write,Edit"</code>; review is read-only.</li>
+<li>Backward compatibility: with no <code>--range</code>/<code>--head</code>/<code>--working</code>, <code>range_expr</code> defaults to <code>base...HEAD</code> — byte-for-byte equivalent to current behavior.</li>
+</ul>
+<h3 id="126-known-limitation-deferred-811-family">12.6 Known limitation (deferred, §8.1.1 family)</h3>
+<p><code>is_api_change</code> still computes from <code>default_branch...HEAD</code>; it is NOT range-aware, so <code>--range</code>/<code>--head</code> do not change which consumer context is loaded for the API-change heuristic. Deferred to Phase 5 alongside the <code>--working</code> <code>is_api_change</code> gap.</p>
+<h3 id="127-testing">12.7 Testing</h3>
+<p>Reuses <code>tests/test_*.sh</code>; the Claude call layers (debate/persona/actual single-pass invocation) are NOT executed in tests — coverage targets the pure <code>review_diff_text</code> range mode, the <code>range_expr</code> construction, and the mutual-exclusion gates. Stated here so coverage is not mistaken for end-to-end review testing.</p>
+<ol>
+<li><strong><code>tests/test_review_working.sh</code> (extended) or new <code>tests/test_review_diff.sh</code></strong> — <code>review_diff_text</code>/<code>review_diff_files</code> <code>range</code> mode against a fixture: commits A then B → <code>range "A..B"</code> contains B's change, excludes pre-A; <code>base...HEAD</code> equals the current default; <code>working</code> mode unchanged (regression).</li>
+<li><strong><code>tests/test_review_flags.sh</code> (new, subprocess-driven, like <code>test_sync_flags.sh</code>)</strong> — <code>MRA_WORKSPACE=… bash bin/mra.sh review &lt;repo&gt; &lt;flags&gt;</code> asserts, all BEFORE any Claude call (so no agent invocation is exercised):
+   - Mutual-exclusion combos exit non-zero with a clear message: <code>--range A..B --head x</code>, <code>--range A..B --pr 1</code>, <code>--head x --working</code>.
+   - <strong>Invalid range</strong> <code>--range maim..HEAD</code> (typo) → exit non-zero + "invalid range/ref" (proves no silent <code>(diff unavailable)</code> / no exit 0).
+   - <strong>Valid empty range</strong> (e.g. <code>--range HEAD..HEAD</code>) → exit 0 + "no changes" (the validation passes, the empty-diff early-return fires before Claude).</li>
+<li><strong>Regression</strong> — existing <code>test_review_working.sh</code>, <code>test_review_personas.sh</code>, <code>test_review_safety.sh</code> stay green, proving base/working behavior and the persona path's switch to <code>review-diff.sh</code> are unchanged.</li>
+</ol>
+<h3 id="128-out-of-scope-phase-5">12.8 Out of scope (Phase 5)</h3>
+<p>The remaining §8.1 follow-ups (§8.1.1–§8.1.3 review-subsystem; §8.1.4 <code>branch_format_row</code> UI cleanup); <code>is_api_change</code> range/working-awareness; the §11.6 follow-ups; any auto-merge / PR-merge orchestration.</p>
+<p><strong>Additional Phase 4 final-review follow-ups (deferred to Phase 5):</strong>
+1. <strong><code>eval.sh</code> PKB <code>changed_files</code> bypasses <code>review-diff.sh</code>:</strong> <code>_eval_run_review</code> builds its PKB module-detection <code>changed_files</code> with a raw <code>git diff --name-only "${resolved_base}...HEAD"</code>, not <code>review_diff_files</code>. Harmless today (eval-review is always <code>--pr</code>, so <code>resolved_base</code> always resolves), but a second un-unified diff site. Route it through <code>review_diff_files</code>.
+2. <strong>Legacy <code>base</code> mode in <code>review-diff.sh</code> is now untested:</strong> after the migration, production callers use <code>range</code>/<code>working</code>; the <code>base</code> else-branch (with its two-command fallback) has no test. Either add a regression test (assert <code>range "A...B"</code> == <code>base "A"</code> output) or remove <code>base</code> mode once no direct callers remain.
+3. <strong><code>is_api_change</code> not range-aware:</strong> with <code>--range</code>/<code>--head</code>, the API-change heuristic still reads <code>default_branch...HEAD</code>, so consumer context may be mis-loaded for a narrow range (same family as the <code>--working</code> gap, §12.6).</p>
+<h2 id="13-phase-5-review-correctness-group">13. Phase 5 — Review correctness group</h2>
+<p><strong>Status:</strong> Approved (design) — 2026-06-01. Implementation scope for the next plan. No new commands; five review-subsystem correctness fixes retiring §8.1.1–§8.1.3, §12.6, §12.8.1–§12.8.3.</p>
+<h3 id="131-items-exact-behavior">13.1 Items &amp; exact behavior</h3>
+<p><strong>① <code>is_api_change</code> mode-aware</strong> (<code>lib/change-detector.sh</code> + <code>lib/review.sh</code>; retires §8.1.1/§12.6/§12.8.3)
+- Signature → <code>is_api_change(project_dir, project_type, [mode], [range_expr])</code>. It computes its changed-file list and any diff-content checks via <code>review_diff_files</code>/<code>review_diff_text "$project_dir" "$mode" "$range_expr"</code> instead of the hard-coded <code>git diff "$default_branch"...HEAD</code>.
+- Backward compatible: when <code>mode</code>/<code>range_expr</code> are omitted, default <code>mode="range"</code>, <code>range_expr="${default_branch}...HEAD"</code> (current behavior). Any non-review caller is unaffected.
+- <code>review.sh</code>: move the <code>(mode, range_expr)</code> decision point (including the explicit-range <code>rev-list</code> validation) to BEFORE the <code>is_api_change</code> call (currently ~line 181), and pass <code>"$mode" "$range_expr"</code>. So <code>--range</code>/<code>--head</code>/<code>--working</code> make the API-change heuristic (hence consumer-context loading) match the actual reviewed diff. The empty-range early-return still happens later, after <code>changed_count</code>.</p>
+<p><strong>② <code>--working + --pr</code> guard</strong> (<code>lib/review.sh</code>; retires §8.1.2)
+- In the existing <code>--working</code> guard block (which already rejects <code>--working + --personas</code> and <code>--working + --strategy debate</code>), add: <code>--working</code> with <code>--pr</code> → <code>log_error "review: --working cannot be combined with --pr (working-tree changes have no PR line mapping)"</code> + <code>return 1</code>.</p>
+<p><strong>③ Mode-aware prompt preamble</strong> (<code>lib/review-prompt.sh</code>; retires §8.1.3)
+- The <code>build_review_prompt</code> opening line ("You are reviewing a pull request for the project …") becomes mode-aware using the existing <code>mode</code>/<code>range_expr</code> params: <code>working</code> → "reviewing the uncommitted working-tree changes for the project …"; <code>range</code> with a non-default <code>range_expr</code> → "reviewing the changes in '<range_expr>' for the project …"; the default <code>…...HEAD</code> → keep the "pull request" wording.</p>
+<p><strong>④ eval PKB via <code>review_diff_files</code></strong> (<code>lib/eval.sh</code>; retires §12.8.1)
+- <code>_eval_run_review</code>'s PKB module-detection <code>git diff --name-only "${resolved_base}...HEAD"</code> → <code>review_diff_files "$project_dir" range "${resolved_base}...HEAD"</code>. Same result, one source of truth.</p>
+<p><strong>⑤ Remove legacy <code>base</code> mode</strong> (<code>lib/review-diff.sh</code> + <code>tests/test_review_working.sh</code>; retires §12.8.2)
+- <code>review_diff_text</code>/<code>review_diff_files</code> keep only <code>working</code> and <code>range</code> (remove the <code>base</code> else-branch; no production caller remains after Phase 4). The mode argument is now <code>working</code> → working tree, anything else → treated as <code>range</code> (a single, documented default). Update <code>test_review_working.sh</code>'s direct <code>base</code>-mode assertions to <code>range "main...HEAD"</code>.</p>
+<h3 id="132-architecture-module-responsibilities">13.2 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/change-detector.sh</code></strong> — <code>is_api_change</code> gains optional <code>(mode, range_expr)</code>; uses <code>review_diff_*</code>.</li>
+<li><strong><code>lib/review.sh</code></strong> — reorder <code>(mode, range_expr)</code> decision before <code>is_api_change</code>; pass it in; add <code>--working + --pr</code> gate.</li>
+<li><strong><code>lib/review-prompt.sh</code></strong> — mode-aware preamble.</li>
+<li><strong><code>lib/eval.sh</code></strong> — PKB changed-files via <code>review_diff_files</code>.</li>
+<li><strong><code>lib/review-diff.sh</code></strong> — drop <code>base</code> mode (working|range only).</li>
+</ul>
+<h3 id="133-error-handling">13.3 Error handling</h3>
+<ul>
+<li><code>--working + --pr</code> → hard <code>log_error</code> + <code>return 1</code> (non-zero exit), consistent with the other <code>--working</code>/range gates.</li>
+<li><code>is_api_change</code> is read-only and best-effort: on any git failure it still returns a safe value (<code>none</code>/<code>low</code>), never aborts the review.</li>
+<li>No behavior change to the default review path; review remains read-only (<code>--disallowedTools "Write,Edit"</code>).</li>
+</ul>
+<h3 id="134-testing">13.4 Testing</h3>
+<p>Reuses <code>tests/test_*.sh</code>; Claude call layers are not executed.</p>
+<ol>
+<li><strong><code>tests/test_change_detector.sh</code> (new)</strong> — <code>is_api_change</code> against a fixture: a range containing an API-surface change (per <code>project_type</code>, e.g. rails-api <code>config/routes.rb</code>) → high/<code>true</code>; a range without it → <code>low</code>/<code>none</code>; omitting <code>mode</code>/<code>range_expr</code> falls back to <code>default...HEAD</code> (backward-compat). Pure git, no Claude.</li>
+<li><strong><code>tests/test_review_flags.sh</code> (extended)</strong> — subprocess <code>review repo --working --pr 1</code> → non-zero exit + message mentioning <code>--working</code>/<code>--pr</code>.</li>
+<li><strong><code>tests/test_review_working.sh</code> (extended)</strong> — call <code>build_review_prompt</code> directly (no Claude): <code>mode=working</code> output contains "uncommitted working-tree" and NOT "pull request"; <code>mode=range</code> with a non-default range contains the range wording; default keeps "pull request". Also: the file's direct <code>review_diff_text</code> assertions switch from <code>base</code> to <code>range "main...HEAD"</code>.</li>
+<li><strong><code>tests/test_review_diff.sh</code> (regression)</strong> — <code>range</code>/<code>working</code> modes still pass after <code>base</code> removal.</li>
+<li><strong>Regression</strong> — <code>test_review_personas.sh</code>, <code>test_review_safety.sh</code> stay green; default review unchanged. The eval PKB rewiring is verified by <code>bash -n</code> + green suite + grep that <code>_eval_run_review</code> now calls <code>review_diff_files</code> (eval-review's end-to-end <code>gh</code>/Claude path is not exercised, per existing convention).</li>
+</ol>
+<h3 id="135-out-of-scope-phase-6">13.5 Out of scope (Phase 6)</h3>
+<p>§8.1.4 (<code>branch_format_row</code> dead <code>action</code> lookup); §11.6.1 (13 test files lacking <code>set -euo pipefail</code>); §11.6.2; any auto-merge / PR-merge orchestration.</p>
+<p><strong>Additional Phase 5 final-review follow-ups (deferred to Phase 6):</strong>
+1. <strong><code>change-detector.sh</code> controller-detection bug (pre-existing, not from Phase 5):</strong> line ~39 <code>echo "$changed_files" | grep -qE "^app/controllers/" | grep -v "concerns/"</code> is a no-op — <code>grep -q</code> produces no stdout, so the piped <code>grep -v</code> always sees empty input and the <code>if</code> is never true. The rails-api "controller public method changed" / "route definition in controller" <code>high</code>-confidence triggers therefore never fire (routes.rb / serializers / schema / docker-compose triggers are unaffected). Exists identically on <code>main</code>. Fix: restructure to two separate conditions (e.g. <code>grep -qE "^app/controllers/" &lt;&lt;&lt;"$changed_files" &amp;&amp; ! grep -q "concerns/" &lt;&lt;&lt;"$changed_files"</code>).
+2. <strong>Test-coverage gaps (logic verified, untested):</strong> <code>is_api_change</code> <code>working</code> mode; explicit <code>--range A..B</code> preamble wording ("changes in 'A..B'"); <code>--head</code> non-HEAD range preamble. Add fixtures.
+3. <strong><code>eval.sh:199</code> <code>is_api_change</code> call</strong> still uses 2-arg back-compat; for consistency pass <code>"range" "${resolved_base}...HEAD"</code> explicitly (currently correct via the back-compat default).</p>
+<h2 id="14-phase-6-cleanup-backlog">14. Phase 6 — Cleanup backlog</h2>
+<p><strong>Status:</strong> Approved (design) — 2026-06-01. Implementation scope for the next plan. No new commands; five cleanups retiring §13.5.1–§13.5.3, §8.1.4, §11.6.1. (auto-merge / §11.6.2 → Phase 7.)</p>
+<h3 id="141-items-exact-behavior">14.1 Items &amp; exact behavior</h3>
+<p><strong>① controller-detection grep bug (behavior fix)</strong> (<code>lib/change-detector.sh</code>)
+- The <code>rails-api</code> controller check is currently <code>if echo "$changed_files" | grep -qE "^app/controllers/" | grep -v "concerns/"; then</code> — a no-op (<code>grep -q</code> emits nothing, so the piped <code>grep -v</code> always sees empty input → the <code>if</code> is never true). The "controller public method changed" / "route definition in controller" high-confidence triggers therefore never fire.
+- Fix to: <code>if echo "$changed_files" | grep -E "^app/controllers/" | grep -qvE "concerns/"; then</code> (list the controller files; succeed if any is NOT under <code>concerns/</code>). This is a deliberate behavior fix — after it, a controller change whose content diff adds a public method / route correctly yields <code>high</code> (the inner content-diff gate is unchanged). Other triggers (routes.rb, serializers, schema, docker-compose) are unaffected.</p>
+<p><strong>② Remove dead <code>action</code> lookup</strong> (<code>lib/branch.sh</code>, <code>branch_format_row</code>; §8.1.4)
+- Replace the two lines <code>action=$(branch_state_get "$s" action 2&gt;/dev/null)</code> + <code>[[ -z "$action" ]] &amp;&amp; action=$(branch_state_get "$s" sync_action)</code> with a single <code>action=$(branch_state_get "$s" sync_action)</code> (the state always emits <code>sync_action</code>; the <code>action</code> key never exists).</p>
+<p><strong>③ eval <code>is_api_change</code> consistency</strong> (<code>lib/eval.sh</code>; §13.5.3)
+- <code>is_api_change "$project_dir" "$project_type"</code> → <code>is_api_change "$project_dir" "$project_type" range "${resolved_base}...HEAD"</code> (explicit mode/range, matching <code>review.sh</code>; behavior-equivalent via the prior back-compat default).</p>
+<p><strong>④ Test-coverage gaps</strong> (<code>tests/</code>; §13.5.2)
+- <code>tests/test_change_detector.sh</code>: add a <code>working</code>-mode case (uncommitted <code>config/routes.rb</code> → <code>high</code>).
+- <code>tests/test_review_working.sh</code>: add an explicit <code>--range A..B</code> preamble assertion ("changes in 'A..B'" present, "pull request" absent) — the same code path covers <code>--head</code>'s <code>base...ref</code>.</p>
+<p><strong>⑤ <code>set -euo pipefail</code> sweep</strong> (13 <code>tests/test_*.sh</code>; §11.6.1)
+- Add <code>set -euo pipefail</code> (after the shebang) to the 13 files that lack it: <code>test_db_safety.sh</code>, <code>test_docker_trust.sh</code>, <code>test_doctor_security.sh</code>, <code>test_install_alias.sh</code>, <code>test_lint_profile.sh</code>, <code>test_project_path.sh</code>, <code>test_review_safety.sh</code>, <code>test_scan_rebuild.sh</code>, <code>test_scanners.sh</code>, <code>test_security_log.sh</code>, <code>test_snapshot.sh</code>, <code>test_url_policy.sh</code>, <code>test_validate.sh</code>. Process one file at a time; run it after adding strict mode. If <code>set -u</code>/<code>set -e</code> surfaces a latent issue (unbound variable, or a previously-ignored non-zero exit), apply the minimal fix (<code>${var:-}</code> for unbound; <code>|| true</code> for an intentionally-failing probe) WITHOUT changing the test's assertions. This is exploratory per-file work; any non-trivial fix is reported.</p>
+<h3 id="142-architecture-module-responsibilities">14.2 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/change-detector.sh</code></strong> — fix the controller grep so the condition can be true.</li>
+<li><strong><code>lib/branch.sh</code></strong> — <code>branch_format_row</code> reads <code>sync_action</code> directly.</li>
+<li><strong><code>lib/eval.sh</code></strong> — explicit <code>is_api_change</code> mode/range args.</li>
+<li><strong><code>tests/</code></strong> — coverage additions + the 13-file strict-mode sweep.</li>
+</ul>
+<h3 id="143-error-handling">14.3 Error handling</h3>
+<ul>
+<li>The controller fix only changes which inputs make the <code>if</code> true; <code>is_api_change</code> remains read-only and best-effort (catches git failures, returns <code>none</code>/<code>low</code>).</li>
+<li>The <code>set -euo pipefail</code> sweep makes the 13 test files fail-fast on errors; any minimal fix preserves the existing pass/fail assertions.</li>
+<li>No production command behavior changes besides the intended controller-detection fix.</li>
+</ul>
+<h3 id="144-testing">14.4 Testing</h3>
+<ol>
+<li><strong><code>tests/test_change_detector.sh</code> (extended)</strong> — a range whose diff adds <code>def index</code> in <code>app/controllers/x_controller.rb</code> → <code>high</code> (proves the controller fix fires); a <code>concerns/</code>-only controller change is not raised to <code>high</code> by this rule. Plus the <code>working</code>-mode case (uncommitted <code>config/routes.rb</code> → <code>high</code>).</li>
+<li><strong><code>tests/test_branch.sh</code> (regression)</strong> — the existing <code>branch_format_row</code> assertion stays green after the dead-lookup removal.</li>
+<li><strong><code>tests/test_review_working.sh</code> (extended)</strong> — explicit <code>--range A..B</code> preamble wording.</li>
+<li><strong><code>eval.sh</code> ③</strong> — verified by <code>bash -n</code> + green suite + grep confirming the 4-arg <code>is_api_change</code> call (the gh/Claude path is not exercised, per convention).</li>
+<li><strong><code>set -euo pipefail</code> sweep ⑤</strong> — each of the 13 files is run individually after adding strict mode and must pass; <code>bash test.sh</code> stays fully green.</li>
+</ol>
+<h3 id="145-out-of-scope-phase-7">14.5 Out of scope (Phase 7)</h3>
+<p>auto-merge / PR-merge orchestration (cross-repo dependency-ordered PR merging — its own design: merge strategy, CI/conflict gating, ordering, dry-run, safety); §11.6.2 (<code>validate_repo_name</code> for a future <code>branch pr</code> repo-subset — no CLI path exists yet).</p>
+<p><strong>Phase 6 final-review follow-ups (deferred to Phase 7):</strong>
+1. <strong><code>integration-test.sh:125</code> <code>is_api_change</code> call</strong> is still 2-arg back-compat (pre-existing; not touched in Phase 6). For full consistency, pass <code>range "${default_branch}...HEAD"</code> explicitly; the back-compat default in <code>is_api_change</code> could then be retired.
+2. <strong>Concerns-only negative test:</strong> add a fixture where only <code>app/controllers/concerns/*.rb</code> changed and assert the controller rule does NOT raise <code>high</code> (locks the <code>grep -qvE concerns/</code> exclusion). The Phase 6 positive case is covered; the negative case is not.</p>
+<h2 id="15-phase-7-cross-repo-pr-merge-orchestration">15. Phase 7 — Cross-repo PR merge orchestration</h2>
+<p><strong>Status:</strong> Approved (design) — 2026-06-01. Implementation scope for the next plan. Adds <code>mra branch merge</code>: merge the open PRs for each repo's feature branch, in dependency order, gated on mergeability + CI.</p>
+<h3 id="151-command-surface">15.1 Command surface</h3>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mra branch merge [--strategy merge\|squash\|rebase] [--dry-run]</code></td>
+<td>Collect feature-branch repos → <code>order_repos_by_deps</code> (deps first) → <code>merge_repo</code> each. Default strategy <code>merge</code>. <code>--dry-run</code> previews.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Default merge strategy is <code>merge</code> (a merge commit); <code>--strategy squash</code>/<code>rebase</code> override. Invalid <code>--strategy</code> → error + exit 1.</li>
+<li>Requires <code>gh</code> (auth preflight at dispatch, like <code>branch pr</code>).</li>
+</ul>
+<h3 id="152-gating-per-pr-before-merging">15.2 Gating (per PR, before merging)</h3>
+<p>Queried live from GitHub via <code>gh</code> (no local fetch):
+- <strong>PR existence/state:</strong> <code>gh pr view "$branch" --json number,state,mergeable</code>. No PR, or state ≠ <code>OPEN</code> → skip + info (not a failure).
+- <strong>Mergeable (no conflicts):</strong> the <code>mergeable</code> field must be <code>MERGEABLE</code>.
+- <strong>CI green:</strong> <code>gh pr checks "$branch"</code> exit 0 (non-zero = a check failed OR is pending — both block).
+- Approval is NOT required (individual/small-team repos often have no reviewer).</p>
+<h3 id="153-stop-on-first-failure">15.3 Stop-on-first-failure</h3>
+<p>Because merges run in dependency order (upstream before consumers), a repo whose PR <strong>exists but cannot merge</strong> (conflict / CI not green / pending) or whose <code>gh pr merge</code> <strong>fails</strong> → <code>log_error</code> and the whole batch STOPS (<code>merge_workspace</code> returns non-zero; the dispatch exits non-zero). This prevents merging a consumer before its upstream has landed. Skips (no PR / non-OPEN / on default branch / detached) are not failures and the loop continues.</p>
+<h3 id="154-data-flow">15.4 Data flow</h3>
+<div class="highlight"><pre><span></span><code>merge_workspace(workspace, strategy, dry_run):
+  graph_file = get_dep_graph_path(workspace)
+  candidates = feature-branch repos (branch != default, != &quot;(detached)&quot;)
+  empty → info, return 0
+  ordered = order_repos_by_deps(graph_file, candidates...)
+  for repo in ordered:
+    merge_repo(&quot;$workspace/$repo&quot;, strategy, dry_run) || return 1   # stop-on-first-failure
+  return 0
+
+merge_repo(repo_dir, strategy, dry_run):
+  should_skip_dir → return 0
+  branch = symbolic-ref --short -q HEAD  ((detached) → return 0)
+  branch == get_default_branch → return 0 (skip)
+  pr_json = gh pr view &quot;$branch&quot; --json number,state,mergeable  (fail/empty → &quot;no open PR&quot;, return 0)
+  state ≠ OPEN → &quot;PR not open&quot;, return 0
+  mergeable ≠ MERGEABLE → log_error &quot;not mergeable&quot;, return 1
+  ! gh pr checks &quot;$branch&quot; → log_error &quot;CI not green&quot;, return 1
+  dry_run → log_info &quot;would merge PR #N ($strategy)&quot;, return 0
+  gh pr merge &quot;$branch&quot; --$strategy → log_success &quot;merged PR #N&quot;, return 0  (else log_error, return 1)
+</code></pre></div>
+
+<h3 id="155-architecture-module-responsibilities">15.5 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/pr-ops.sh</code> (extended)</strong> — add <code>merge_repo()</code> and <code>merge_workspace()</code> (siblings of <code>pr_repo</code>/<code>pr_workspace</code>); reuse <code>order_repos_by_deps</code>, <code>get_default_branch</code>, <code>should_skip_dir</code>.</li>
+<li><strong><code>bin/mra.sh</code></strong> — <code>branch)</code> dispatch gains a <code>merge</code> subcommand (<code>--strategy</code>/<code>--dry-run</code>), with a <code>check_gh_auth</code> preflight; usage updated.</li>
+</ul>
+<h3 id="156-error-handling">15.6 Error handling</h3>
+<ul>
+<li><code>gh</code> auth preflight; unauth → log_error + exit 1.</li>
+<li>Invalid <code>--strategy</code> → log_error + exit 1.</li>
+<li>Gating block / merge failure → log_error + non-zero (stop-on-first-failure).</li>
+<li>Skips (no PR / non-OPEN / default branch / detached) → info, continue.</li>
+<li><code>--dry-run</code> performs only read-only <code>gh pr view</code>/<code>gh pr checks</code> — never <code>gh pr merge</code>. No local repo writes in any path (merges happen on GitHub).</li>
+</ul>
+<h3 id="157-testing">15.7 Testing</h3>
+<p>Reuses <code>tests/test_pr_ops.sh</code>. <code>gh pr view</code>/<code>gh pr checks</code>/<code>gh pr merge</code> are NOT executed in tests (no GitHub PR available) — coverage targets the skip paths, the collect+order logic (via a stubbed <code>merge_repo</code>), and <code>--strategy</code> validation. Stated here so coverage is not mistaken for end-to-end <code>gh</code> testing.</p>
+<ol>
+<li><strong><code>merge_repo</code> skip paths</strong> — a default-branch repo → skip (returns before any <code>gh</code>); a feature-branch repo in a local fixture with no GitHub PR → <code>gh pr view</code> fails → "no open PR" skip + return 0 + no merge; dry-run on the same → still the no-PR skip.</li>
+<li><strong><code>merge_workspace</code> collect+order</strong> — multi-repo fixture: only feature-branch repos are collected; <code>merge_repo</code> is invoked in <code>order_repos_by_deps</code> order (verify with a <code>merge_repo</code> stub recording call order, like the Phase 2 <code>sync_review</code> <code>review_project</code> stub).</li>
+<li><strong><code>--strategy</code> validation</strong> — subprocess <code>branch merge --strategy bogus</code> → non-zero exit + message (when <code>gh</code> is authenticated; the validation gate fires before any merge).</li>
+<li><strong>Regression</strong> — <code>order_repos_by_deps</code>, <code>pr_repo</code>, <code>pr_workspace</code> tests unchanged.</li>
+</ol>
+<h3 id="158-out-of-scope">15.8 Out of scope</h3>
+<p>Auto-resolving conflicts; waiting/polling for pending CI (a blocked/pending PR stops the batch — rerun <code>branch merge</code> later); auto-deleting merged branches; merge-queue integration. §11.6.2 and the §14.5 follow-ups remain backlog.</p>
+<p><strong>Phase 7 final-review follow-ups (deferred):</strong>
+1. <strong>Skip-path log levels in <code>merge_repo</code></strong> use <code>log_info</code> for detached-HEAD / on-default-branch, whereas <code>pr_repo</code> uses <code>log_warn</code>. Cosmetic; align or document the divergence (merge skips are expected states, so <code>log_info</code> is defensible).
+2. <strong><code>--delete-branch</code> option</strong> — <code>gh pr merge --delete-branch</code> is a common workflow; a future <code>mra branch merge --delete-branch</code> could pass it through.
+3. <strong>Malformed-JSON message:</strong> if <code>gh pr view</code> ever returns non-empty invalid JSON, <code>merge_repo</code> reports "PR not open () — skipping" (safe, but the empty state in the message is slightly misleading). Not a real risk (gh returns valid JSON or non-zero).</p>
+<h2 id="16-phase-8-final-polish">16. Phase 8 — Final polish</h2>
+<p><strong>Status:</strong> Approved (design) — 2026-06-01. Implementation scope for the next plan. Four small follow-ups; no new subsystem. Closes the actionable backlog.</p>
+<h3 id="161-items-exact-behavior">16.1 Items &amp; exact behavior</h3>
+<p><strong>① <code>branch merge --delete-branch</code></strong> (<code>bin/mra.sh</code> + <code>lib/pr-ops.sh</code>; retires §15.8.2)
+- Opt-in flag (default: do NOT delete). The <code>merge)</code> dispatch parses <code>--delete-branch</code> and threads it through <code>merge_workspace</code> → <code>merge_repo</code>.
+- <code>merge_repo</code> gains a 4th param <code>delete_branch</code> (default <code>false</code>); on the real merge it runs <code>gh pr merge "$branch" --"$strategy"</code> plus <code>--delete-branch</code> when set. Dry-run preview appends "(+delete-branch)" when set.</p>
+<p><strong>② <code>integration-test.sh</code> <code>is_api_change</code> consistency</strong> (<code>lib/integration-test.sh</code>; retires §14.5.1)
+- <code>is_api_change "$project_dir" "$project_type"</code> → <code>is_api_change "$project_dir" "$project_type" range "$(get_default_branch "$project_dir")...HEAD"</code> (explicit mode/range like <code>review.sh</code>/<code>eval.sh</code>; behavior-equivalent). The 2-arg back-compat default in <code>is_api_change</code> is KEPT (still covered by <code>test_change_detector.sh</code>, a safety net).</p>
+<p><strong>③ Concerns-only negative test</strong> (<code>tests/test_change_detector.sh</code>, test-only; retires §14.5.2)
+- Fixture where a range changes ONLY <code>app/controllers/concerns/*.rb</code> (no routes/serializer/schema) → assert the result is NOT <code>high</code> (locks the <code>grep -qvE concerns/</code> exclusion; the Phase 6 positive case is already covered).</p>
+<p><strong>④ <code>merge_repo</code> skip log-level alignment</strong> (<code>lib/pr-ops.sh</code>; retires §15.8.1)
+- The detached-HEAD and on-default-branch skips in <code>merge_repo</code> switch from <code>log_info</code> to <code>log_warn</code>, matching <code>pr_repo</code>'s convention. (The no-PR / non-OPEN skips remain <code>log_info</code>.)</p>
+<h3 id="162-architecture-module-responsibilities">16.2 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/pr-ops.sh</code></strong> — <code>merge_repo</code> gains <code>delete_branch</code> param + uses it in <code>gh pr merge</code>; <code>merge_workspace</code> threads it; the two skip logs become <code>log_warn</code>.</li>
+<li><strong><code>bin/mra.sh</code></strong> — <code>branch merge</code> dispatch parses <code>--delete-branch</code> and passes it to <code>merge_workspace</code>; usage updated.</li>
+<li><strong><code>lib/integration-test.sh</code></strong> — explicit <code>is_api_change</code> mode/range.</li>
+<li><strong><code>tests/</code></strong> — <code>--delete-branch</code> dry-run preview test; concerns-only negative test.</li>
+</ul>
+<h3 id="163-error-handling">16.3 Error handling</h3>
+<ul>
+<li><code>--delete-branch</code> is purely additive to the <code>gh pr merge</code> invocation; all existing gating/skip/stop semantics are unchanged.</li>
+<li>No behavior change to <code>is_api_change</code> (explicit call equals the prior back-compat default); no behavior change from the log-level swap (message text unchanged).</li>
+</ul>
+<h3 id="164-testing">16.4 Testing</h3>
+<ol>
+<li><strong><code>tests/test_pr_ops.sh</code></strong> — <code>merge_repo</code> dry-run with <code>delete_branch=true</code> on a no-PR fixture still hits the no-PR skip (gh layer untested per convention); the dispatch passes <code>--delete-branch</code> through (subprocess reaches the no-PR skip / gh-auth path). The existing skip-path/order/strategy tests stay green; merge_repo skip messages still contain "detached"/"default branch" after the log-level change.</li>
+<li><strong><code>tests/test_change_detector.sh</code></strong> — concerns-only range → NOT <code>high</code>.</li>
+<li><strong>Regression</strong> — <code>bash test.sh</code> fully green; <code>is_api_change</code> 2-arg back-compat test unchanged.</li>
+</ol>
+<h3 id="165-out-of-scope-closed">16.5 Out of scope / closed</h3>
+<p>At Phase 8 closure the actionable backlog from Phases 0–7 was cleared, with §11.6.2 (no <code>branch pr</code> repo-subset CLI path) and §15.8.3 marked won't-fix. §11.6.2 is <strong>now reopened as Phase 9</strong> (§17, designed 2026-06-05). §15.8.3 (malformed-JSON message — not a real risk; <code>gh</code> returns valid JSON or non-zero) remains <strong>won't fix / N/A</strong>.</p>
+<h2 id="17-phase-9-branch-prbranch-merge-repo-subset">17. Phase 9 — <code>branch pr</code>/<code>branch merge</code> repo subset</h2>
+<p><strong>Status:</strong> Implemented — 2026-06-05. <code>branch pr</code>/<code>branch merge</code> accept <code>[repos…]</code>; <code>validate_repo_subset</code> + <code>warn_excluded_feature_deps</code> in <code>lib/pr-ops.sh</code>. Reactivated §11.6.2.</p>
+<h3 id="171-goal-command-surface">17.1 Goal &amp; command surface</h3>
+<p>Let <code>branch pr</code> and <code>branch merge</code> accept an optional trailing <code>[repos...]</code> list that restricts the operation to that subset, mirroring <code>branch new &lt;name&gt; [repos...]</code>. <strong>No subset args = current behavior</strong> (operate on every feature-branch repo in the workspace).</p>
+<div class="highlight"><pre><span></span><code>mra branch pr    [--base &lt;ref&gt;] [--dry-run] [repos...]
+mra branch merge [--strategy merge|squash|rebase] [--dry-run] [--delete-branch] [repos...]
+</code></pre></div>
+
+<ul>
+<li>Flag and positional tokens may interleave; after flag parsing, every remaining non-flag token is a repo name.</li>
+<li>The existing <code>validate_repo_name</code> rejects <code>-*</code> / <code>.</code> / <code>..</code> / <code>*/*</code>, so a mistyped flag landing in the repo list is caught as an invalid name rather than silently treated as a repo.</li>
+</ul>
+<h3 id="172-exact-behavior">17.2 Exact behavior</h3>
+<p><strong>Dispatch ordering.</strong> To keep subset validation cheap and side-effect-free, the <code>branch pr</code> / <code>branch merge</code> dispatch reorders its preflight so that subset validation runs <strong>before</strong> the <code>gh auth</code> check (which today runs first — <code>bin/mra.sh:663</code>, mirroring §10.5 / §15.6). The new order is:</p>
+<blockquote>
+<p>parse args → <code>resolve_workspace</code> → <strong>validate subset</strong> (only if <code>[repos…]</code> given) → <code>check_gh_auth</code> → <code>pr_workspace</code> / <code>merge_workspace</code></p>
+</blockquote>
+<p>A bad repo name therefore aborts before the gh-auth preflight and before any <code>gh</code> API call — the user gets the "invalid repo name" / "not a git repo" error without needing gh set up. The dispatch now always runs <code>resolve_workspace</code> before <code>check_gh_auth</code> (both are read-only preflights — Phase 2 / Phase 7 ran <code>check_gh_auth</code> first; swapping two side-effect-free checks is observationally identical). When no subset is given, <code>validate_repo_subset</code> is skipped and the <strong>full-workspace scan behavior is unchanged</strong> from Phase 2 / Phase 7.</p>
+<p><strong>Subset validation (fail fast).</strong> When a subset is given, the WHOLE list is validated before <code>check_gh_auth</code> and before any <code>pr_repo</code>/<code>merge_repo</code> call:
+1. Each name passes <code>validate_repo_name</code> (else <code>log_error</code> "invalid repo name").
+2. Each named repo must resolve to a non-skipped git repo in the workspace (<code>should_skip_dir</code> false; else <code>log_error</code> "not a git repo").
+3. If any name fails (1) or (2), abort the whole command (return non-zero) — <strong>no gh-auth check, no PR opened, no merge performed.</strong> All bad names are reported, not just the first.</p>
+<p><strong>Candidate selection within the subset.</strong> Of the validated named repos, those NOT on a feature branch (on the default branch, or detached) are skipped with <code>log_info</code> ("nothing to PR" / "nothing to merge"); the rest are candidates. (Feature-branch detection stays per-command: <code>pr</code> compares against <code>base_ref</code> = <code>--base</code> override or default; <code>merge</code> compares against the repo default.)</p>
+<p><strong>Dependency handling (warn, don't block).</strong> Candidates are ordered with <code>order_repos_by_deps</code> <strong>within the subset only</strong>. Additionally, if a subset repo depends (per the dep graph) on a repo that is itself on a feature branch but excluded from the subset, emit <code>log_warn</code> (order/wholeness risk) and continue — the explicit subset is respected.</p>
+<p><strong>No subset = unchanged.</strong> When no repo args are given, both functions run their existing full-workspace scan verbatim.</p>
+<h3 id="173-architecture-module-responsibilities">17.3 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/pr-ops.sh</code></strong></li>
+<li><code>pr_workspace</code> / <code>merge_workspace</code> gain an optional trailing repo-list parameter. When non-empty, they iterate the named subset (immutably building a new candidate array) instead of scanning all dirs; when empty, the current scan path is unchanged.</li>
+<li>New shared helper <code>validate_repo_subset workspace repos...</code> — validates names + existence per §17.2, reports all failures, returns non-zero if any. Reuses <code>validate_repo_name</code> from <code>lib/branch-ops.sh</code>. Called by the dispatch (not by <code>pr_workspace</code>/<code>merge_workspace</code>) so it runs before <code>check_gh_auth</code>; the two workspace functions may trust the names are already valid and only do candidate selection + the dep warning.</li>
+<li>New shared helper <code>warn_excluded_feature_deps graph_file subset... -- feature_repos...</code> (or equivalent signature) — emits the excluded-dependency warning. Pure logging; no control-flow effect.</li>
+<li><strong><code>bin/mra.sh</code></strong> — the <code>pr)</code> and <code>merge)</code> sub-dispatches under <code>branch)</code> collect non-flag positionals into a <code>repos</code> array, then follow the §17.2 dispatch ordering: <code>resolve_workspace</code> → (if <code>repos</code> non-empty) <code>validate_repo_subset</code> (abort on failure) → <code>check_gh_auth</code> → <code>pr_workspace</code>/<code>merge_workspace "$@" "${repos[@]}"</code>. The existing <code>check_gh_auth</code> call moves to <strong>after</strong> subset validation. Usage strings updated to show <code>[repos...]</code>.</li>
+<li>No change to <code>pr_repo</code> / <code>merge_repo</code> (single-repo workers) — the subset is resolved entirely above them.</li>
+</ul>
+<h3 id="174-error-handling">17.4 Error handling</h3>
+<ul>
+<li>Subset validation is fail-fast and side-effect-free: a bad name aborts before the <code>gh auth</code> preflight and any <code>gh</code> API call (see the §17.2 dispatch ordering — <code>check_gh_auth</code> moves after subset validation).</li>
+<li>All existing gating, skip, stop-on-first-failure, dry-run, and <code>--delete-branch</code> semantics are unchanged — the subset only narrows which repos enter the existing pipeline.</li>
+<li>Excluded-dependency detection is advisory (<code>log_warn</code>) and never changes exit status on its own.</li>
+</ul>
+<h3 id="175-testing-extend-teststest_pr_opssh-existing-passfail-harness">17.5 Testing (extend <code>tests/test_pr_ops.sh</code>, existing PASS/FAIL harness)</h3>
+<ol>
+<li>Subset of 2 of 3 feature-branch repos → only the named 2 are acted on (dry-run; assert output names).</li>
+<li>Named repo that does not exist → <code>log_error</code>, non-zero exit, and <strong>no</strong> <code>pr_repo</code>/<code>merge_repo</code> invoked (assert absence in dry-run output).</li>
+<li>Named repo on the default branch → skipped with info; other named repos still proceed.</li>
+<li>Subset repo depends on an excluded feature-branch repo → warning emitted; command still proceeds.</li>
+<li>Invalid repo names (<code>-x</code>, <code>a/b</code>) → rejected as invalid name.</li>
+<li>Dependency ordering within the subset is respected (assert order in dry-run output).</li>
+<li><strong>Dispatch ordering:</strong> a bad subset name aborts the <code>validate_repo_subset</code> path; assert the error is the invalid-name/not-a-git-repo message (not a gh-auth error), confirming validation runs before <code>check_gh_auth</code>.</li>
+<li><strong>Regression:</strong> no-arg <code>branch pr</code>/<code>branch merge</code> behavior unchanged; <code>bash test.sh</code> fully green.</li>
+</ol>
+<h3 id="176-out-of-scope-phase-9">17.6 Out of scope (Phase 9)</h3>
+<ul>
+<li>No subset for <code>mra sync</code> or <code>mra review</code> (separate surfaces).</li>
+<li>No auto-inclusion of excluded dependencies (decided: warn only).</li>
+<li>No CI-polling auto-merge (now designed as Phase 10, §18).</li>
+</ul>
+<h2 id="18-phase-10-ci-polling-auto-merge">18. Phase 10 — CI-polling auto-merge</h2>
+<p><strong>Status:</strong> Implemented — 2026-06-05. <code>branch merge --wait-ci [--ci-timeout &lt;sec&gt;]</code> polls CI via <code>wait_for_pr_checks</code> in <code>lib/ci.sh</code> (exit-code driven); <code>ci_wait_timeout</code> threaded through <code>merge_workspace</code>/<code>merge_repo</code>.</p>
+<h3 id="181-goal-command-surface">18.1 Goal &amp; command surface</h3>
+<p>Add an opt-in <code>--wait-ci</code> flag to <code>mra branch merge</code> that polls each PR's CI checks until they finish (instead of the current immediate stop when CI is not yet green), then merges. <code>--ci-timeout</code> is configurable; the poll interval is a fixed constant.</p>
+<div class="highlight"><pre><span></span><code>mra branch merge [--strategy S] [--dry-run] [--delete-branch] [--wait-ci] [--ci-timeout &lt;sec&gt;] [repos...]
+</code></pre></div>
+
+<ul>
+<li><code>--wait-ci</code> — enable polling. Default OFF: without it, <code>branch merge</code> keeps the current behaviour (one-shot <code>gh pr checks</code>, stop if not green). Fully backward-compatible.</li>
+<li><code>--ci-timeout &lt;sec&gt;</code> — max seconds to wait per PR. Default <strong>1800</strong> (30 min). Must be a positive integer. <strong>If <code>--ci-timeout</code> is given without <code>--wait-ci</code>, error</strong> (clearer than silently ignoring).</li>
+<li>Poll interval — fixed constant <code>CI_POLL_INTERVAL</code> (default 30s) in <code>lib/ci.sh</code>. Not user-configurable (YAGNI).</li>
+<li><code>branch pr</code> is unchanged (it opens PRs, it does not merge or gate on CI).</li>
+</ul>
+<h3 id="182-exact-behavior">18.2 Exact behavior</h3>
+<p>The current <code>merge_repo</code> CI gate (<code>lib/pr-ops.sh</code> §15.2: one-shot <code>gh pr checks "$branch"</code> → if not green, <code>log_error … stopping; return 1</code>) is conditionally replaced by a poll.</p>
+<p><strong>When polling is enabled and not dry-run</strong>, the CI gate calls <code>wait_for_pr_checks "$repo_dir" "$branch" "$ci_timeout"</code>, which drives off <code>gh pr checks</code>'s <strong>documented exit codes</strong> rather than parsing state buckets (robust, no JSON brittleness):
+- <code>gh pr checks "$branch"</code> exit <code>0</code> → all checks passed → <strong>green</strong> → proceed to merge.
+- exit <code>8</code> → <strong>checks pending</strong> (<code>gh</code>'s documented "pending" code) → sleep <code>CI_POLL_INTERVAL</code>, then re-poll, until the elapsed time reaches the timeout.
+- any <strong>other</strong> non-zero exit (e.g. <code>1</code>) → <strong>not green</strong> → <strong>fail-fast</strong>: stop immediately (<code>return 1</code>), do not wait the full timeout. This bucket includes both a failed check <strong>and the "no checks reported on the branch" case</strong> (<code>gh</code> exits non-zero, not 8, when a PR has no checks). Treating no-checks as a stop is <strong>identical to today's one-shot gate</strong> (<code>if ! gh pr checks; then … "CI not green — stopping"</code>, §15.2) — Phase 10 introduces no behaviour change for the no-checks case.
+- Elapsed ≥ timeout while still pending (exit <code>8</code>) → <strong>timed out</strong> → treat as failure: <code>log_error "$repo: CI did not finish within &lt;sec&gt;s — stopping"</code> → <code>return 1</code> (the batch then halts via stop-on-first-failure, §15.3).</p>
+<p>(Exit code 8 = "Checks pending" is confirmed from <code>gh pr checks --help</code>. Relying on exit codes means a transient pending state never trips the failure path — the exact case Phase 10 exists to wait through. <code>gh pr checks</code> exits 0 only when checks exist and all passed; no-checks and failures are both non-8 non-zero, so both stop, matching §15.2.)</p>
+<p><code>wait_for_pr_checks</code> returns <code>0</code> (green), <code>1</code> (failed), or <code>2</code> (timed out); <code>merge_repo</code> maps <code>1</code>/<code>2</code> to a stop (<code>return 1</code>) with distinct messages.</p>
+<p><strong>When polling is disabled</strong> (<code>ci_wait_timeout</code> empty): <code>merge_repo</code> runs the existing one-shot <code>gh pr checks</code> gate verbatim — no behaviour change.</p>
+<p><strong>Dry-run + <code>--wait-ci</code>:</strong> do NOT poll (avoid blocking up to 30 min just to preview). Preview only: <code>"$repo: would wait for CI (timeout &lt;sec&gt;s) then merge PR #&lt;n&gt; (&lt;strategy&gt;)"</code>. The merge itself is still previewed, not executed.</p>
+<h3 id="183-architecture-module-responsibilities">18.3 Architecture / module responsibilities</h3>
+<p><strong>Signature note (why one new param, not two).</strong> <code>merge_repo</code> is <code>(repo_dir, strategy, dry_run, delete_branch)</code> and <code>merge_workspace</code> is <code>(workspace, strategy, dry_run, delete_branch, [subset…])</code> with the subset at <code>${@:5}</code> (Phase 9). Adding both <code>wait_ci</code> (bool) and <code>ci_timeout</code> (int) as separate positionals would bloat the signature, push the subset to <code>${@:7}</code>, and is exactly the kind of positional fragility that caused a Phase 9 bug. Instead the two concepts collapse into a <strong>single param <code>ci_wait_timeout</code></strong>: empty string = do not poll (default, current behaviour); a positive integer = poll with that timeout. One new positional.</p>
+<ul>
+<li><strong><code>lib/ci.sh</code></strong> — new <code>wait_for_pr_checks repo_dir branch timeout_sec [interval_sec]</code> → returns <code>0</code> green / <code>1</code> failed / <code>2</code> timed-out. Pure poll loop that inspects the <strong>exit code</strong> of <code>gh pr checks "$branch"</code> (<code>0</code>=green, <code>8</code>=pending→keep polling, other non-zero=failed); <code>interval_sec</code> defaults to the <code>CI_POLL_INTERVAL</code> constant (tests pass a small value); elapsed time tracked with the bash <code>SECONDS</code> builtin. This is the first runtime (non-generator) function in <code>ci.sh</code>.</li>
+<li><strong><code>lib/pr-ops.sh</code></strong></li>
+<li><code>merge_repo</code> gains a 5th param <code>ci_wait_timeout</code> (default <code>""</code>). The CI gate branches: non-empty + not dry-run → call <code>wait_for_pr_checks</code> and map its result; empty → existing one-shot check. The dry-run preview string includes the "would wait for CI (timeout Xs) then" clause when <code>ci_wait_timeout</code> is non-empty.</li>
+<li><code>merge_workspace</code> signature becomes <code>(workspace, strategy, dry_run, delete_branch, ci_wait_timeout, [subset…])</code> — subset moves to <code>${@:6}</code>; it threads <code>ci_wait_timeout</code> into each <code>merge_repo</code> call.</li>
+<li><strong>Knock-on:</strong> Phase 9 tests that call <code>merge_workspace</code> directly insert an empty <code>""</code> for <code>ci_wait_timeout</code> before the subset (<code>merge true false a</code> → <code>merge true false "" a</code>).</li>
+<li><strong><code>bin/mra.sh</code></strong> — the <code>merge)</code> dispatch parses <code>--wait-ci</code> (a boolean <code>wait_ci</code>) and <code>--ci-timeout &lt;sec&gt;</code> (a <code>ci_timeout</code> value, validated as a positive integer) in the existing interleave-tolerant arg loop (Phase 9 allows flags and positionals in any order). Validation happens <strong>after</strong> the loop, off the captured state — NOT by requiring <code>--wait-ci</code> to appear first — so <code>--ci-timeout 60 --wait-ci</code> and <code>--wait-ci --ci-timeout 60</code> are both valid. Post-parse: if <code>ci_timeout</code> was set but <code>wait_ci</code> is false → error; otherwise <code>ci_wait_timeout</code> = (<code>wait_ci</code> ? (<code>ci_timeout</code> or default 1800) : <code>""</code>). Threads <code>ci_wait_timeout</code> into <code>merge_workspace</code>. The <code>pr)</code> block is untouched. Usage line updated.</li>
+<li>No change to <code>pr_repo</code>, <code>pr_workspace</code>, <code>validate_repo_subset</code>, <code>warn_excluded_feature_deps</code>, or <code>merge_repo</code>'s mergeable check.</li>
+</ul>
+<h3 id="184-error-handling">18.4 Error handling</h3>
+<ul>
+<li><code>--ci-timeout</code> without <code>--wait-ci</code> → <code>log_error</code> + exit non-zero. Checked <strong>after</strong> arg parsing (off <code>wait_ci</code>/<code>ci_timeout</code> state), so flag order is irrelevant — <code>--ci-timeout 60 --wait-ci</code> is accepted.</li>
+<li><code>--ci-timeout</code> non-integer / ≤ 0 → <code>log_error</code> + exit non-zero (validated where the value is parsed).</li>
+<li>Both validations run before <code>resolve_workspace</code>/subset/gh-auth — before any side effect.</li>
+<li>A failed or timed-out poll maps to the existing stop-on-first-failure path — no new control-flow surface.</li>
+<li><code>wait_for_pr_checks</code> is read-only (only <code>gh pr checks</code>, <code>sleep</code>); it never writes or merges.</li>
+<li>All existing gating (mergeable), skip, dry-run, <code>--delete-branch</code>, and subset semantics are unchanged when <code>--wait-ci</code> is absent.</li>
+</ul>
+<h3 id="185-testing">18.5 Testing</h3>
+<p><strong><code>tests/test_ci.sh</code> (new suite) — <code>wait_for_pr_checks</code></strong> (stub a <code>gh</code> function returning scripted <strong>exit codes</strong> across calls; small interval):
+1. <code>gh</code> exits <code>0</code> on first poll → returns <code>0</code> (green).
+2. <code>gh</code> exits <code>8</code>, <code>8</code>, then <code>0</code> across polls → returns <code>0</code> (proves it keeps polling through pending; the pending stub MUST return exit code 8, gh's documented pending code).
+3. <code>gh</code> exits <code>1</code> (a non-8 non-zero) → returns <code>1</code> immediately (fail-fast; does not wait out the timeout — assert it returns well under the timeout).
+4. <code>gh</code> always exits <code>8</code> with a tiny timeout → returns <code>2</code> (timed out).
+5. <code>gh</code> exits non-zero-non-8 (e.g. <code>1</code>) simulating "no checks reported" → returns <code>1</code> (treated as not-green / stop, matching today's one-shot gate — no-checks is NOT silently green).</p>
+<p><strong><code>tests/test_pr_ops.sh</code> — merge_repo / merge_workspace</strong> (these must reach the CI gate, so stub <code>gh pr view</code> to report an OPEN + MERGEABLE PR; otherwise <code>merge_repo</code> returns at the earlier "no open PR" skip and never exercises the gate):
+6. <strong>Backward-compat:</strong> <code>ci_wait_timeout=""</code> with an OPEN+MERGEABLE stubbed PR → <code>merge_repo</code> invokes the one-shot <code>gh pr checks</code> gate (assert via a <code>gh</code> stub that records the <code>checks</code> subcommand was called) and <code>wait_for_pr_checks</code> is NOT called.
+7. <strong>Poll path:</strong> non-empty <code>ci_wait_timeout</code> (not dry-run) with the same stubbed PR → <code>wait_for_pr_checks</code> IS called (stub it to record invocation + return 0) and the one-shot <code>gh pr checks</code> gate is bypassed.
+8. <strong>Dry-run:</strong> dry-run + non-empty <code>ci_wait_timeout</code> → preview contains "would wait for CI (timeout Xs)"; a stubbed <code>wait_for_pr_checks</code> confirms it is NOT called in dry-run.
+9. <strong>Signature:</strong> Phase 9 subset tests updated with the <code>""</code> slot still select the right repos; a stubbed <code>merge_repo</code> confirms <code>ci_wait_timeout</code> is threaded through <code>merge_workspace</code>.</p>
+<p><strong><code>tests/test_pr_ops.sh</code> — dispatch:</strong>
+10. <code>branch merge --ci-timeout 60</code> (no <code>--wait-ci</code>) → error, non-zero exit.
+11. <code>branch merge --ci-timeout 60 --wait-ci</code> (timeout BEFORE wait-ci) → accepted (no error), proving order-independent post-parse validation.
+12. <code>branch merge --ci-timeout abc --wait-ci</code> → error (non-integer), non-zero exit.
+13. <code>branch merge --wait-ci somerepo</code> (stub env) → subset validation still runs before gh-auth (reuses the Phase 9 ordering proof).</p>
+<p><strong>Regression:</strong> <code>bash test.sh</code> fully green (suite count +1 for <code>test_ci.sh</code>).</p>
+<h3 id="186-out-of-scope-phase-10">18.6 Out of scope (Phase 10)</h3>
+<ul>
+<li>No <code>--wait-ci</code> on <code>branch pr</code> (pr does not merge).</li>
+<li>No user-configurable poll interval (fixed constant).</li>
+<li>No automatic CI re-run / retry on failure.</li>
+<li>No change to the mergeable check (stays one-shot; only the CI gate polls).</li>
+</ul>
+<h2 id="19-phase-11-branch-status-json">19. Phase 11 — <code>branch status --json</code></h2>
+<p><strong>Status:</strong> Implemented — 2026-06-05. <code>branch status --json</code> emits an all-repos JSON array via the new pure <code>branch_state_json</code> in <code>lib/branch.sh</code>; JSON-mode stdout stays JSON-only (fetch errors → stderr).</p>
+<h3 id="191-goal-command-surface">19.1 Goal &amp; command surface</h3>
+<p>Add an opt-in <code>--json</code> flag to <code>mra branch status</code> that emits a machine-readable JSON array of every repo's branch state, for CI / external-tool consumption.</p>
+<div class="highlight"><pre><span></span><code>mra branch status [--all] [--fetch] [--json]
+</code></pre></div>
+
+<ul>
+<li><code>--json</code> emits <strong>all repos</strong> (it ignores the needs-attention filter — machine consumers want the full dataset and filter themselves). <code>--all</code> is therefore redundant under <code>--json</code> (allowed, no error).</li>
+<li><code>--fetch</code> still works with <code>--json</code> (fetch fresh, then emit).</li>
+<li>Without <code>--json</code>, the existing text table is unchanged (zero behaviour change).</li>
+</ul>
+<h3 id="192-output-shape">19.2 Output shape</h3>
+<p>A JSON array; one object per repo, in workspace directory order:</p>
+<div class="highlight"><pre><span></span><code><span class="p">[</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">&quot;repo&quot;</span><span class="p">:</span><span class="s2">&quot;app&quot;</span><span class="p">,</span><span class="nt">&quot;branch&quot;</span><span class="p">:</span><span class="s2">&quot;feat/x&quot;</span><span class="p">,</span><span class="nt">&quot;upstream&quot;</span><span class="p">:</span><span class="s2">&quot;origin/feat/x&quot;</span><span class="p">,</span>
+<span class="w">   </span><span class="nt">&quot;ahead&quot;</span><span class="p">:</span><span class="mi">2</span><span class="p">,</span><span class="nt">&quot;behind&quot;</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">&quot;dirty&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">&quot;sync_action&quot;</span><span class="p">:</span><span class="s2">&quot;ahead-only&quot;</span><span class="p">,</span>
+<span class="w">   </span><span class="nt">&quot;on_default&quot;</span><span class="p">:</span><span class="kc">false</span><span class="p">,</span><span class="nt">&quot;needs_attention&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">}</span>
+<span class="p">]</span>
+</code></pre></div>
+
+<ul>
+<li><code>repo</code>, <code>branch</code>, <code>upstream</code>, <code>sync_action</code> — strings.</li>
+<li><code>ahead</code>, <code>behind</code>, <code>dirty</code> — JSON numbers.</li>
+<li><code>on_default</code>, <code>needs_attention</code> — JSON booleans.</li>
+<li><code>needs_attention</code> mirrors <code>branch_row_needs_attention</code> so a consumer can reproduce the text-mode filter.</li>
+<li>Empty / no-repo workspace → <code>[]</code>.</li>
+</ul>
+<h3 id="193-stdout-discipline">19.3 stdout discipline</h3>
+<p><code>_log</code> (and therefore <code>log_*</code>) writes to <strong>stdout</strong> (<code>lib/colors.sh</code>), so in <code>--json</code> mode the dispatch must keep stdout JSON-only:</p>
+<ul>
+<li>Do NOT print the table header or the "all repos clean and up to date" success line.</li>
+<li><code>--fetch</code> failures (the only diagnostic that occurs <em>mid-emit</em>, per repo) are reported via <code>log_error … &gt;&amp;2</code> (stderr) and still cause a non-zero exit at the end, exactly as the text path does — but they never touch the JSON on stdout.</li>
+<li><strong>Scope of the guarantee + consumer contract.</strong> There are three outcomes a JSON consumer can see:</li>
+<li><strong>exit 0</strong> — stdout contains <em>only</em> the complete JSON array; nothing on stderr.</li>
+<li><strong>non-zero, mid-emit (per-repo <code>--fetch</code> failure)</strong> — stdout <em>still</em> contains a JSON array (the states read, post-fetch-attempt); the fetch-failure message is on <strong>stderr</strong>. The non-zero exit is a warning that some counts may be stale, NOT an "ignore stdout" signal.</li>
+<li><strong>non-zero, pre-emit fatal</strong> — an unknown option in the <code>status</code> parser or <code>resolve_workspace</code> failing aborts <em>before</em> any JSON; these keep their existing <code>log_error</code> behaviour (currently stdout) and produce <strong>no</strong> JSON array.</li>
+<li><strong>Robust consumer rule:</strong> parse stdout as JSON — if it parses, use it (regardless of exit code), and treat a non-zero exit as "check stderr for fetch warnings"; if stdout does not parse, it was a pre-emit fatal error (read the message, which the non-zero exit confirms). Redirecting pre-emit diagnostics to stderr is out of scope (it would touch shared/unrelated dispatch paths) — §19.6 test 8 only locks the mid-emit fetch-failure case.</li>
+</ul>
+<h3 id="194-architecture-module-responsibilities">19.4 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/branch.sh</code></strong> — new pure function <code>branch_state_json state_block on_default needs_attention</code> that builds one JSON object with <code>jq -n</code>, using <code>--arg</code> for strings and <code>--argjson</code> for the numeric/boolean fields (the <code>jq --arg</code> injection discipline keeps branch names with quotes/spaces safe). It is the JSON sibling of <code>branch_format_row</code>, reading the same <code>get_branch_state</code> block. No change to <code>get_branch_state</code>, <code>branch_format_row</code>, <code>branch_row_needs_attention</code>, or <code>branch_sync_action</code>.</li>
+<li><strong><code>bin/mra.sh</code></strong> — the <code>branch status</code> dispatch parses <code>--json</code>. In JSON mode it iterates all repos (no attention filter), computes <code>state</code>/<code>on_default</code>/<code>needs_attention</code> per repo, calls <code>branch_state_json</code>, collects the objects, and emits a single array via <code>jq -s '.'</code>; fetch errors go to stderr; no header/clean line. In text mode it runs the existing path verbatim. Usage line updated to show <code>[--json]</code>.</li>
+</ul>
+<h3 id="195-error-handling">19.5 Error handling</h3>
+<ul>
+<li><code>--fetch</code> failure in <code>--json</code> mode → <code>log_error … &gt;&amp;2</code>, JSON still emitted for the repos read, non-zero exit at the end (consistent with text mode).</li>
+<li><code>branch_state_json</code> relies on <code>get_branch_state</code> always emitting numeric <code>ahead</code>/<code>behind</code>/<code>dirty</code> (it defaults them to 0), so <code>--argjson</code> never receives a non-number.</li>
+<li><code>--json</code> combined with <code>--all</code> is accepted (all-repos is already implied); no error.</li>
+</ul>
+<h3 id="196-testing">19.6 Testing</h3>
+<p><strong><code>tests/test_branch.sh</code> (existing suite) — <code>branch_state_json</code>:</strong></p>
+<ol>
+<li>A state block + <code>on_default=false</code> + <code>needs_attention=true</code> → output parses (<code>jq -e</code>), string fields correct, <code>ahead</code>/<code>behind</code>/<code>dirty</code> are JSON numbers (<code>jq '.ahead|type=="number"'</code>), <code>on_default</code>/<code>needs_attention</code> are JSON booleans.</li>
+<li>A branch name with special characters (a quote or a space) → still valid JSON (jq injection-safe).</li>
+</ol>
+<p><strong><code>tests/test_branch.sh</code> — <code>branch status --json</code> dispatch (real CLI via <code>MRA_WORKSPACE</code>):</strong></p>
+<ol start="3">
+<li>Multi-repo workspace (mix of default-branch and feature-branch repos) → <code>--json</code> output is a JSON array (<code>jq -e 'type=="array"'</code>) whose length equals the total repo count (including <code>needs_attention:false</code> repos).</li>
+<li><code>needs_attention</code> is correct per repo (clean default-branch repo → false; an ahead/dirty repo → true).</li>
+<li>stdout is clean: the entire <code>--json</code> output parses with <code>jq .</code> (no header/log contamination).</li>
+<li>Empty workspace → <code>[]</code>.</li>
+<li>Text mode (no <code>--json</code>) regression — output unchanged.</li>
+<li><strong>Failure-path stdout discipline (the risky case):</strong> a repo whose <code>origin</code> points at a non-existent path (so <code>git fetch</code> fails) run with <code>--fetch --json</code> → assert (a) non-zero exit, (b) stdout still parses as a JSON array (<code>jq -e 'type=="array"'</code>), (c) the fetch-failure message appears on <strong>stderr</strong> (capture stdout/stderr separately), (d) stdout contains no <code>[branch]</code> log tag. This locks the mid-emit fetch-failure redirection that §19.3 requires.</li>
+</ol>
+<p><strong>Regression:</strong> <code>bash test.sh</code> fully green (no new suite — tests live in the existing <code>tests/test_branch.sh</code>).</p>
+<h3 id="197-out-of-scope-phase-11">19.7 Out of scope (Phase 11)</h3>
+<ul>
+<li>No <code>--json</code> on other commands (only <code>branch status</code>).</li>
+<li>No field selection / jq-expression flag.</li>
+<li>No change to the text-mode output format.</li>
+</ul>
+<h2 id="20-phase-12-sync-json-default-safe-push">20. Phase 12 — <code>sync --json</code> (default / --safe / --push)</h2>
+<p><strong>Status:</strong> Implemented — 2026-06-05. <code>sync --json</code> (default/<code>--safe</code>/<code>--push</code>) emits a per-repo <code>{repo, action, ok}</code> array via <code>sync_result_json</code> + the <code>SYNC_RESULT_FILE</code> sink in <code>lib/sync.sh</code>; JSON-mode stdout stays JSON-only (worker logs → stderr). <code>--review --json</code> rejected.</p>
+<h3 id="201-goal-command-surface">20.1 Goal &amp; command surface</h3>
+<p>Add an opt-in <code>--json</code> to <code>mra sync</code> for its three sync-outcome modes (default, <code>--safe</code>, <code>--push</code>), emitting a per-repo <code>{repo, action, ok}</code> JSON array for CI / external-tool consumption.</p>
+<div class="highlight"><pre><span></span><code>mra sync [--safe|--push] [--dry-run] [--json]
+</code></pre></div>
+
+<ul>
+<li><code>--json</code> composes with the default mode, <code>--safe</code>, or <code>--push</code> (orthogonal to the existing mutually-exclusive mode flags).</li>
+<li><code>mra sync --review --json</code> → <strong>error, non-zero exit, no JSON</strong> (review output is freeform LLM prose with no clean JSON contract — the same reason <code>review --json</code> was declined).</li>
+<li>Existing rules unchanged: the three mode flags stay mutually exclusive; <code>--dry-run</code> applies only to <code>--push</code>.</li>
+</ul>
+<h3 id="202-shared-per-repo-result-model">20.2 Shared per-repo result model</h3>
+<p>Every repo that the run acts on yields one record <code>{repo, action, ok}</code>:</p>
+<ul>
+<li><code>action</code> — a normalized lowercase-hyphen string (per-mode vocabulary in §20.3).</li>
+<li><code>ok</code> — JSON boolean: <code>false</code> for the <code>*-failed</code> actions; <code>true</code> otherwise (including safe skips, which the workers already treat as non-errors by returning 0).</li>
+<li>Repos that <code>should_skip_dir</code> rejects (not a git repo) are <strong>not recorded</strong> — consistent with text mode, where they never appear.</li>
+</ul>
+<p>A new pure <code>sync_result_json repo action ok</code> (<code>lib/sync.sh</code>) builds one JSON object with <code>jq -n</code> (<code>--arg</code> for <code>repo</code>/<code>action</code>, <code>--argjson</code> for <code>ok</code>), injection-safe — the sibling of Phase 11's <code>branch_state_json</code>.</p>
+<h3 id="203-per-mode-action-vocabulary">20.3 Per-mode action vocabulary</h3>
+<p><strong>default (<code>sync_repo</code> — clone/pull):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>action</th>
+<th>ok</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>repo dir missing → clone succeeds</td>
+<td><code>cloned</code></td>
+<td>true</td>
+</tr>
+<tr>
+<td>clone fails</td>
+<td><code>clone-failed</code></td>
+<td>false</td>
+</tr>
+<tr>
+<td>on a feature branch (not default) → skip</td>
+<td><code>skipped-branch</code></td>
+<td>true</td>
+</tr>
+<tr>
+<td>on default branch, fetch+pull succeeds</td>
+<td><code>pulled</code></td>
+<td>true</td>
+</tr>
+<tr>
+<td>pull fails</td>
+<td><code>sync-failed</code></td>
+<td>false</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>--safe</code> (<code>safe_sync_repo</code> — ff-only pull):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>action</th>
+<th>ok</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>fetch fails</td>
+<td><code>fetch-failed</code></td>
+<td>false</td>
+</tr>
+<tr>
+<td>fast-forward pull succeeds</td>
+<td><code>pulled</code></td>
+<td>true</td>
+</tr>
+<tr>
+<td>ff-only pull fails</td>
+<td><code>ff-failed</code></td>
+<td>false</td>
+</tr>
+<tr>
+<td>up-to-date / ahead-only</td>
+<td><code>up-to-date</code> / <code>ahead-only</code></td>
+<td>true</td>
+</tr>
+<tr>
+<td>diverged / dirty-skip / no-upstream / unknown</td>
+<td><code>diverged</code> / <code>dirty-skip</code> / <code>no-upstream</code> / <code>unknown</code></td>
+<td>true (safe skip)</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>--push</code> (<code>push_repo</code> — push; <code>--dry-run</code> uses the <code>would-</code> forms):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>action</th>
+<th>ok</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>push-new succeeds / dry-run</td>
+<td><code>pushed-new</code> / <code>would-push-new</code></td>
+<td>true</td>
+</tr>
+<tr>
+<td>push succeeds / dry-run</td>
+<td><code>pushed</code> / <code>would-push</code></td>
+<td>true</td>
+</tr>
+<tr>
+<td>push-new fails / push fails</td>
+<td><code>push-new-failed</code> / <code>push-failed</code></td>
+<td>false</td>
+</tr>
+<tr>
+<td>up-to-date</td>
+<td><code>up-to-date</code></td>
+<td>true</td>
+</tr>
+<tr>
+<td>skip-detached / skip-diverged / skip-behind / unknown</td>
+<td>same name</td>
+<td>true (safe skip)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="204-mechanism-json-without-disturbing-text-mode">20.4 Mechanism — JSON without disturbing text mode</h3>
+<p>The per-repo workers today call <code>log_*</code> (stdout) and return a code. <strong>Text mode stays byte-identical</strong> (the existing <code>tests/test_sync*.sh</code> human-message assertions must keep passing). The JSON path is added via a file sink:</p>
+<ul>
+<li>A new <code>_sync_record repo action ok</code> (<code>lib/sync.sh</code>) appends <code>repo&lt;TAB&gt;action&lt;TAB&gt;ok</code> to the file named by the env var <code>SYNC_RESULT_FILE</code> — <strong>only when that var is set</strong>. Unset (the normal/text path) → no-op, zero behaviour change. A file (not a shell variable) is used so records survive the <code>$(...)</code>/subshell boundaries the workers run under.</li>
+<li>Each worker (<code>sync_repo</code>, <code>safe_sync_repo</code>, <code>push_repo</code>) normalizes its outcome into an <code>action</code> (+ <code>ok</code>) and calls <code>_sync_record</code> at each result point, in addition to its existing human <code>log_*</code> line.</li>
+<li><strong>JSON dispatch:</strong> <code>sync --json</code> creates a temp <code>SYNC_RESULT_FILE</code>, runs the chosen workspace function with its <strong>stdout redirected to stderr</strong> (<code>… 1&gt;&amp;2</code>, so the human <code>log_*</code> lines land on stderr and never pollute the JSON), then reads the result file and emits a single array via <code>sync_result_json</code> per line. Empty → <code>[]</code>. If any record has <code>ok=false</code>, exit non-zero.</li>
+</ul>
+<h3 id="205-architecture-module-responsibilities">20.5 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/sync.sh</code></strong> — add <code>sync_result_json</code> (pure jq object) and <code>_sync_record</code> (the <code>SYNC_RESULT_FILE</code> sink). Normalize <code>sync_repo</code> / <code>safe_sync_repo</code> / <code>push_repo</code> to compute an <code>action</code>/<code>ok</code> at each outcome and call <code>_sync_record</code> (human <code>log_*</code> lines preserved). No change to the workspace drivers' text behaviour.</li>
+<li><strong><code>lib/repos.sh</code></strong> — <code>sync_from_repos_json</code> (default driver) is unchanged; recording happens in <code>sync_repo</code> at the worker layer.</li>
+<li><strong><code>bin/mra.sh</code></strong> — the <code>sync</code> dispatch parses <code>--json</code>. <code>--review --json</code> → error. In JSON mode it sets up <code>SYNC_RESULT_FILE</code>, invokes the selected workspace function with stdout→stderr, reads the file, emits the array (or <code>[]</code>), and exits non-zero if any <code>ok=false</code>. Usage line updated. The <code>--review</code>, <code>branch_*</code>, and Phase 11 <code>branch_state_json</code> paths are untouched.</li>
+</ul>
+<h3 id="206-error-handling-consumer-contract">20.6 Error handling &amp; consumer contract</h3>
+<ul>
+<li><code>--review --json</code> → <code>log_error</code> + non-zero exit, no JSON (a pre-emit fatal error).</li>
+<li>A per-repo failure (<code>clone-failed</code>/<code>sync-failed</code>/<code>fetch-failed</code>/<code>ff-failed</code>/<code>push*-failed</code>) records <code>ok:false</code>, the JSON array is still emitted, and the run exits non-zero (mid-emit failure).</li>
+<li>Consumer contract. <strong>stdout is JSON-only in every emit case</strong> (this is the machine contract). Unlike Phase 11's <code>branch status --json</code> (which <em>suppresses</em> its header/clean line so a successful run has empty stderr), <code>sync --json</code> <em>redirects</em> the workers' per-repo <code>log_*</code> lines to <strong>stderr</strong> — so <strong>stderr normally carries human progress/skip/error lines even on a fully successful (exit 0) run</strong>. stderr is therefore NOT an error signal here; the exit code is. Three outcomes:</li>
+<li><strong>exit 0</strong> — stdout = complete JSON array (every <code>ok:true</code>); stderr may contain the per-repo human log lines (normal, not a failure).</li>
+<li><strong>non-zero mid-emit</strong> — stdout = JSON array still emitted (one or more records <code>ok:false</code>); stderr has the human logs including the failures.</li>
+<li><strong>non-zero pre-emit</strong> (<code>--review --json</code>, unknown flag, no workspace) — no JSON on stdout; the error is on stdout/stderr per existing <code>log_error</code> behaviour.</li>
+<li>Robust consumers parse stdout first; if it parses, use it and rely on the exit code (not stderr presence) to decide success.</li>
+<li><code>_sync_record</code> is additive and side-effect-free when <code>SYNC_RESULT_FILE</code> is unset, guaranteeing text-mode behaviour is unchanged.</li>
+</ul>
+<h3 id="207-testing">20.7 Testing</h3>
+<p><strong><code>tests/test_sync.sh</code> (existing) — <code>sync_result_json</code>:</strong></p>
+<ol>
+<li><code>sync_result_json app pulled true</code> → valid JSON (<code>jq -e</code>); <code>.repo=="app"</code>, <code>.action=="pulled"</code>, <code>.ok==true</code> with <code>(.ok|type)=="boolean"</code>.</li>
+<li>A repo name with a double-quote → still valid JSON (injection-safe).</li>
+<li><code>sync_result_json x clone-failed false</code> → <code>.ok==false</code>.</li>
+</ol>
+<p><strong><code>tests/test_sync.sh</code> — <code>_sync_record</code> sink:</strong></p>
+<ol start="4">
+<li><code>SYNC_RESULT_FILE</code> unset → <code>_sync_record</code> writes nothing, no side effect.</li>
+<li><code>SYNC_RESULT_FILE</code> set → appends one <code>repo&lt;TAB&gt;action&lt;TAB&gt;ok</code> line; multiple calls accumulate.</li>
+</ol>
+<p><strong><code>tests/test_sync.sh</code> — worker recording (call the worker directly with <code>SYNC_RESULT_FILE</code> set):</strong></p>
+<ol start="6">
+<li><code>safe_sync_repo</code>: a default-branch up-to-date repo records <code>up-to-date true</code>; a fetch-failure fixture (bad origin) records <code>fetch-failed false</code>.</li>
+<li><code>push_repo</code> dry-run: a feature branch with a commit records a <code>would-push*</code> action; an up-to-date default branch records <code>up-to-date</code>.</li>
+<li><code>sync_repo</code>: a missing repo dir records <code>cloned</code> (local bare origin) or <code>clone-failed</code> (bad origin); a feature-branch repo records <code>skipped-branch</code>.</li>
+</ol>
+<p><strong><code>tests/test_sync_flags.sh</code> (existing) — <code>sync --json</code> dispatch (real CLI via <code>MRA_WORKSPACE</code>):</strong></p>
+<ol start="9">
+<li><code>sync --json</code> (default mode) → stdout is a JSON array (<code>jq -e 'type=="array"'</code>), each object has repo/action/ok, length matches.</li>
+<li><code>sync --safe --json</code> → valid array; stdout clean (whole output parses with <code>jq .</code>, no <code>[sync]</code> log tag); human messages on stderr.</li>
+<li><code>sync --review --json</code> → error, non-zero exit, no JSON.</li>
+<li>Empty workspace <code>sync --json</code> → <code>[]</code>.</li>
+<li>Failure path: a repo whose <code>--safe</code> fetch fails (bad origin) → non-zero exit, stdout still a JSON array containing that repo with <code>ok:false</code>, logs on stderr.</li>
+<li><code>sync --push --dry-run --json</code> (real CLI; a feature-branch repo with a local commit) → stdout is a clean JSON array (<code>jq -e 'type=="array"'</code>, no <code>[sync]</code> tag), the repo's <code>action</code> is a <code>would-push*</code> (or <code>up-to-date</code>), and the human log line is on <strong>stderr</strong> (captured separately). This exercises the <code>--push</code> parser + <code>--dry-run</code> + JSON-wrapper combination end-to-end (the worker-level test alone misses dispatch wiring).</li>
+<li>Text-mode regression: <code>sync --safe</code> (no <code>--json</code>) output and messages unchanged.</li>
+</ol>
+<p><strong>Regression:</strong> <code>bash test.sh</code> fully green (no new suite — tests live in the existing <code>tests/test_sync.sh</code> / <code>tests/test_sync_flags.sh</code>).</p>
+<h3 id="208-out-of-scope-phase-12">20.8 Out of scope (Phase 12)</h3>
+<ul>
+<li><code>--review --json</code> (freeform LLM output — no clean contract).</li>
+<li>No change to any text-mode message format.</li>
+<li>No field-selection / jq-expression flag.</li>
+<li>No <code>--json</code> for non-sync commands beyond Phase 11's <code>branch status</code>.</li>
+</ul>
+<h2 id="21-phase-13-mra-plan-dual-claude-codex-multi-model-council">21. Phase 13 — <code>mra plan --dual</code> (claude + codex multi-model council)</h2>
+<p><strong>Status:</strong> Implemented — 2026-06-08. <code>mra plan --dual</code> runs each persona on claude AND codex via the new <code>lib/model-provider.sh</code> (<code>call_model</code> + <code>ensure_codex_available</code>); <code>run_plan_council</code> tags blocks by provider, writes a missing-side sentinel on a failed/empty call, and synthesizes with an agree/disagree template. Non-dual path unchanged; codex side runs <code>codex exec -s read-only</code>.</p>
+<h3 id="211-goal-command-surface">21.1 Goal &amp; command surface</h3>
+<p><code>mra plan</code>'s council today runs N personas, each a <code>claude -p</code> call, then a <code>claude</code> synthesizer merges them (<code>lib/plan-council.sh</code>). Phase 13 adds an opt-in <code>--dual</code> that runs each persona on <strong>both</strong> claude and codex (dual-run), and has the synthesizer explicitly mark where the two models agree (high confidence) vs disagree (flagged for human decision).</p>
+<div class="highlight"><pre><span></span><code>mra plan &lt;project&gt; &quot;&lt;task&gt;&quot; [--model &lt;claude-tier&gt;] [--dual]
+</code></pre></div>
+
+<ul>
+<li><code>--dual</code> enables the two-model council. Default (no <code>--dual</code>) = the current claude-only council, <strong>zero behaviour change</strong>.</li>
+<li><code>--model</code> continues to control <strong>only</strong> the claude tier (default <code>sonnet</code>). codex uses its own configured default model (no <code>--codex-model</code> in v1).</li>
+<li><strong>Preflight:</strong> <code>--dual</code> with <code>codex</code> not available → error + non-zero exit, before the council convenes (pre-emit, like the gh-auth checks).</li>
+</ul>
+<h3 id="212-safety-no-working-tree-mutation-from-planning">21.2 Safety (no working-tree mutation from planning)</h3>
+<ul>
+<li><strong>claude side</strong> keeps the existing <code>--disallowedTools Write,Edit,NotebookEdit</code> — the <strong>direct file-edit tools are disabled</strong>. This matches the current council exactly and is NOT changed. Note this is not a hard sandbox: Bash remains available to claude (status quo for <code>mra plan</code> today), so the guarantee here is "no direct edit-tool mutations", not a kernel-level read-only jail.</li>
+<li><strong>codex side</strong> runs <code>codex exec -s read-only</code> — a genuine read-only sandbox where model-generated shell commands may only read (no writes/exec-mutations). Invoked with the project dir as cwd (<code>(cd "$project_dir" &amp;&amp; codex exec -s read-only …)</code>) so codex sees the repo (the analogue of claude's <code>--add-dir</code>).</li>
+<li>The two sides therefore have asymmetric enforcement (claude: edit-tools-off; codex: read-only sandbox). Hardening the claude side to a full sandbox is out of scope — it would change the existing single-model council behaviour and break the "non-dual path byte-unchanged" guarantee.</li>
+</ul>
+<h3 id="213-provider-abstraction">21.3 Provider abstraction</h3>
+<p>New <code>lib/model-provider.sh</code>:</p>
+<ul>
+<li><code>call_model &lt;provider&gt; &lt;prompt&gt; &lt;model&gt; &lt;project_dir&gt; &lt;add_dirs&gt; &lt;max_turns&gt;</code> → dispatches:</li>
+<li><code>claude</code> → <code>claude -p "$prompt" &lt;add_dirs&gt; --model "$model" --max-turns "$max_turns" --disallowedTools Write,Edit,NotebookEdit --setting-sources project</code> (exactly the existing invocation). <strong><code>max_turns</code> is a parameter</strong> because the codbase uses two different values: expert calls use <code>6</code>, the synthesizer uses <code>4</code> (<code>lib/plan-council.sh</code>). Passing it through <code>call_model</code> reproduces each call byte-for-byte — the non-dual path stays unchanged.</li>
+<li><code>codex</code> → <code>(cd "$project_dir" &amp;&amp; "$codex_bin" exec -s read-only "$prompt")</code>. (codex has no turn limit; <code>max_turns</code> applies to the claude branch only.)</li>
+<li>unknown provider → non-zero.</li>
+<li>The binary names are env-overridable for testability and prod-safety: <code>${MRA_CLAUDE_BIN:-claude}</code> / <code>${MRA_CODEX_BIN:-codex}</code>.</li>
+<li><code>ensure_codex_available</code> → <code>command -v "${MRA_CODEX_BIN:-codex}" &gt;/dev/null</code> (the preflight gate).</li>
+<li>A provider call that <strong>fails (non-zero) or returns empty output</strong> is non-fatal: that persona keeps the other model's view; the council continues (reusing <code>run_plan_council</code>'s existing "warn + continue on a failed persona" behaviour). v1 has <strong>no timeout mechanism</strong> — a call runs to the CLI's own completion/error; per-call timeouts are a future consideration, not promised here.</li>
+</ul>
+<h3 id="214-dual-run-flow-synthesizer-decision-format">21.4 Dual-run flow &amp; synthesizer decision format</h3>
+<p><code>run_plan_council</code> gains a <code>dual</code> parameter (or a providers list). <code>dual=false</code> → the current single-claude path, byte-unchanged. <code>dual=true</code>:</p>
+<ul>
+<li>For each persona, spawn TWO background jobs — <code>call_model claude …</code> and <code>call_model codex …</code> (parallel, same <code>mktemp</code> + <code>&amp;</code> + <code>wait</code> collection as today). The same <code>build_plan_prompt</code> output feeds both models.</li>
+<li>Results are tagged by provider:
+  <code>### &lt;persona&gt; [claude]
+  …
+  ### &lt;persona&gt; [codex]
+  …</code></li>
+<li>The 2N tagged perspectives feed the synthesizer (claude — it performs a structured comparison/merge, it does NOT adjudicate disagreements). The synthesizer prompt is extended to emit:
+  ```
+  # Unified Plan: <task></li>
+</ul>
+<p>## High-confidence (both models agree)
+  - [persona] <concern raised by both></p>
+<p>## ⚠ Model Disagreements (human decides)
+  - [persona] claude: <position A> │ codex: <position B>
+  - [persona] claude raised X; codex did not</p>
+<p>## Consolidated Files / Risks / Required Tests / Execution Steps
+  (existing format; risks keep expert attribution and may add [agreed]/[claude-only]/[codex-only])
+  <code>- **Missing-side sentinel.** When a provider call fails (non-zero) or returns empty, `run_plan_council` writes an explicit sentinel into that provider's tagged block rather than an empty section — e.g.:</code>
+  ### performance-hawk [codex]
+  (no response — codex call failed or returned empty)
+  ```
+  This guarantees the synthesizer always sees an unambiguous signal (not a blank it could misread as "nothing to add"), and the synthesizer places such a persona under <strong>Model Disagreements</strong> noting the missing side. The sentinel string is a fixed, testable marker.</p>
+<h3 id="215-architecture-module-responsibilities">21.5 Architecture / module responsibilities</h3>
+<ul>
+<li><strong><code>lib/model-provider.sh</code> (new)</strong> — <code>call_model</code> + <code>ensure_codex_available</code>; the only place that knows how to invoke each CLI. Pure execution layer, independently testable via the <code>MRA_*_BIN</code> seams.</li>
+<li><strong><code>lib/plan-council.sh</code></strong> — <code>run_plan_council</code> gains the <code>dual</code> flag: <code>dual=false</code> keeps the current claude-only path verbatim; <code>dual=true</code> runs claude+codex per persona via <code>call_model</code>, tags <code>$all</code> by provider, and uses the agree/disagree synthesizer prompt. <code>build_plan_prompt</code> is unchanged (one prompt, two models). The per-persona/synth claude calls migrate to go through <code>call_model</code> so both paths share one invocation point.</li>
+<li><strong><code>bin/mra.sh</code></strong> — the <code>plan)</code> dispatch parses <code>--dual</code>; when set, calls <code>ensure_codex_available</code> (error + exit if absent) before convening; threads <code>dual</code> into <code>run_plan_council</code>. Usage line updated.</li>
+<li>Out of scope: <code>review --strategy debate</code>/<code>--personas</code>, <code>eval</code> — their codex wiring is a later phase.</li>
+</ul>
+<h3 id="216-error-handling">21.6 Error handling</h3>
+<ul>
+<li><code>--dual</code> without codex available → <code>log_error</code> + non-zero exit, before any model call (pre-emit).</li>
+<li>A single provider call failing → warn to stderr, that persona keeps the surviving model's view, council continues (existing behaviour).</li>
+<li>Synthesizer failure / empty output → existing <code>run_plan_council</code> handling (warn + non-zero) unchanged.</li>
+<li>Both models run in their planning-safe mode (per §21.2): claude keeps direct edit tools disabled (<code>--disallowedTools Write,Edit,NotebookEdit</code>); codex runs in a read-only sandbox (<code>-s read-only</code>). Enforcement is asymmetric — see §21.2.</li>
+</ul>
+<h3 id="217-testing">21.7 Testing</h3>
+<p>Stubs use env-overridable binary names (<code>MRA_CLAUDE_BIN</code> / <code>MRA_CODEX_BIN</code> → stub scripts in a temp dir). This is hermetic, subshell-safe, and prod-neutral (defaults to the real <code>claude</code>/<code>codex</code>). The real CLIs are never invoked in tests.</p>
+<p><strong><code>tests/test_plan_council.sh</code> (existing) — <code>call_model</code> (lib/model-provider.sh):</strong></p>
+<ol>
+<li><code>call_model claude … 6</code> (stub <code>MRA_CLAUDE_BIN</code>) → the stub is invoked with <code>-p</code>, <code>--disallowedTools Write,Edit,NotebookEdit</code>, <code>--model</code>, and <strong><code>--max-turns 6</code></strong>; a second call with <code>4</code> forwards <strong><code>--max-turns 4</code></strong> (proves the param is threaded, so expert=6 / synth=4 are both reproduced).</li>
+<li><code>call_model codex …</code> (stub <code>MRA_CODEX_BIN</code>) → invoked with <code>exec</code> and <code>-s read-only</code>, and with cwd = project_dir.</li>
+<li><code>call_model bogus …</code> → non-zero exit.</li>
+</ol>
+<p><strong><code>tests/test_plan_council.sh</code> — preflight:</strong></p>
+<ol start="4">
+<li><code>ensure_codex_available</code> → 0 when present (real codex / a stub); non-zero when <code>MRA_CODEX_BIN=__nope__</code> (a name not on PATH).</li>
+</ol>
+<p><strong><code>tests/test_plan_council.sh</code> — <code>run_plan_council</code> (stub both bins, 1 persona):</strong></p>
+<ol start="5">
+<li><code>dual=true</code> → a shared record file shows claude(expert, <code>--max-turns 6</code>) + codex(expert) + claude(synth, <code>--max-turns 4</code>) all ran; output is the synth stub's text; <code>$all</code> carries <code>[claude]</code> and <code>[codex]</code> tags.</li>
+<li><code>dual=false</code> (default) → only claude is invoked; <strong>codex is never called</strong> (record has no codex line); the expert (max-turns 6) and synth (max-turns 4) claude calls match the pre-Phase-13 invocations — the regression guard for the unchanged single-model path.</li>
+<li><code>dual=true</code> with a <strong>failing codex stub</strong> (exits non-zero / empty) → the council still produces synth output and exits 0; the synthesizer input for that persona's <code>[codex]</code> block contains the fixed missing-side sentinel (assert the sentinel string reached the synth stub's captured input).</li>
+</ol>
+<p><strong><code>tests/test_plan_council.sh</code> — dispatch (real CLI via <code>MRA_WORKSPACE</code>):</strong></p>
+<ol start="8">
+<li><code>mra plan &lt;proj&gt; "task" --dual</code> with <code>MRA_CODEX_BIN=__nope__</code> (codex "absent") → preflight error, non-zero exit, council not convened.</li>
+<li>usage advertises <code>--dual</code>.</li>
+</ol>
+<p><strong>Regression:</strong> <code>bash test.sh</code> fully green (no new suite — tests live in the existing <code>tests/test_plan_council.sh</code>).</p>
+<h3 id="218-out-of-scope-phase-13">21.8 Out of scope (Phase 13)</h3>
+<ul>
+<li>Multi-model only for <code>plan-council</code>; <code>review</code> (debate/personas) and <code>eval</code> codex wiring are later phases.</li>
+<li>No <code>--codex-model</code> (codex uses its configured default).</li>
+<li>The synthesizer does not adjudicate disagreements — it surfaces them for human decision.</li>
+<li>No automatic cross-model vote / majority decision (dual = 2 sources; a real quorum vote needs ≥3 and is a future consideration).</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

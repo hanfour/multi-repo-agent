@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mra plan --dual (Phase 13) Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-title">mra plan --dual (Phase 13) Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#file-structure">File Structure</a></li>
+<li><a href="#task-1-libmodel-providersh-call_model-ensure_codex_available">Task 1: lib/model-provider.sh — call_model + ensure_codex_available</a></li>
+<li><a href="#task-2-run_plan_council-dual-mode">Task 2: run_plan_council dual mode</a></li>
+<li><a href="#task-3-mra-plan-dual-dispatch-preflight-usage">Task 3: mra plan --dual dispatch + preflight + usage</a></li>
+<li><a href="#task-4-full-regression-spec-status">Task 4: Full regression + spec status</a></li>
+<li><a href="#self-review-notes">Self-Review Notes</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>mra plan --dual (Phase 13) Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Add <code>mra plan --dual</code> — an opt-in council that runs each persona on both claude and codex, then synthesizes with explicit cross-model agree/disagree.</p>
+<p><strong>Architecture:</strong> A new <code>lib/model-provider.sh</code> provides <code>call_model &lt;provider&gt; &lt;prompt&gt; &lt;model&gt; &lt;project_dir&gt; &lt;add_dirs&gt; &lt;max_turns&gt;</code> (claude = existing flags incl. a parameterized <code>--max-turns</code>; codex = <code>codex exec -s read-only</code> with cwd = project dir; binary names env-overridable via <code>MRA_CLAUDE_BIN</code>/<code>MRA_CODEX_BIN</code>) plus <code>ensure_codex_available</code>. <code>run_plan_council</code> routes every expert AND synth call through <code>call_model</code>; a new <code>dual</code> param makes it run claude+codex per persona, tag blocks by provider, write a missing-side sentinel on a failed/empty call, and use an agree/disagree synth template. Default (<code>dual=false</code>) reproduces today's claude-only council byte-for-byte.</p>
+<p><strong>Tech Stack:</strong> Bash (<code>lib/model-provider.sh</code>, <code>lib/plan-council.sh</code>, <code>bin/mra.sh</code>), the <code>claude</code> and <code>codex</code> CLIs, custom PASS/FAIL harness (<code>tests/test_plan_council.sh</code>).</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code> §21.</p>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<ul>
+<li><strong><code>lib/model-provider.sh</code></strong> (create) — <code>call_model</code> + <code>ensure_codex_available</code>; the only place that knows how to invoke each CLI. Depends on <code>expand_add_dir_string</code> (<code>lib/args.sh</code>) and <code>log_error</code> (<code>lib/colors.sh</code>).</li>
+<li><strong><code>bin/mra.sh</code></strong> (modify) — source <code>lib/model-provider.sh</code>; <code>plan)</code> dispatch parses <code>--dual</code>, preflights codex, threads <code>dual</code> into <code>run_plan_council</code>; usage updated.</li>
+<li><strong><code>lib/plan-council.sh</code></strong> (modify) — <code>run_plan_council</code> gains a <code>dual</code> param; routes expert + synth calls through <code>call_model</code>; dual mode = 2 providers/persona + provider tags + missing-side sentinel + agree/disagree synth template. Non-dual path byte-unchanged.</li>
+<li><strong><code>tests/test_plan_council.sh</code></strong> (modify) — source <code>args.sh</code> + <code>model-provider.sh</code>; add <code>call_model</code> / <code>ensure_codex_available</code> / dual <code>run_plan_council</code> / dispatch tests.</li>
+</ul>
+<p>Reference facts (read before starting):
+- <code>expand_add_dir_string &lt;arrayvar&gt; &lt;string&gt;</code> (<code>lib/args.sh:43</code>) expands an add-dir string into a bash array; <code>build_add_dir_string</code> (<code>lib/args.sh:12</code>) builds the string. plan-council currently does <code>expand_add_dir_string _ad_arr "$claude_add_dirs"</code> then passes <code>"${_ad_arr[@]}"</code>.
+- <code>run_plan_council project project_dir task personas model add_dirs pkb_context lang_directive</code> (<code>lib/plan-council.sh:67</code>) — <code>$2</code> is the project dir (codex cwd). Currently each persona + the synth call <code>claude -p … --model "$model" … --setting-sources project</code>, experts with <code>--max-turns 6</code>, synth with <code>--max-turns 4</code>, both with <code>--disallowedTools Write,Edit,NotebookEdit</code>.
+- Single caller: <code>bin/mra.sh:858</code> (under <code>plan)</code>), which parses <code>--model</code> (default <code>sonnet</code>), builds <code>add_dirs</code>/<code>pkb_context</code>/<code>lang_directive</code>.
+- <code>tests/test_plan_council.sh</code> sources colors/personas/plan-council, uses <code>errors</code>, ends <code>if [[ $errors -eq 0 ]]; then echo "PASS: all plan-council tests passed"; else …; exit 1; fi</code>. Append before that block.
+- <code>bin/mra.sh</code> runs <code>set -euo pipefail</code>; lib files don't set it themselves. The existing <code>"${_ad_arr[@]}"</code> empty-array expansion works under the runtime bash (5.x) — replicate verbatim (no guard) to stay byte-identical.</p>
+<hr />
+<h2 id="task-1-libmodel-providersh-call_model-ensure_codex_available">Task 1: <code>lib/model-provider.sh</code> — <code>call_model</code> + <code>ensure_codex_available</code></h2>
+<p><strong>Files:</strong>
+- Create: <code>lib/model-provider.sh</code>
+- Modify: <code>bin/mra.sh</code> (source the new lib)
+- Modify: <code>tests/test_plan_council.sh</code> (source <code>args.sh</code> + <code>model-provider.sh</code>; append tests)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Add the source lines</strong></li>
+</ul>
+<p>In <code>tests/test_plan_council.sh</code>, after <code>source "$SCRIPT_DIR/lib/plan-council.sh"</code>, add:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/args.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/model-provider.sh&quot;</span>
+</code></pre></div>
+
+<p>In <code>bin/mra.sh</code>, alongside the other <code>source "$MRA_DIR/lib/*.sh"</code> lines (near where <code>args.sh</code> / <code>plan-council.sh</code> are sourced), add:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/model-provider.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Write the failing tests</strong> — append to <code>tests/test_plan_council.sh</code>, BEFORE the final summary block:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- model-provider: call_model dispatch + ensure_codex_available ---</span>
+<span class="nv">MP_DIR</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="nv">MP_REC</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">/rec&quot;</span>
+<span class="c1"># stub &quot;claude&quot;: record flattened args, emit fixed output</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">/claude&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;STUB&#39;</span>
+<span class="s">#!/usr/bin/env bash</span>
+<span class="s">echo &quot;claude: $*&quot; &gt;&gt; &quot;$MP_REC&quot;</span>
+<span class="s">echo &quot;&lt;claude-output&gt;&quot;</span>
+<span class="s">STUB</span>
+<span class="c1"># stub &quot;codex&quot;: record flattened args + cwd, emit fixed output</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">/codex&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;STUB&#39;</span>
+<span class="s">#!/usr/bin/env bash</span>
+<span class="s">echo &quot;codex: $* | cwd=$(pwd)&quot; &gt;&gt; &quot;$MP_REC&quot;</span>
+<span class="s">echo &quot;&lt;codex-output&gt;&quot;</span>
+<span class="s">STUB</span>
+chmod<span class="w"> </span>+x<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">/claude&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">/codex&quot;</span>
+<span class="nb">export</span><span class="w"> </span>MP_REC
+
+<span class="c1"># 1. call_model claude forwards -p / --disallowedTools / --model / --max-turns (param)</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_REC</span><span class="s2">&quot;</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_CLAUDE_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">/claude&quot;</span><span class="w"> </span>call_model<span class="w"> </span>claude<span class="w"> </span><span class="s2">&quot;PROMPT-A&quot;</span><span class="w"> </span>sonnet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="m">6</span><span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;&lt;claude-output&gt;&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: call_model claude output: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="nv">rec</span><span class="o">=</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_REC</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;-p&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: claude missing -p: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;--disallowedTools Write,Edit,NotebookEdit&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: claude missing disallowedTools: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;--model sonnet&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: claude missing --model: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;--max-turns 6&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: claude missing --max-turns 6: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># max_turns is a real parameter (4 for the synthesizer)</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_REC</span><span class="s2">&quot;</span>
+<span class="nv">MRA_CLAUDE_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">/claude&quot;</span><span class="w"> </span>call_model<span class="w"> </span>claude<span class="w"> </span><span class="s2">&quot;PROMPT-S&quot;</span><span class="w"> </span>sonnet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="m">4</span><span class="w"> </span>&gt;/dev/null
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_REC</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;--max-turns 4&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: claude should forward --max-turns 4: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_REC</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+<span class="c1"># 2. call_model codex uses `exec -s read-only` and runs with cwd = project_dir</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_REC</span><span class="s2">&quot;</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_CODEX_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">/codex&quot;</span><span class="w"> </span>call_model<span class="w"> </span>codex<span class="w"> </span><span class="s2">&quot;PROMPT-B&quot;</span><span class="w"> </span>sonnet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="m">6</span><span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;&lt;codex-output&gt;&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: call_model codex output: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="nv">rec</span><span class="o">=</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_REC</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;exec -s read-only&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: codex missing &#39;exec -s read-only&#39;: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;cwd=</span><span class="nv">$MP_DIR</span><span class="s2">&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: codex cwd should be project_dir: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+<span class="c1"># 3. unknown provider -&gt; non-zero</span>
+<span class="k">if</span><span class="w"> </span>call_model<span class="w"> </span>bogus<span class="w"> </span><span class="s2">&quot;P&quot;</span><span class="w"> </span>sonnet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="m">6</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: unknown provider should fail&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># 4. ensure_codex_available: present (stub) vs absent</span>
+<span class="k">if</span><span class="w"> </span>!<span class="w"> </span><span class="nv">MRA_CODEX_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">/codex&quot;</span><span class="w"> </span>ensure_codex_available<span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: ensure_codex_available should pass with a real bin&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">MRA_CODEX_BIN</span><span class="o">=</span><span class="s2">&quot;__nope_not_a_real_bin__&quot;</span><span class="w"> </span>ensure_codex_available<span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: ensure_codex_available should fail when bin absent&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MP_DIR</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">unset</span><span class="w"> </span>MP_REC
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_plan_council.sh</code>
+Expected: FAIL — <code>call_model: command not found</code> / <code>ensure_codex_available: command not found</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Write the implementation</strong> — create <code>lib/model-provider.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="c1"># Model provider abstraction for mra: dispatch one prompt to claude or codex.</span>
+<span class="c1"># Depends on: expand_add_dir_string (lib/args.sh), log_error (lib/colors.sh).</span>
+<span class="c1"># Binary names are env-overridable (MRA_CLAUDE_BIN / MRA_CODEX_BIN) for tests.</span>
+
+<span class="c1"># Run one prompt against a provider, printing the model&#39;s response to stdout.</span>
+<span class="c1"># Args: provider prompt model project_dir add_dirs max_turns</span>
+<span class="c1">#   claude -&gt; existing council invocation (edit tools disabled; --max-turns parameterized</span>
+<span class="c1">#             so experts use 6 and the synthesizer uses 4).</span>
+<span class="c1">#   codex  -&gt; `codex exec -s read-only` (read-only sandbox), cwd = project_dir so it sees the repo.</span>
+<span class="c1">#             (codex has no turn limit; max_turns applies to the claude branch only.)</span>
+call_model<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">provider</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">prompt</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">model</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$3</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">project_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$4</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">add_dirs</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$5</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">max_turns</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">6</span><span class="k">:-</span><span class="nv">6</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$provider</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">    </span>claude<span class="o">)</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span><span class="nv">_ad</span><span class="o">=()</span>
+<span class="w">      </span>expand_add_dir_string<span class="w"> </span>_ad<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$add_dirs</span><span class="s2">&quot;</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">MRA_CLAUDE_BIN</span><span class="k">:-</span><span class="nv">claude</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">_ad</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--model<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--max-turns<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$max_turns</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--disallowedTools<span class="w"> </span><span class="s2">&quot;Write,Edit,NotebookEdit&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--setting-sources<span class="w"> </span><span class="s2">&quot;project&quot;</span>
+<span class="w">      </span><span class="p">;;</span>
+<span class="w">    </span>codex<span class="o">)</span>
+<span class="w">      </span><span class="o">(</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">MRA_CODEX_BIN</span><span class="k">:-</span><span class="nv">codex</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-s<span class="w"> </span>read-only<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">)</span>
+<span class="w">      </span><span class="p">;;</span>
+<span class="w">    </span>*<span class="o">)</span>
+<span class="w">      </span>log_error<span class="w"> </span><span class="s2">&quot;call_model: unknown provider &#39;</span><span class="nv">$provider</span><span class="s2">&#39;&quot;</span><span class="w"> </span><span class="s2">&quot;plan&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">2</span>
+<span class="w">      </span><span class="p">;;</span>
+<span class="w">  </span><span class="k">esac</span>
+<span class="o">}</span>
+
+<span class="c1"># Preflight gate for `mra plan --dual`: is the codex CLI available?</span>
+ensure_codex_available<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">command</span><span class="w"> </span>-v<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">MRA_CODEX_BIN</span><span class="k">:-</span><span class="nv">codex</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_plan_council.sh</code>
+Expected: <code>PASS: all plan-council tests passed</code> (0 errors).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/model-provider.sh<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests/test_plan_council.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(plan): model-provider abstraction (call_model claude|codex + ensure_codex_available)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-2-run_plan_council-dual-mode">Task 2: <code>run_plan_council</code> dual mode</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_plan_council.sh</code> (append dual tests)
+- Modify: <code>lib/plan-council.sh</code> (replace the whole <code>run_plan_council</code> function)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing tests</strong> — append to <code>tests/test_plan_council.sh</code>, BEFORE the summary block:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- run_plan_council dual mode (stub both bins) ---</span>
+<span class="nv">RC_DIR</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="nv">RC_REC</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/rec&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">RC_PROJ</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/proj&quot;</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_PROJ</span><span class="s2">&quot;</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/claude&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;STUB&#39;</span>
+<span class="s">#!/usr/bin/env bash</span>
+<span class="s">echo &quot;claude: $*&quot; &gt;&gt; &quot;$RC_REC&quot;</span>
+<span class="s">echo &quot;&lt;claude-output&gt;&quot;</span>
+<span class="s">STUB</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/codex&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;STUB&#39;</span>
+<span class="s">#!/usr/bin/env bash</span>
+<span class="s">echo &quot;codex: $*&quot; &gt;&gt; &quot;$RC_REC&quot;</span>
+<span class="s">echo &quot;&lt;codex-output&gt;&quot;</span>
+<span class="s">STUB</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/codex-fail&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;STUB&#39;</span>
+<span class="s">#!/usr/bin/env bash</span>
+<span class="s">exit 1</span>
+<span class="s">STUB</span>
+chmod<span class="w"> </span>+x<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/claude&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/codex&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/codex-fail&quot;</span>
+<span class="nb">export</span><span class="w"> </span>RC_REC
+
+<span class="c1"># 5. dual=true, 1 persona -&gt; claude(expert,6) + codex(expert) + claude(synth,4) all ran; tags present; synth output returned</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_REC</span><span class="s2">&quot;</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_CLAUDE_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/claude&quot;</span><span class="w"> </span><span class="nv">MRA_CODEX_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/codex&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>run_plan_council<span class="w"> </span>proj<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_PROJ</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;do a thing&quot;</span><span class="w"> </span><span class="s2">&quot;security-auditor&quot;</span><span class="w"> </span>sonnet<span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nb">true</span><span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;&lt;claude-output&gt;&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: dual run should return synth (claude) output: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="nv">rec</span><span class="o">=</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_REC</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;--max-turns 6&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: dual missing expert claude --max-turns 6: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;exec -s read-only&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: dual missing codex expert call: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;--max-turns 4&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: dual missing synth claude --max-turns 4: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># the synth prompt (recorded in the claude synth call) carries the [claude]/[codex] tags</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;[claude]&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: synth input missing [claude] tag: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;[codex]&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: synth input missing [codex] tag: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+<span class="c1"># 6. dual=false (default) -&gt; ONLY claude; codex never called; expert(6)+synth(4) present</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_REC</span><span class="s2">&quot;</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_CLAUDE_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/claude&quot;</span><span class="w"> </span><span class="nv">MRA_CODEX_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/codex&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>run_plan_council<span class="w"> </span>proj<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_PROJ</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;do a thing&quot;</span><span class="w"> </span><span class="s2">&quot;security-auditor&quot;</span><span class="w"> </span>sonnet<span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nb">false</span><span class="k">)</span>
+<span class="nv">rec</span><span class="o">=</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_REC</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="k">if</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;codex:&#39;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: non-dual must NOT call codex: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;--max-turns 6&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: non-dual missing expert --max-turns 6: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;--max-turns 4&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: non-dual missing synth --max-turns 4: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">if</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;\[codex\]&#39;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: non-dual synth input must not carry provider tags: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># 7. dual=true with a FAILING codex -&gt; council still produces output (exit 0), sentinel reaches synth input</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_REC</span><span class="s2">&quot;</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_CLAUDE_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/claude&quot;</span><span class="w"> </span><span class="nv">MRA_CODEX_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">/codex-fail&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>run_plan_council<span class="w"> </span>proj<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_PROJ</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;do a thing&quot;</span><span class="w"> </span><span class="s2">&quot;security-auditor&quot;</span><span class="w"> </span>sonnet<span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nb">true</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: failing codex should not break the council (rc=</span><span class="nv">$rc</span><span class="s2">)&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;&lt;claude-output&gt;&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: council should still return synth output on codex failure: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_REC</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;no response&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: missing-side sentinel should reach synth input: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_REC</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RC_DIR</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">unset</span><span class="w"> </span>RC_REC
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_plan_council.sh</code>
+Expected: FAIL — <code>run_plan_council</code> does not accept a 9th <code>dual</code> arg yet, never calls codex, and has no sentinel/tagged synth input.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write the implementation</strong> — replace the ENTIRE <code>run_plan_council</code> function in <code>lib/plan-council.sh</code> with:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>run_plan_council<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">project</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">project_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">task</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$3</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">personas</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$4</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">model</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$5</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">claude_add_dirs</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$6</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">pkb_context</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">7</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">lang_directive</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">8</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dual</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">9</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">providers</span><span class="o">=(</span><span class="s2">&quot;claude&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dual</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">providers</span><span class="o">=(</span><span class="s2">&quot;claude&quot;</span><span class="w"> </span><span class="s2">&quot;codex&quot;</span><span class="o">)</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>expert_count<span class="p">;</span><span class="w"> </span><span class="nv">expert_count</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$personas</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-w<span class="w"> </span><span class="p">|</span><span class="w"> </span>tr<span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39; &#39;</span><span class="k">)</span>
+<span class="w">  </span>log_progress<span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="w"> </span><span class="s2">&quot;[plan] convening council of </span><span class="nv">$expert_count</span><span class="s2"> experts</span><span class="k">$(</span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dual</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39; ×2 models&#39;</span><span class="k">)</span><span class="s2">...&quot;</span><span class="w"> </span><span class="s2">&quot;plan&quot;</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">pids</span><span class="o">=()</span><span class="w"> </span><span class="nv">result_files</span><span class="o">=()</span><span class="w"> </span><span class="nv">err_files</span><span class="o">=()</span><span class="w"> </span><span class="nv">persona_names</span><span class="o">=()</span><span class="w"> </span><span class="nv">provider_names</span><span class="o">=()</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>p<span class="w"> </span>prov
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>p<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="nv">$personas</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span>prov<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">providers</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span>f<span class="w"> </span>err
+<span class="w">      </span><span class="nv">f</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="nv">err</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+<span class="w">      </span><span class="nv">result_files</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$f</span><span class="s2">&quot;</span><span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="nv">err_files</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$err</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">      </span><span class="nv">persona_names</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$p</span><span class="s2">&quot;</span><span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="nv">provider_names</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$prov</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">      </span><span class="o">(</span>
+<span class="w">        </span><span class="nb">local</span><span class="w"> </span>prompt
+<span class="w">        </span><span class="nv">prompt</span><span class="o">=</span><span class="k">$(</span>build_plan_prompt<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$p</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$task</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pkb_context</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$lang_directive</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">        </span>call_model<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$prov</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$claude_add_dirs</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">6</span>
+<span class="w">      </span><span class="o">)</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$f</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">2</span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$err</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>
+<span class="w">      </span><span class="nv">pids</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$!</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">    </span><span class="k">done</span>
+<span class="w">  </span><span class="k">done</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>i<span class="w"> </span>pid<span class="w"> </span>rc
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="p">!pids[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="nv">pid</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">pids</span><span class="p">[</span><span class="nv">$i</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span><span class="nb">wait</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pid</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span>
+<span class="w">      </span>log_warn<span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="w"> </span><span class="s2">&quot;[plan] </span><span class="si">${</span><span class="nv">persona_names</span><span class="p">[</span><span class="nv">$i</span><span class="p">]</span><span class="si">}</span><span class="s2"> [</span><span class="si">${</span><span class="nv">provider_names</span><span class="p">[</span><span class="nv">$i</span><span class="p">]</span><span class="si">}</span><span class="s2">] failed (rc=</span><span class="nv">$rc</span><span class="s2">) — stderr: </span><span class="si">${</span><span class="nv">err_files</span><span class="p">[</span><span class="nv">$i</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;plan&quot;</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">done</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">all</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="p">!result_files[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span>tag<span class="w"> </span>content
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dual</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nv">tag</span><span class="o">=</span><span class="s2">&quot;### </span><span class="si">${</span><span class="nv">persona_names</span><span class="p">[</span><span class="nv">$i</span><span class="p">]</span><span class="si">}</span><span class="s2"> [</span><span class="si">${</span><span class="nv">provider_names</span><span class="p">[</span><span class="nv">$i</span><span class="p">]</span><span class="si">}</span><span class="s2">]&quot;</span>
+<span class="w">    </span><span class="k">else</span>
+<span class="w">      </span><span class="nv">tag</span><span class="o">=</span><span class="s2">&quot;### </span><span class="si">${</span><span class="nv">persona_names</span><span class="p">[</span><span class="nv">$i</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">    </span><span class="nv">content</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">result_files</span><span class="p">[</span><span class="nv">$i</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dual</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">content</span><span class="p">//[[:</span><span class="nv">space</span><span class="p">:]]/</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nv">content</span><span class="o">=</span><span class="s2">&quot;(no response — </span><span class="si">${</span><span class="nv">provider_names</span><span class="p">[</span><span class="nv">$i</span><span class="p">]</span><span class="si">}</span><span class="s2"> call failed or returned empty)&quot;</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">    </span><span class="nv">all</span><span class="o">+=</span><span class="s2">&quot;</span><span class="nv">$tag</span><span class="s2">&quot;</span><span class="s1">$&#39;\n\n&#39;</span><span class="s2">&quot;</span><span class="nv">$content</span><span class="s2">&quot;</span><span class="s1">$&#39;\n\n---\n\n&#39;</span>
+<span class="w">    </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">result_files</span><span class="p">[</span><span class="nv">$i</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>e
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>e<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">err_files</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$e</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$e</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">done</span>
+
+<span class="w">  </span>log_progress<span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="w"> </span><span class="s2">&quot;[plan] synthesizing unified plan...&quot;</span><span class="w"> </span><span class="s2">&quot;plan&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>synth_template
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dual</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nv">synth_template</span><span class="o">=</span><span class="k">$(</span>cat<span class="w"> </span><span class="s">&lt;&lt;&#39;TEMPLATE&#39;</span>
+<span class="s">You are the council synthesizer. Below are independent plans for the same task, each from a domain expert as seen by TWO models (claude and codex). Blocks are tagged &quot;### &lt;persona&gt; [claude]&quot; / &quot;### &lt;persona&gt; [codex]&quot;. A block reading &quot;(no response — ...)&quot; means that model did not return for that persona.</span>
+
+<span class="s">## Task</span>
+<span class="s">%TASK%</span>
+
+<span class="s">## Expert Perspectives (per persona × model)</span>
+<span class="s">%EXPERTS%</span>
+
+<span class="s">## Your Job</span>
+<span class="s">For each persona, COMPARE the claude and codex perspectives:</span>
+<span class="s">1. Where BOTH models agree → list under &quot;High-confidence (both models agree)&quot;.</span>
+<span class="s">2. Where they DISAGREE, only one model raised it, or one is &quot;(no response)&quot; → list under &quot;Model Disagreements&quot; showing both sides. DO NOT pick a winner — leave it for a human to decide.</span>
+<span class="s">3. Then produce the consolidated plan, keeping every CRITICAL concern from either model with attribution.</span>
+
+<span class="s">%LANG%</span>
+
+<span class="s">## Output Format</span>
+
+<span class="s"># Unified Plan: &lt;task&gt;</span>
+
+<span class="s">## High-confidence (both models agree)</span>
+<span class="s">- [persona] &lt;concern&gt;</span>
+
+<span class="s">## ⚠ Model Disagreements (human decides)</span>
+<span class="s">- [persona] claude: &lt;position&gt; │ codex: &lt;position&gt;</span>
+
+<span class="s">## Consolidated Files</span>
+<span class="s">- `path` — &lt;why, which expert/model raised it&gt;</span>
+
+<span class="s">## Risks (sorted)</span>
+<span class="s">- [CRITICAL] [persona/model] &lt;risk + mitigation&gt;</span>
+<span class="s">- [HIGH] [persona/model] &lt;risk + mitigation&gt;</span>
+
+<span class="s">## Required Tests</span>
+<span class="s">- &lt;test&gt;</span>
+
+<span class="s">## Execution Steps</span>
+<span class="s">1. &lt;step&gt;</span>
+<span class="s">2. &lt;step&gt;</span>
+<span class="s">TEMPLATE</span>
+<span class="k">)</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span><span class="nv">synth_template</span><span class="o">=</span><span class="k">$(</span>cat<span class="w"> </span><span class="s">&lt;&lt;&#39;TEMPLATE&#39;</span>
+<span class="s">You are the council synthesizer. Below are independent plans from N domain experts for the same task.</span>
+
+<span class="s">## Task</span>
+<span class="s">%TASK%</span>
+
+<span class="s">## Expert Perspectives</span>
+<span class="s">%EXPERTS%</span>
+
+<span class="s">## Your Job</span>
+<span class="s">Produce ONE unified implementation plan that:</span>
+<span class="s">1. Keeps every CRITICAL concern raised by any expert.</span>
+<span class="s">2. Merges overlapping files-to-touch into one consolidated list.</span>
+<span class="s">3. Orders risks by severity, keeping expert attribution (e.g. &quot;[security-auditor] ...&quot;).</span>
+<span class="s">4. Lists required tests deduped across experts.</span>
+<span class="s">5. Ends with a numbered step-by-step TODO list ready for execution.</span>
+
+<span class="s">%LANG%</span>
+
+<span class="s">## Output Format</span>
+
+<span class="s"># Unified Plan: &lt;task&gt;</span>
+
+<span class="s">## Consolidated Files</span>
+<span class="s">- `path` — &lt;why, which expert raised it&gt;</span>
+
+<span class="s">## Risks (sorted)</span>
+<span class="s">- [CRITICAL] [expert] &lt;risk&gt;</span>
+<span class="s">- [HIGH] [expert] &lt;risk&gt;</span>
+
+<span class="s">## Required Tests</span>
+<span class="s">- &lt;test&gt;</span>
+
+<span class="s">## Execution Steps</span>
+<span class="s">1. &lt;step&gt;</span>
+<span class="s">2. &lt;step&gt;</span>
+<span class="s">TEMPLATE</span>
+<span class="k">)</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="c1"># Safe substitution via bash parameter expansion (no command evaluation)</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">synth_prompt</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$synth_template</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nv">synth_prompt</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">synth_prompt</span><span class="p">//%TASK%/</span><span class="nv">$task</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nv">synth_prompt</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">synth_prompt</span><span class="p">//%EXPERTS%/</span><span class="nv">$all</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nv">synth_prompt</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">synth_prompt</span><span class="p">//%LANG%/</span><span class="nv">$lang_directive</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>synth_out<span class="p">;</span><span class="w"> </span><span class="nv">synth_out</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>synth_err<span class="p">;</span><span class="w"> </span><span class="nv">synth_err</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+<span class="w">  </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span>
+<span class="w">  </span>call_model<span class="w"> </span>claude<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$synth_prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$claude_add_dirs</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>&gt;<span class="s2">&quot;</span><span class="nv">$synth_out</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">2</span>&gt;<span class="s2">&quot;</span><span class="nv">$synth_err</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-ne<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_warn<span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="w"> </span><span class="s2">&quot;[plan] synthesizer failed (rc=</span><span class="nv">$rc</span><span class="s2">) — stderr: </span><span class="nv">$synth_err</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;plan&quot;</span>
+<span class="w">    </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$synth_out</span><span class="s2">&quot;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nv">$rc</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$synth_out</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_warn<span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="w"> </span><span class="s2">&quot;[plan] synthesizer returned empty output — see stderr: </span><span class="nv">$synth_err</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;plan&quot;</span>
+<span class="w">    </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$synth_out</span><span class="s2">&quot;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$synth_out</span><span class="s2">&quot;</span>
+<span class="w">  </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$synth_out</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$synth_err</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$synth_err</span><span class="s2">&quot;</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_plan_council.sh</code>
+Expected: <code>PASS: all plan-council tests passed</code> (0 errors) — including the existing non-dual tests (the <code>default_plan_personas</code> / <code>build_plan_prompt</code> tests are untouched).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/plan-council.sh<span class="w"> </span>tests/test_plan_council.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(plan): run_plan_council --dual (claude+codex per persona, agree/disagree synth)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-3-mra-plan-dual-dispatch-preflight-usage">Task 3: <code>mra plan --dual</code> dispatch + preflight + usage</h2>
+<p><strong>Files:</strong>
+- Modify: <code>bin/mra.sh</code> — the <code>plan)</code> dispatch + usage lines
+- Modify: <code>tests/test_plan_council.sh</code> (append dispatch tests)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing tests</strong> — append to <code>tests/test_plan_council.sh</code>, BEFORE the summary block:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- mra plan --dual dispatch (real CLI via MRA_WORKSPACE) ---</span>
+<span class="nv">PD_WS</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD_WS</span><span class="s2">/.collab&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD_WS</span><span class="s2">/app&quot;</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{&quot;app&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]}}}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD_WS</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD_WS</span><span class="s2">/app&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD_WS</span><span class="s2">/app&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD_WS</span><span class="s2">/app&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD_WS</span><span class="s2">/app&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>init<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="c1"># 8. --dual with codex absent -&gt; preflight error, non-zero, council not convened</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$PD_WS</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">MRA_CODEX_BIN</span><span class="o">=</span><span class="s2">&quot;__nope_not_real__&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>plan<span class="w"> </span>app<span class="w"> </span><span class="s2">&quot;do a thing&quot;</span><span class="w"> </span>--dual<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-ne<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --dual without codex should exit non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*codex*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: preflight error should mention codex: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;convening council&quot;</span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: council must NOT convene when codex absent: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD_WS</span><span class="s2">&quot;</span>
+<span class="c1"># 9. usage advertises --dual</span>
+grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;plan .*--dual&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: usage should advertise plan --dual&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_plan_council.sh</code>
+Expected: FAIL — <code>--dual</code> is an unknown option today (<code>-*) unknown option</code>), so it errors with "unknown option" (not the codex preflight message), and usage has no <code>--dual</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Edit the <code>plan)</code> dispatch</strong> in <code>bin/mra.sh</code>. (a) Add <code>plan_dual=false</code> to the locals line:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="w">      </span><span class="nb">local</span><span class="w"> </span><span class="nv">plan_project</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nv">plan_task</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nv">plan_model</span><span class="o">=</span><span class="s2">&quot;sonnet&quot;</span><span class="w"> </span><span class="nv">plan_dual</span><span class="o">=</span><span class="nb">false</span>
+</code></pre></div>
+
+<p>(b) Add a <code>--dual</code> case to the arg loop, just before the <code>-*)</code> unknown-option case:</p>
+<div class="highlight"><pre><span></span><code><span class="w">          </span>--dual<span class="o">)</span><span class="w"> </span><span class="nv">plan_dual</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+</code></pre></div>
+
+<p>(c) After the <code>project_dir</code> existence check (<code>[[ ! -d "$project_dir" ]] &amp;&amp; { … exit 1; }</code>) and BEFORE the <code>pkb_build_context</code> line, add the preflight:</p>
+<div class="highlight"><pre><span></span><code><span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$plan_dual</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>!<span class="w"> </span>ensure_codex_available<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;mra plan --dual requires the codex CLI (not found on PATH)&quot;</span><span class="w"> </span><span class="s2">&quot;plan&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">fi</span>
+</code></pre></div>
+
+<p>(d) Pass <code>dual</code> as the 9th arg to <code>run_plan_council</code> (the call at the end of <code>plan)</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="w">      </span>run_plan_council<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$plan_project</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$plan_task</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span><span class="s2">&quot;</span><span class="k">$(</span>default_plan_personas<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$plan_model</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$add_dirs</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pkb_context</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$lang_directive</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$plan_dual</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Update the usage lines</strong> in <code>bin/mra.sh</code>. (a) The dispatch usage-error string:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>log_error &quot;usage: mra plan &lt;project&gt; \&quot;&lt;task&gt;\&quot; [--model &lt;model&gt;]&quot; &quot;plan&quot;; exit 1
+</code></pre></div>
+
+<p>→ append <code>[--dual]</code>:</p>
+<div class="highlight"><pre><span></span><code>log_error &quot;usage: mra plan &lt;project&gt; \&quot;&lt;task&gt;\&quot; [--model &lt;model&gt;] [--dual]&quot; &quot;plan&quot;; exit 1
+</code></pre></div>
+
+<p>(b) The top-level help line for <code>plan</code>:</p>
+<div class="highlight"><pre><span></span><code>  plan &lt;project&gt; &quot;&lt;task&gt;&quot; [--model M]  Multi-expert implementation plan
+</code></pre></div>
+
+<p>→</p>
+<div class="highlight"><pre><span></span><code>  plan &lt;project&gt; &quot;&lt;task&gt;&quot; [--model M] [--dual]  Multi-expert plan; --dual = claude+codex council
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_plan_council.sh</code>
+Expected: <code>PASS: all plan-council tests passed</code> (0 errors).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests/test_plan_council.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(plan): mra plan --dual flag + codex preflight + usage&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-4-full-regression-spec-status">Task 4: Full regression + spec status</h2>
+<p><strong>Files:</strong>
+- Modify: <code>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code> (§21 status) + re-render <code>.html</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: <code>shell tests: 45 passed, 0 failed</code> and <code>mcp-server : ok</code>. (No new suite — Phase 13 tests live in <code>tests/test_plan_council.sh</code>.) If anything fails, STOP and report BLOCKED with the output.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Flip the §21 status note</strong> in the spec. Find the <code>**Status:**</code> line directly under <code>## 21. Phase 13 —</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>**Status:** Approved (design) — 2026-06-08. Implementation scope for the next plan. First multi-MODEL capability: the existing plan-council (claude personas) gains a `--dual` mode that runs each persona on claude AND codex and surfaces cross-model agreement/disagreement. First engine of a broader multi-model push; review-debate / personas / eval are out of scope here.
+</code></pre></div>
+
+<p>Replace with:</p>
+<div class="highlight"><pre><span></span><code>**Status:** Implemented — 2026-06-08. `mra plan --dual` runs each persona on claude AND codex via the new `lib/model-provider.sh` (`call_model` + `ensure_codex_available`); `run_plan_council` tags blocks by provider, writes a missing-side sentinel on a failed/empty call, and synthesizes with an agree/disagree template. Non-dual path unchanged; codex side runs `codex exec -s read-only`.
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Re-render the spec HTML</strong></li>
+</ul>
+<p>Run: <code>python3 docs/superpowers/render-html.py docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code>
+Expected: <code>✓ …-design.md -&gt; …-design.html</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md<span class="w"> </span>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.html
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;docs(spec): mark Phase 13 (mra plan --dual) implemented&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="self-review-notes">Self-Review Notes</h2>
+<ul>
+<li><strong>Spec coverage:</strong> §21.1 surface (<code>--dual</code>, <code>--model</code> claude-only, preflight) → Task 3. §21.2 safety (claude edit-tools-off / codex read-only) → Task 1 (<code>call_model</code>). §21.3 provider abstraction (call_model signature incl. <code>max_turns</code>, <code>MRA_*_BIN</code>, ensure_codex_available, fail/empty non-fatal) → Task 1. §21.4 dual flow + tags + missing-side sentinel + agree/disagree synth → Task 2. §21.5 architecture → Tasks 1–3. §21.6 error handling (preflight, single-call fail, synth fail) → Tasks 1–3. §21.7 tests 1–4 → Task 1; 5–7 → Task 2; 8–9 → Task 3; regression → Task 4. §21.8 out-of-scope respected (plan-council only; no <code>--codex-model</code>; synth does not adjudicate).</li>
+<li><strong>No placeholders:</strong> every code step shows the full function body / exact edit / runnable test.</li>
+<li><strong>Type/name consistency:</strong> <code>call_model provider prompt model project_dir add_dirs max_turns</code> and <code>ensure_codex_available</code> are defined in Task 1 and used identically in Tasks 2–3. <code>run_plan_council</code>'s 9th param <code>dual</code> (default <code>false</code>) is added in Task 2 and passed by the dispatch in Task 3. <code>MRA_CLAUDE_BIN</code>/<code>MRA_CODEX_BIN</code> seams and the <code>(no response — … )</code> sentinel string are consistent between impl and tests.</li>
+<li><strong>Non-dual byte-equivalence:</strong> Task 2 keeps the non-dual tag (<code>### persona</code>, no provider), the original synth template verbatim, and no sentinel — so non-dual <code>$all</code> and synth prompt are identical to today; expert (max-turns 6) and synth (max-turns 4) go through <code>call_model</code> which reproduces the exact claude invocation. Test 6 is the regression guard (codex never called; both max-turns present; no provider tags).</li>
+<li><strong>Hermetic tests:</strong> claude/codex are stubbed via <code>MRA_*_BIN</code> pointing at temp scripts that record args/cwd to a file (subshell-safe); the real CLIs are never called. Dispatch test 8 simulates codex-absent with <code>MRA_CODEX_BIN=__nope_not_real__</code>.</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

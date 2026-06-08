@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Branch-aware Sync & Review — Phase 8 Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-title">Branch-aware Sync & Review — Phase 8 Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#file-structure">File Structure</a></li>
+<li><a href="#task-1-thread-delete_branch-through-merge_repomerge_workspace-align-skip-logs">Task 1: Thread delete_branch through merge_repo/merge_workspace + align skip logs</a></li>
+<li><a href="#task-2-wire-branch-merge-delete-branch-dispatch">Task 2: Wire branch merge --delete-branch dispatch</a></li>
+<li><a href="#task-3-integration-testsh-is_api_change-consistency">Task 3: integration-test.sh is_api_change consistency</a></li>
+<li><a href="#task-4-concerns-only-negative-test">Task 4: Concerns-only negative test</a></li>
+<li><a href="#done-phase-8-complete">Done — Phase 8 complete</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>Branch-aware Sync & Review — Phase 8 Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Final polish — add <code>branch merge --delete-branch</code> (opt-in), make <code>integration-test.sh</code>'s <code>is_api_change</code> call explicit, add a concerns-only negative test, and align <code>merge_repo</code>'s skip log levels with <code>pr_repo</code>.</p>
+<p><strong>Architecture:</strong> Thread a <code>delete_branch</code> flag through <code>merge_repo</code>/<code>merge_workspace</code>/dispatch (default off; appends <code>--delete-branch</code> to <code>gh pr merge</code>). Two one-line consistency fixes and one test addition. No new subsystem.</p>
+<p><strong>Tech Stack:</strong> Bash, git CLI, <code>gh</code> CLI, existing <code>lib/pr-ops.sh</code>/<code>lib/integration-test.sh</code>, plain-bash tests under <code>tests/</code>.</p>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<ul>
+<li><strong>Modify <code>lib/pr-ops.sh</code></strong> — <code>merge_repo</code> gains <code>delete_branch</code> (4th param) + uses it in <code>gh pr merge</code> and the dry-run preview; the two skip logs become <code>log_warn</code>; <code>merge_workspace</code> gains <code>delete_branch</code> (4th param) and passes it through.</li>
+<li><strong>Modify <code>bin/mra.sh</code></strong> — <code>branch merge</code> dispatch parses <code>--delete-branch</code> and passes it to <code>merge_workspace</code>; usage updated.</li>
+<li><strong>Modify <code>lib/integration-test.sh</code></strong> — explicit <code>is_api_change</code> mode/range.</li>
+<li><strong>Modify <code>tests/test_pr_ops.sh</code>, <code>tests/test_change_detector.sh</code></strong> — passthrough/skip tests + concerns-only negative test.</li>
+</ul>
+<p>Task order: T1 lib plumbing (<code>merge_repo</code> + <code>merge_workspace</code>) → T2 dispatch flag → T3 integration-test consistency → T4 concerns-only test.</p>
+<hr />
+<h2 id="task-1-thread-delete_branch-through-merge_repomerge_workspace-align-skip-logs">Task 1: Thread <code>delete_branch</code> through <code>merge_repo</code>/<code>merge_workspace</code> + align skip logs</h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/pr-ops.sh</code>
+- Test: <code>tests/test_pr_ops.sh</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Append to <code>tests/test_pr_ops.sh</code>, before the final <code>if [[ $errors -eq 0 ]]</code> block:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- merge_repo accepts delete_branch param without breaking the skip path ---</span>
+<span class="nv">DB_DIR</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DB_DIR</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>repo<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">DBR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DB_DIR</span><span class="s2">/repo&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBR</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBR</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBR</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBR</span><span class="s2">&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBR</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>work<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>merge_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBR</span><span class="s2">&quot;</span><span class="w"> </span>merge<span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="w">   </span><span class="c1"># delete_branch=true, no PR =&gt; skip</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-ne<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: merge_repo w/ delete_branch should still skip no-PR (rc=</span><span class="nv">$rc</span><span class="s2">): </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;no open PR&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected no-PR skip: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DB_DIR</span><span class="s2">&quot;</span>
+
+<span class="c1"># --- merge_workspace passes delete_branch through to merge_repo (stubbed) ---</span>
+<span class="nv">DBW_DIR</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_DIR</span><span class="s2">/.collab&quot;</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{&quot;a&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]}}}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_DIR</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_DIR</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>a<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>init<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">DBW_LOG</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+merge_repo<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;delete=</span><span class="nv">$4</span><span class="s2">&quot;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="o">}</span><span class="w">   </span><span class="c1"># record 4th arg (delete_branch)</span>
+merge_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_DIR</span><span class="s2">&quot;</span><span class="w"> </span>merge<span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_LOG</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;delete=true&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: merge_workspace should pass delete_branch=true to merge_repo: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_LOG</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="nb">unset</span><span class="w"> </span>-f<span class="w"> </span>merge_repo
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBW_LOG</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL — <code>merge_workspace</code> ignores a 4th arg today (the stub records <code>delete=</code> empty, not <code>delete=true</code>).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Update <code>merge_repo</code> in <code>lib/pr-ops.sh</code></strong></li>
+</ul>
+<p>(a) Change the signature line:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">merge</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">3</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>to:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">merge</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">3</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">4</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>(b) Change the two skip logs from <code>log_info</code> to <code>log_warn</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: detached HEAD — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+</code></pre></div>
+
+<p>→</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: detached HEAD — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+</code></pre></div>
+
+<p>and</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: on default branch &#39;</span><span class="nv">$def</span><span class="s2">&#39; — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+</code></pre></div>
+
+<p>→</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: on default branch &#39;</span><span class="nv">$def</span><span class="s2">&#39; — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+</code></pre></div>
+
+<p>(c) Replace the dry-run + merge block (the part from <code>if [[ "$dry_run" == "true" ]]; then ... fi</code> through the <code>gh pr merge</code> <code>if</code>) with:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">del_note</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">merge_args</span><span class="o">=(</span>--<span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$delete_branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">del_note</span><span class="o">=</span><span class="s2">&quot; (+delete-branch)&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">merge_args</span><span class="o">+=(</span>--delete-branch<span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: would merge PR #</span><span class="nv">$number</span><span class="s2"> (</span><span class="nv">$strategy</span><span class="s2">)</span><span class="nv">$del_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>gh<span class="w"> </span>pr<span class="w"> </span>merge<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">merge_args</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: merged PR #</span><span class="nv">$number</span><span class="s2"> (</span><span class="nv">$strategy</span><span class="s2">)</span><span class="nv">$del_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: gh pr merge failed for PR #</span><span class="nv">$number</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Update <code>merge_workspace</code> in <code>lib/pr-ops.sh</code></strong></li>
+</ul>
+<p>(a) Change its signature:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">merge</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">3</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>to:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">merge</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">3</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">4</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>(b) Change the merge_repo call:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>merge_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+</code></pre></div>
+
+<p>to:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>merge_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$delete_branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS. Then <code>bash test.sh</code> — all green (the existing merge_repo default-branch skip test still passes; its message text is unchanged by the log-level swap).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/pr-ops.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(merge): --delete-branch passthrough (merge_repo/merge_workspace) + align skip log levels&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-2-wire-branch-merge-delete-branch-dispatch">Task 2: Wire <code>branch merge --delete-branch</code> dispatch</h2>
+<p><strong>Files:</strong>
+- Modify: <code>bin/mra.sh</code>
+- Test: <code>tests/test_pr_ops.sh</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Append to <code>tests/test_pr_ops.sh</code>, before the final <code>if [[ $errors -eq 0 ]]</code> block:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- branch merge --delete-branch is accepted and threaded (no-PR fixture =&gt; skip, exit 0) ---</span>
+<span class="nv">DBD</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBD</span><span class="s2">/.collab&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{&quot;a&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]}}}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBD</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBD</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>a<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBD</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBD</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBD</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>init<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBD</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBD</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>work<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DBD</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>branch<span class="w"> </span>merge<span class="w"> </span>--delete-branch<span class="w"> </span>--dry-run<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="c1"># gh authenticated =&gt; no-PR skip + exit 0; gh unauth =&gt; auth error + exit 1. Accept either, but --delete-branch must NOT be &quot;unknown option&quot;.</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;unknown option&quot;</span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --delete-branch should be a recognized flag: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DBD</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL — <code>--delete-branch</code> is currently an unknown option in the <code>merge)</code> arm (<code>*) log_error "unknown option"</code>).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Add <code>--delete-branch</code> to the <code>merge)</code> dispatch</strong></li>
+</ul>
+<p>In <code>bin/mra.sh</code>'s <code>merge)</code> arm, add <code>delete_branch=false</code> to the locals and a <code>--delete-branch</code> case, then pass it to <code>merge_workspace</code>. Specifically:</p>
+<p>Change:</p>
+<div class="highlight"><pre><span></span><code><span class="w">          </span><span class="nb">local</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;merge&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="nb">false</span>
+<span class="w">          </span><span class="k">while</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">            </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">              </span>--strategy<span class="o">)</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;--strategy requires merge|squash|rebase&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span><span class="p">;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--dry-run<span class="o">)</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>*<span class="o">)</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;unknown option: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">            </span><span class="k">esac</span>
+<span class="w">          </span><span class="k">done</span>
+</code></pre></div>
+
+<p>to:</p>
+<div class="highlight"><pre><span></span><code><span class="w">          </span><span class="nb">local</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;merge&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span><span class="nb">false</span>
+<span class="w">          </span><span class="k">while</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">            </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">              </span>--strategy<span class="o">)</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;--strategy requires merge|squash|rebase&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span><span class="p">;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--dry-run<span class="o">)</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--delete-branch<span class="o">)</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>*<span class="o">)</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;unknown option: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">            </span><span class="k">esac</span>
+<span class="w">          </span><span class="k">done</span>
+</code></pre></div>
+
+<p>And change:</p>
+<div class="highlight"><pre><span></span><code><span class="w">          </span>merge_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>to:</p>
+<div class="highlight"><pre><span></span><code><span class="w">          </span>merge_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$delete_branch</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Update usage text</strong></li>
+</ul>
+<p>In the usage heredoc, change the <code>branch merge</code> line to document <code>--delete-branch</code>:</p>
+<div class="highlight"><pre><span></span><code>  branch merge [--strategy S] [--dry-run] [--delete-branch]  Merge open PRs across repos (deps first; gated on mergeable+CI)
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS (<code>--delete-branch</code> accepted, not "unknown option"). Then <code>bash test.sh</code> — all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(merge): wire branch merge --delete-branch (opt-in) + usage&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-3-integration-testsh-is_api_change-consistency">Task 3: <code>integration-test.sh</code> <code>is_api_change</code> consistency</h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/integration-test.sh</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Make the change</strong></li>
+</ul>
+<p>In <code>lib/integration-test.sh</code> (~line 125), find:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nv">change_level</span><span class="o">=</span><span class="k">$(</span>is_api_change<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_type</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<p>Replace with:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nv">change_level</span><span class="o">=</span><span class="k">$(</span>is_api_change<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_type</span><span class="s2">&quot;</span><span class="w"> </span>range<span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>get_default_branch<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">...HEAD&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<p>(<code>get_default_branch</code> is available at runtime — <code>integration-test.sh</code> is sourced into <code>bin/mra.sh</code> alongside <code>sync.sh</code>. This is behavior-equivalent to the prior 2-arg back-compat default, just explicit and consistent with <code>review.sh</code>/<code>eval.sh</code>.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Verify syntax + call shape</strong></li>
+</ul>
+<p>Run: <code>bash -n lib/integration-test.sh</code> — Expected: no output.
+Run: <code>grep -n 'is_api_change' lib/integration-test.sh</code> — Expected: the call now has 4 args including <code>range "$(get_default_branch ...)...HEAD"</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/integration-test.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;fix(integration-test): pass explicit mode/range to is_api_change (consistency)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-4-concerns-only-negative-test">Task 4: Concerns-only negative test</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_change_detector.sh</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the test</strong></li>
+</ul>
+<p>Append to <code>tests/test_change_detector.sh</code>, before the final <code>if [[ $errors -eq 0 ]]</code> block:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- concerns-only controller change is NOT high (locks the grep -qvE concerns/ exclusion) ---</span>
+<span class="nv">CC</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CC</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>repo<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">CCR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$CC</span><span class="s2">/repo&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">/app/controllers/concerns&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>base<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">CCA</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>HEAD<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;module Auth\n  def authenticate\n  end\nend\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">/app/controllers/concerns/auth_concern.rb&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">&quot;</span><span class="w"> </span>add<span class="w"> </span>.<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;add concern&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">CCB</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>HEAD<span class="k">)</span>
+<span class="nv">res</span><span class="o">=</span><span class="k">$(</span>is_api_change<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCR</span><span class="s2">&quot;</span><span class="w"> </span>rails-api<span class="w"> </span>range<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CCA</span><span class="s2">..</span><span class="nv">$CCB</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$res</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>high*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: concerns-only change should NOT be high, got: </span><span class="nv">$res</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CC</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_change_detector.sh</code>
+Expected: PASS — a change only under <code>app/controllers/concerns/</code> does NOT match <code>^config/routes.rb$</code>/serializer/schema, and the controller rule's <code>grep -qvE "concerns/"</code> excludes it, so the verdict is <code>low</code> (not <code>high</code>). (If it FAILS as <code>high</code>, the exclusion logic is broken — report it.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>tests/test_change_detector.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;test(review): concerns-only controller change is not high (lock exclusion)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="done-phase-8-complete">Done — Phase 8 complete</h2>
+<p>After Task 4: <code>mra branch merge --delete-branch</code> opt-in deletes merged branches; <code>integration-test.sh</code> calls <code>is_api_change</code> explicitly; the concerns-only exclusion is locked by a negative test; and <code>merge_repo</code>'s skip logs match <code>pr_repo</code>'s <code>log_warn</code> convention. The actionable backlog for branch-aware sync &amp; review is now cleared (spec §16.5).</p>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Branch-aware Sync & Review — Phase 4 Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-title">Branch-aware Sync & Review — Phase 4 Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#file-structure">File Structure</a></li>
+<li><a href="#task-1-add-range-mode-to-libreview-diffsh">Task 1: Add range mode to lib/review-diff.sh</a></li>
+<li><a href="#task-2-single-pass-review-consumes-mode-range_expr">Task 2: Single-pass review consumes (mode, range_expr)</a></li>
+<li><a href="#task-3-debate-persona-consume-mode-range_expr-retires-815">Task 3: Debate + persona consume (mode, range_expr) (retires §8.1.5)</a></li>
+<li><a href="#task-4-head-range-flags-gates-validation">Task 4: --head / --range flags + gates + validation</a></li>
+<li><a href="#done-phase-4-complete">Done — Phase 4 complete</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>Branch-aware Sync & Review — Phase 4 Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Add <code>mra review &lt;repo&gt; --range &lt;R&gt;</code> and <code>--head &lt;ref&gt;</code>, and unify diff acquisition so single-pass, debate, and persona paths all use <code>lib/review-diff.sh</code> (retiring spec §8.1.5).</p>
+<p><strong>Architecture:</strong> Generalize <code>review-diff.sh</code> with an additive <code>range</code> mode (<code>git diff "$range_expr"</code>). Introduce a single <code>(mode, range_expr)</code> decision point in <code>review.sh</code> and thread it to all three review paths (incrementally, behavior-preserving at each step). Finally add the <code>--head</code>/<code>--range</code> flags with mutual-exclusion gates and <code>git rev-list</code> validation that fails loud on an invalid ref/range and exits 0 with "no changes" on a valid-but-empty range.</p>
+<p><strong>Tech Stack:</strong> Bash, git CLI, existing <code>lib/review*.sh</code>, plain-bash tests under <code>tests/</code> auto-discovered by <code>test.sh</code>.</p>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<ul>
+<li><strong>Modify <code>lib/review-diff.sh</code></strong> — add <code>range</code> mode (additive; <code>working</code>/<code>base</code> unchanged).</li>
+<li><strong>Modify <code>lib/review.sh</code></strong> — <code>(mode, range_expr)</code> decision point; thread to single-pass, debate, persona; <code>--head</code>/<code>--range</code> parsing + gates + validation.</li>
+<li><strong>Modify <code>lib/review-prompt.sh</code></strong> — <code>build_review_prompt</code> consumes <code>(mode, range_expr)</code>.</li>
+<li><strong>Modify <code>lib/review-debate.sh</code></strong> — <code>run_debate_review</code> consumes <code>(mode, range_expr)</code>.</li>
+<li><strong>Modify <code>bin/mra.sh</code></strong> — <code>review)</code> dispatch recognizes <code>--head</code>/<code>--range</code>; usage.</li>
+<li><strong>Create <code>tests/test_review_diff.sh</code></strong> — range-mode unit test.</li>
+<li><strong>Create <code>tests/test_review_flags.sh</code></strong> — flag gates + validation (subprocess).</li>
+</ul>
+<p>Task order: T1 review-diff range mode (additive, green) → T2 single-pass on range_expr (behavior-preserving) → T3 debate+persona on range_expr (behavior-preserving; retires §8.1.5) → T4 <code>--head</code>/<code>--range</code> flags + gates + validation (the user-facing feature). Each task keeps the full suite green.</p>
+<hr />
+<h2 id="task-1-add-range-mode-to-libreview-diffsh">Task 1: Add <code>range</code> mode to <code>lib/review-diff.sh</code></h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/review-diff.sh</code>
+- Test: <code>tests/test_review_diff.sh</code> (new)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Create <code>tests/test_review_diff.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+
+<span class="nv">SCRIPT_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review-diff.sh&quot;</span>
+
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span>
+<span class="nv">TEST_DIR</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TEST_DIR</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>repo<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">R</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TEST_DIR</span><span class="s2">/repo&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;a\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">/f.txt&quot;</span><span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>add<span class="w"> </span>f.txt<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">A</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>HEAD<span class="k">)</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;b\n&#39;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">/f.txt&quot;</span><span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>add<span class="w"> </span>f.txt<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span>c2<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">B</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>HEAD<span class="k">)</span>
+
+<span class="c1"># range mode: A..B contains c2&#39;s change</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>review_diff_text<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>range<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$A</span><span class="s2">..</span><span class="nv">$B</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s1">&#39;+b&#39;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: range A..B should contain c2 change (+b): </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="nv">files</span><span class="o">=</span><span class="k">$(</span>review_diff_files<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>range<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$A</span><span class="s2">..</span><span class="nv">$B</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$files</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*f.txt*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: range changed-files should list f.txt: </span><span class="nv">$files</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+<span class="c1"># range mode: empty range yields empty output (no error)</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>review_diff_text<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>range<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$B</span><span class="s2">..</span><span class="nv">$B</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: empty range should yield empty diff: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># working mode unchanged (regression)</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;c\n&#39;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">/f.txt&quot;</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>review_diff_text<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R</span><span class="s2">&quot;</span><span class="w"> </span>working<span class="w"> </span><span class="s2">&quot;&quot;</span><span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s1">&#39;+c&#39;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: working mode should capture unstaged change: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TEST_DIR</span><span class="s2">&quot;</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$errors</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: review-diff range/working tests passed&quot;</span>
+<span class="k">else</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$errors</span><span class="s2"> tests failed&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_diff.sh</code>
+Expected: FAIL — <code>range</code> mode is not yet handled (current <code>review_diff_text</code> treats any non-<code>working</code> mode as <code>base</code>, running <code>git diff "$range_expr...HEAD"</code> which is wrong for an explicit <code>A..B</code>).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Add the <code>range</code> mode</strong></li>
+</ul>
+<p>Replace the body of <code>lib/review-diff.sh</code> with (adds <code>range</code>; keeps <code>working</code> and <code>base</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="c1"># Single source of truth for review diff acquisition.</span>
+<span class="c1"># mode &quot;working&quot;: working tree vs HEAD (staged + unstaged tracked changes; untracked excluded).</span>
+<span class="c1"># mode &quot;range&quot;  : an explicit git range expression (e.g. &quot;base...HEAD&quot;, &quot;base...ref&quot;, &quot;A..B&quot;).</span>
+<span class="c1"># mode &quot;base&quot;   : legacy — &quot;&lt;resolved_base&gt;...HEAD&quot; (kept for direct callers/tests).</span>
+
+review_diff_text<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">project_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">arg</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">3</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;working&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;range&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$arg</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">arg</span><span class="si">}</span><span class="s2">...HEAD&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">arg</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="o">}</span>
+
+review_diff_files<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">project_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">arg</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">3</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;working&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span>--name-only<span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;range&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span>--name-only<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$arg</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span>--name-only<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">arg</span><span class="si">}</span><span class="s2">...HEAD&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span>--name-only<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">arg</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_diff.sh</code>
+Expected: PASS. Then <code>bash test.sh</code> — all green (existing <code>test_review_working.sh</code> base/working unit tests still pass since those modes are unchanged).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-diff.sh<span class="w"> </span>tests/test_review_diff.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(review): add range mode to review-diff (explicit git range)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-2-single-pass-review-consumes-mode-range_expr">Task 2: Single-pass review consumes <code>(mode, range_expr)</code></h2>
+<p>Introduce the single <code>(mode, range_expr)</code> decision point in <code>review.sh</code> and route the strategy diff + single-pass prompt through <code>range</code> mode. Behavior-preserving: the default <code>range_expr</code> is <code>${resolved_base}...HEAD</code> (the current <code>base...HEAD</code>). <code>working</code> stays <code>mode=working</code>.</p>
+<p><strong>Files:</strong>
+- Modify: <code>lib/review.sh</code>
+- Modify: <code>lib/review-prompt.sh</code>
+- Test: full suite (regression — base/working behavior unchanged)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Replace the diff-mode block in <code>review.sh</code></strong></li>
+</ul>
+<p>In <code>lib/review.sh</code>, find the block (after the resolved_base block):</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1"># --- Resolve diff mode (working tree vs committed branch) ---</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">diff_mode</span><span class="o">=</span><span class="s2">&quot;base&quot;</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$working</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">diff_mode</span><span class="o">=</span><span class="s2">&quot;working&quot;</span>
+
+<span class="w">  </span><span class="c1"># --- Auto-select strategy based on diff size ---</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>diff_for_strategy<span class="w"> </span>changed_files_for_strategy
+<span class="w">  </span><span class="nv">diff_for_strategy</span><span class="o">=</span><span class="k">$(</span>review_diff_text<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$diff_mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$resolved_base</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="nv">changed_files_for_strategy</span><span class="o">=</span><span class="k">$(</span>review_diff_files<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$diff_mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$resolved_base</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<p>Replace it with:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1"># --- Resolve diff mode + range expression (single decision point) ---</span>
+<span class="w">  </span><span class="c1"># Phase 4: default is the committed range base...HEAD; --working uses the working tree.</span>
+<span class="w">  </span><span class="c1"># --range / --head (added in a later task) override range_expr.</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;range&quot;</span><span class="w"> </span><span class="nv">range_expr</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base</span><span class="si">}</span><span class="s2">...HEAD&quot;</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$working</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;working&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">range_expr</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="c1"># --- Auto-select strategy based on diff size ---</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>diff_for_strategy<span class="w"> </span>changed_files_for_strategy
+<span class="w">  </span><span class="nv">diff_for_strategy</span><span class="o">=</span><span class="k">$(</span>review_diff_text<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="nv">changed_files_for_strategy</span><span class="o">=</span><span class="k">$(</span>review_diff_files<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Update the single-pass <code>build_review_prompt</code> call in <code>review.sh</code></strong></li>
+</ul>
+<p>Find the single-pass call:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nv">prompt</span><span class="o">=</span><span class="k">$(</span>build_review_prompt<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;</span><span class="nv">$project</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;</span><span class="nv">$project_type</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$consumers</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$deps</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$has_api_change</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;</span><span class="nv">$output_language</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$output_mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$diff_mode</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<p>Replace its last line so it passes <code>"$mode" "$range_expr"</code> instead of <code>"$diff_mode"</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nv">prompt</span><span class="o">=</span><span class="k">$(</span>build_review_prompt<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;</span><span class="nv">$project</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;</span><span class="nv">$project_type</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$consumers</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$deps</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$has_api_change</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;</span><span class="nv">$output_language</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$output_mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Update <code>build_review_prompt</code> in <code>review-prompt.sh</code></strong></li>
+</ul>
+<p>In <code>lib/review-prompt.sh</code>, change the <code>diff_mode</code> param (currently <code>local diff_mode="${11:-base}"</code>) to a <code>mode</code>+<code>range_expr</code> pair, and replace the base-resolution + diff block. Specifically:</p>
+<p>Replace:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">diff_mode</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">11</span><span class="k">:-</span><span class="nv">base</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>with:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">11</span><span class="k">:-</span><span class="nv">range</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">range_expr</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">12</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>Then replace the base-resolution + diff block:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1"># --- Resolve base ref (try local, then origin/) ---</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">resolved_base</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">/.git&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--verify<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--verify<span class="w"> </span><span class="s2">&quot;origin/</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span><span class="nv">resolved_base</span><span class="o">=</span><span class="s2">&quot;origin/</span><span class="nv">$base_ref</span><span class="s2">&quot;</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="c1"># --- Get diff ---</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>diff
+<span class="w">  </span><span class="nv">diff</span><span class="o">=</span><span class="k">$(</span>review_diff_text<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$diff_mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$resolved_base</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$diff</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">diff</span><span class="o">=</span><span class="s2">&quot;(diff unavailable)&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>changed_files
+<span class="w">  </span><span class="nv">changed_files</span><span class="o">=</span><span class="k">$(</span>review_diff_files<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$diff_mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$resolved_base</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<p>with (the base ref is already resolved by <code>review.sh</code> and baked into <code>range_expr</code>, so no re-resolution here):</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1"># --- Get diff (mode/range_expr resolved by review.sh) ---</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>diff
+<span class="w">  </span><span class="nv">diff</span><span class="o">=</span><span class="k">$(</span>review_diff_text<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$diff</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">diff</span><span class="o">=</span><span class="s2">&quot;(diff unavailable)&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>changed_files
+<span class="w">  </span><span class="nv">changed_files</span><span class="o">=</span><span class="k">$(</span>review_diff_files<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<p>(If <code>$base_ref</code> is referenced elsewhere in the prompt text below this block, leave those references — only the diff acquisition changes.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run the full suite (regression)</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: all green. Default review now uses <code>range</code> mode with <code>range_expr=${resolved_base}...HEAD</code> — equivalent to the previous <code>base</code> behavior (single <code>git diff base...HEAD</code>; the rarely-hit two-step fallback is dropped, consistent with prior phases). <code>--working</code> unchanged. <code>test_review_working.sh</code> / <code>test_review_personas.sh</code> / <code>test_review_safety.sh</code> stay green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Smoke test default + working review reach the right diff path</strong></li>
+</ul>
+<p>Run:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">WS</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/.collab&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{}}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>repo<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/repo&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/repo&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+<span class="nb">echo</span><span class="w"> </span>a<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/repo/f.txt&quot;</span><span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/repo&quot;</span><span class="w"> </span>add<span class="w"> </span>f.txt<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/repo&quot;</span><span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span>init<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span>bin/mra.sh<span class="w"> </span>review<span class="w"> </span>repo<span class="w"> </span>--working<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;working exit=</span><span class="nv">$?</span><span class="s2">&quot;</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>Expected: <code>no uncommitted changes to review</code> + <code>working exit=0</code> (working mode still early-returns on a clean tree).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review.sh<span class="w"> </span>lib/review-prompt.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;refactor(review): single-pass consumes (mode, range_expr) via review-diff&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-3-debate-persona-consume-mode-range_expr-retires-815">Task 3: Debate + persona consume <code>(mode, range_expr)</code> (retires §8.1.5)</h2>
+<p>Migrate the debate path (<code>run_debate_review</code>) and the persona block to <code>review_diff_text(project_dir, mode, range_expr)</code>, eliminating their inline <code>git diff base...HEAD</code>. Behavior-preserving by default. After this task all four diff sites use <code>review-diff.sh</code>.</p>
+<p><strong>Files:</strong>
+- Modify: <code>lib/review-debate.sh</code>
+- Modify: <code>lib/review.sh</code>
+- Test: full suite (regression)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: <code>run_debate_review</code> accepts <code>(mode, range_expr)</code></strong></li>
+</ul>
+<p>In <code>lib/review-debate.sh</code>, add two trailing params after <code>pkb_context</code> (currently <code>${13}</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">pkb_context</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">13</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">14</span><span class="k">:-</span><span class="nv">range</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">range_expr</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">15</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>Then replace the base-resolution + inline diff block:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1"># --- Resolve base ref ---</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">resolved_base</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">/.git&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--verify<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--verify<span class="w"> </span><span class="s2">&quot;origin/</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span><span class="nv">resolved_base</span><span class="o">=</span><span class="s2">&quot;origin/</span><span class="nv">$base_ref</span><span class="s2">&quot;</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>diff
+<span class="w">  </span><span class="nv">diff</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base</span><span class="si">}</span><span class="s2">...HEAD&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">         </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">         </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;(diff unavailable)&quot;</span><span class="k">)</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>changed_files
+<span class="w">  </span><span class="nv">changed_files</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span>--name-only<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base</span><span class="si">}</span><span class="s2">...HEAD&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">                  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span>--name-only<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">                  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<p>with:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1"># --- Get diff (mode/range_expr resolved by review.sh) ---</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>diff
+<span class="w">  </span><span class="nv">diff</span><span class="o">=</span><span class="k">$(</span>review_diff_text<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$diff</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">diff</span><span class="o">=</span><span class="s2">&quot;(diff unavailable)&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>changed_files
+<span class="w">  </span><span class="nv">changed_files</span><span class="o">=</span><span class="k">$(</span>review_diff_files<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<p>(Leave the <code>base_ref</code> param 4 in place — it may still be referenced in the debate prompt text. <code>review-debate.sh</code> can call <code>review_diff_text</code> because <code>bin/mra.sh</code> sources <code>lib/review-diff.sh</code> before <code>lib/review-debate.sh</code>; the existing <code>test_review_personas.sh</code>/<code>test_review_safety.sh</code> don't exercise the diff, so no test sourcing change is needed.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Pass <code>(mode, range_expr)</code> from review.sh's debate call</strong></li>
+</ul>
+<p>In <code>lib/review.sh</code>, find the <code>run_debate_review</code> call and append <code>"$mode" "$range_expr"</code> as the last two args:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="nv">review_json</span><span class="o">=</span><span class="k">$(</span>run_debate_review<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$project</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$project_type</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$consumers</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$deps</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$has_api_change</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$output_language</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$claude_add_dirs_str</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$claude_focused_dirs_str</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$pkb_context</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Migrate the persona block in review.sh to <code>review_diff_text</code></strong></li>
+</ul>
+<p>In <code>lib/review.sh</code>, replace the persona block's base-resolution + inline diff:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="c1"># Resolve base + diff (same as debate path does internally)</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span><span class="nv">resolved_base_p</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">/.git&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--verify<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--verify<span class="w"> </span><span class="s2">&quot;origin/</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">          </span><span class="nv">resolved_base_p</span><span class="o">=</span><span class="s2">&quot;origin/</span><span class="nv">$base_ref</span><span class="s2">&quot;</span>
+<span class="w">        </span><span class="k">fi</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span>persona_diff<span class="w"> </span>persona_changed
+<span class="w">    </span><span class="nv">persona_diff</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base_p</span><span class="si">}</span><span class="s2">...HEAD&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">                   </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base_p</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">                   </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;(diff unavailable)&quot;</span><span class="k">)</span>
+<span class="w">    </span><span class="nv">persona_changed</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span>--name-only<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base_p</span><span class="si">}</span><span class="s2">...HEAD&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">                      </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>diff<span class="w"> </span>--name-only<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base_p</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">                      </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<p>with:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="c1"># diff via review-diff.sh (mode/range_expr resolved above)</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span>persona_diff<span class="w"> </span>persona_changed
+<span class="w">    </span><span class="nv">persona_diff</span><span class="o">=</span><span class="k">$(</span>review_diff_text<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$persona_diff</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">persona_diff</span><span class="o">=</span><span class="s2">&quot;(diff unavailable)&quot;</span>
+<span class="w">    </span><span class="nv">persona_changed</span><span class="o">=</span><span class="k">$(</span>review_diff_files<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run the full suite (regression)</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: all green. Debate and persona now use <code>review-diff.sh</code> with the same default <code>range_expr=${resolved_base}...HEAD</code>. <code>test_review_personas.sh</code> / <code>test_review_safety.sh</code> unchanged.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Confirm no remaining inline diff sites + no other callers broke</strong></li>
+</ul>
+<p>Run: <code>grep -rn 'diff "\${resolved_base' lib/ || echo "no inline base diffs remain"</code>
+Expected: <code>no inline base diffs remain</code> (all four sites now route through <code>review-diff.sh</code>).
+Run: <code>grep -rn 'run_debate_review\|build_review_prompt' lib/ bin/ | grep -v 'review-debate.sh:\|review-prompt.sh:'</code>
+Expected: only the call sites in <code>lib/review.sh</code> (confirms signatures changed safely).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-debate.sh<span class="w"> </span>lib/review.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;refactor(review): debate + persona consume (mode, range_expr); retire §8.1.5 inline diffs&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-4-head-range-flags-gates-validation">Task 4: <code>--head</code> / <code>--range</code> flags + gates + validation</h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/review.sh</code>
+- Modify: <code>bin/mra.sh</code>
+- Test: <code>tests/test_review_flags.sh</code> (new)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Create <code>tests/test_review_flags.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+
+<span class="nv">SCRIPT_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span>
+
+<span class="nv">WS</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/.collab&quot;</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{}}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>repo<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/repo&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/repo&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/repo&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+
+<span class="c1"># capture exit + output without aborting under set -e</span>
+run<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>review<span class="w"> </span>repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$@</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+<span class="c1"># mutual exclusion -&gt; non-zero</span>
+run<span class="w"> </span>--range<span class="w"> </span>c1..HEAD<span class="w"> </span>--head<span class="w"> </span>HEAD
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --range + --head should be rejected&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;mutually exclusive&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected &#39;mutually exclusive&#39;: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+run<span class="w"> </span>--range<span class="w"> </span>HEAD~0..HEAD<span class="w"> </span>--pr<span class="w"> </span><span class="m">1</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --range + --pr should be rejected&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+run<span class="w"> </span>--head<span class="w"> </span>HEAD<span class="w"> </span>--working
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --head + --working should be rejected&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># invalid range -&gt; non-zero + &#39;invalid&#39;</span>
+run<span class="w"> </span>--range<span class="w"> </span>maim..HEAD
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: invalid range should exit non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*invalid*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected &#39;invalid&#39; message: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+<span class="c1"># valid but empty range -&gt; exit 0 + &#39;no changes&#39;</span>
+run<span class="w"> </span>--range<span class="w"> </span>HEAD..HEAD
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-ne<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: empty range should exit 0, got rc=</span><span class="nv">$rc</span><span class="s2">: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;no changes&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected &#39;no changes&#39;: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$errors</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: review flag gates + range validation passed&quot;</span>
+<span class="k">else</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$errors</span><span class="s2"> tests failed&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_flags.sh</code>
+Expected: FAIL — <code>--range</code>/<code>--head</code> are currently unknown options (or mis-parsed), and there is no validation.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Parse <code>--range</code>/<code>--head</code> in <code>review.sh</code></strong></li>
+</ul>
+<p>In <code>lib/review.sh</code>, add <code>range_arg=""</code> and <code>head_arg=""</code> to the <code>review_project</code> locals line:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">project</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nv">pr_number</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nv">base_ref</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nv">model</span><span class="o">=</span><span class="s2">&quot;sonnet&quot;</span><span class="w"> </span><span class="nv">debate</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="nv">force_strategy</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nv">working</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">range_arg</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nv">head_arg</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+</code></pre></div>
+
+<p>In the option <code>while</code> loop, add two cases before the <code>-*)</code> catch-all:</p>
+<div class="highlight"><pre><span></span><code><span class="w">      </span>--range<span class="o">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;--range requires a range (e.g. A..B)&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">        </span><span class="nv">range_arg</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">      </span>--head<span class="o">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;--head requires a ref&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">        </span><span class="nv">head_arg</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="p">;;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Add mutual-exclusion gates</strong></li>
+</ul>
+<p>In <code>lib/review.sh</code>, after the existing <code>if [[ "$working" == "true" ]]; then ... fi</code> guard block (the one rejecting <code>--working + --personas</code>/<code>--strategy debate</code>), add:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_arg</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$head_arg</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_error<span class="w"> </span><span class="s2">&quot;review: --range and --head are mutually exclusive&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="o">(</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_arg</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$head_arg</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">)</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pr_number</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_error<span class="w"> </span><span class="s2">&quot;review: --range/--head cannot be combined with --pr&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="o">(</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_arg</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$head_arg</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">)</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$working</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_error<span class="w"> </span><span class="s2">&quot;review: --range/--head cannot be combined with --working&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Extend the mode/range_expr decision + add validation</strong></li>
+</ul>
+<p>In <code>lib/review.sh</code>, replace the Task-2 block:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1"># --- Resolve diff mode + range expression (single decision point) ---</span>
+<span class="w">  </span><span class="c1"># Phase 4: default is the committed range base...HEAD; --working uses the working tree.</span>
+<span class="w">  </span><span class="c1"># --range / --head (added in a later task) override range_expr.</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;range&quot;</span><span class="w"> </span><span class="nv">range_expr</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base</span><span class="si">}</span><span class="s2">...HEAD&quot;</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$working</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;working&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">range_expr</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+</code></pre></div>
+
+<p>with:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1"># --- Resolve diff mode + range expression (single decision point) ---</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;range&quot;</span><span class="w"> </span><span class="nv">range_expr</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base</span><span class="si">}</span><span class="s2">...HEAD&quot;</span><span class="w"> </span><span class="nv">explicit_range</span><span class="o">=</span><span class="nb">false</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$working</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;working&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">range_expr</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_arg</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;range&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">range_expr</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$range_arg</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">explicit_range</span><span class="o">=</span><span class="nb">true</span>
+<span class="w">  </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$head_arg</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nv">mode</span><span class="o">=</span><span class="s2">&quot;range&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">range_expr</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">resolved_base</span><span class="si">}</span><span class="s2">...</span><span class="si">${</span><span class="nv">head_arg</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">explicit_range</span><span class="o">=</span><span class="nb">true</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="c1"># An explicit --range/--head must resolve; a typo fails loud (never a silent empty review).</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$explicit_range</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span>rev-list<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="w"> </span>--<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_error<span class="w"> </span><span class="s2">&quot;review: invalid range/ref &#39;</span><span class="nv">$range_expr</span><span class="s2">&#39;&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">fi</span>
+</code></pre></div>
+
+<p>Then find the existing working empty-diff early-return:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$working</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$changed_count</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_info<span class="w"> </span><span class="s2">&quot;no uncommitted changes to review&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+</code></pre></div>
+
+<p>and add, immediately after it, the explicit-range empty early-return:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$explicit_range</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$changed_count</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_info<span class="w"> </span><span class="s2">&quot;review: no changes in &#39;</span><span class="nv">$range_expr</span><span class="s2">&#39; — nothing to review&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Recognize <code>--range</code>/<code>--head</code> in the <code>bin/mra.sh</code> review dispatch</strong></li>
+</ul>
+<p>In <code>bin/mra.sh</code>'s <code>review)</code> case, the <code>has_project</code> detection loop marks value-taking flags so their values aren't mistaken for the project. Find:</p>
+<div class="highlight"><pre><span></span><code><span class="w">          </span>--pr<span class="p">|</span>--base<span class="p">|</span>--model<span class="p">|</span>--strategy<span class="o">)</span><span class="w"> </span><span class="nv">skip_next</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="p">;;</span>
+</code></pre></div>
+
+<p>and change it to:</p>
+<div class="highlight"><pre><span></span><code><span class="w">          </span>--pr<span class="p">|</span>--base<span class="p">|</span>--model<span class="p">|</span>--strategy<span class="p">|</span>--range<span class="p">|</span>--head<span class="o">)</span><span class="w"> </span><span class="nv">skip_next</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="p">;;</span>
+</code></pre></div>
+
+<p>(The outer collection loop already forwards unknown flags to <code>review_args</code>, so <code>review_project</code> receives <code>--range</code>/<code>--head</code>.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 7: Update usage text</strong></li>
+</ul>
+<p>In the usage heredoc, change the <code>review</code> line to document the new flags:</p>
+<div class="highlight"><pre><span></span><code>  review &lt;project&gt; [--pr N] [--working] [--range A..B] [--head &lt;ref&gt;] [--no-debate]  Code review
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 8: Run the tests</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_flags.sh</code>
+Expected: PASS. Then <code>bash test.sh</code> — all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 9: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review.sh<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests/test_review_flags.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(review): --range/--head with mutual-exclusion gates and rev-list validation&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="done-phase-4-complete">Done — Phase 4 complete</h2>
+<p>After Task 4, <code>mra review &lt;repo&gt; --range A..B</code> and <code>--head &lt;ref&gt;</code> work across light/standard/debate/persona (all four paths consume <code>(mode, range_expr)</code> via <code>review-diff.sh</code>, retiring §8.1.5). An invalid range/ref fails loud (exit 1); a valid-but-empty range exits 0 with "no changes"; <code>--range</code>/<code>--head</code> are mutually exclusive with each other and with <code>--pr</code>/<code>--working</code>. Default <code>base...HEAD</code> review is byte-for-byte unchanged. Deferred to Phase 5 (spec §12.8): §8.1.1–§8.1.4, <code>is_api_change</code> range/working-awareness, §11.6.</p>
+  </main>
+</div>
+</body>
+</html>

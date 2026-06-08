@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Branch pr/merge repo subset (Phase 9) Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-title">Branch pr/merge repo subset (Phase 9) Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#file-structure">File Structure</a></li>
+<li><a href="#task-1-validate_repo_subset-helper">Task 1: validate_repo_subset helper</a></li>
+<li><a href="#task-2-warn_excluded_feature_deps-helper">Task 2: warn_excluded_feature_deps helper</a></li>
+<li><a href="#task-3-pr_workspace-accepts-an-optional-subset">Task 3: pr_workspace accepts an optional subset</a></li>
+<li><a href="#task-4-merge_workspace-accepts-an-optional-subset">Task 4: merge_workspace accepts an optional subset</a></li>
+<li><a href="#task-5-wire-branch-pr-dispatch-usage">Task 5: Wire branch pr dispatch + usage</a></li>
+<li><a href="#task-6-wire-branch-merge-dispatch-usage">Task 6: Wire branch merge dispatch + usage</a></li>
+<li><a href="#task-7-full-regression-spec-status">Task 7: Full regression + spec status</a></li>
+<li><a href="#self-review-notes">Self-Review Notes</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>Branch pr/merge repo subset (Phase 9) Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Let <code>mra branch pr</code> and <code>mra branch merge</code> accept an optional trailing <code>[repos…]</code> list that restricts the operation to that subset, mirroring <code>mra branch new &lt;name&gt; [repos…]</code>.</p>
+<p><strong>Architecture:</strong> The subset is resolved entirely above the single-repo workers (<code>pr_repo</code>/<code>merge_repo</code> are untouched). Two new helpers in <code>lib/pr-ops.sh</code> — <code>validate_repo_subset</code> (fail-fast name/existence check, called by the dispatch before the gh-auth preflight) and <code>warn_excluded_feature_deps</code> (advisory warning). <code>pr_workspace</code>/<code>merge_workspace</code> gain an optional trailing repo-list; empty = current full-workspace scan unchanged.</p>
+<p><strong>Tech Stack:</strong> Bash (shell library + <code>bin/mra.sh</code> dispatch), custom PASS/FAIL test harness in <code>tests/test_pr_ops.sh</code>, <code>jq</code>/<code>git</code>/<code>gh</code>.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code> §17.</p>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<ul>
+<li><strong><code>lib/pr-ops.sh</code></strong> (modify) — add <code>validate_repo_subset</code> and <code>warn_excluded_feature_deps</code>; refactor <code>pr_workspace</code>/<code>merge_workspace</code> to accept an optional trailing subset.</li>
+<li><strong><code>bin/mra.sh</code></strong> (modify) — <code>branch pr</code> / <code>branch merge</code> dispatch: collect positional repos, validate before <code>check_gh_auth</code>, pass subset through; usage lines updated.</li>
+<li><strong><code>tests/test_pr_ops.sh</code></strong> (modify) — source <code>branch-ops.sh</code>; add subset tests for both helpers, both workspace functions, and both dispatch paths.</li>
+</ul>
+<p>Reference facts (read before starting):
+- <code>validate_repo_name</code> lives in <code>lib/branch-ops.sh:17</code> (rejects <code>-*</code>, <code>.</code>, <code>..</code>, <code>*/*</code>).
+- <code>should_skip_dir</code> lives in <code>lib/sync.sh:36</code> (true for non-git / missing dir).
+- <code>get_project_deps project graph_file</code> lives in <code>lib/deps.sh:19</code> (prints deps one per line).
+- <code>bin/mra.sh</code> sources <code>branch-ops.sh</code> (line 18), <code>pr-ops.sh</code> (line 20), <code>deps.sh</code> (line 21) — all helpers are in scope at dispatch time.
+- <code>tests/test_pr_ops.sh</code> currently sources colors/sync/branch/deps/pr-ops — it does NOT source <code>branch-ops.sh</code> yet.</p>
+<hr />
+<h2 id="task-1-validate_repo_subset-helper">Task 1: <code>validate_repo_subset</code> helper</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_pr_ops.sh</code> (add <code>source branch-ops.sh</code> near the top, then append tests at end)
+- Modify: <code>lib/pr-ops.sh</code> (add function)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Add the missing source line to the test file</strong></li>
+</ul>
+<p>In <code>tests/test_pr_ops.sh</code>, after the existing <code>source "$SCRIPT_DIR/lib/branch.sh"</code> line, add:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/branch-ops.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Write the failing test</strong> (append at the end of <code>tests/test_pr_ops.sh</code>, before the final summary/exit block)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- validate_repo_subset: names + existence, fail-fast, reports ALL failures ---</span>
+<span class="nv">VS</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>a<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>i<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">/notrepo&quot;</span>
+
+<span class="c1"># valid existing repo -&gt; pass (return 0)</span>
+<span class="k">if</span><span class="w"> </span>!<span class="w"> </span>validate_repo_subset<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">&quot;</span><span class="w"> </span>a<span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: valid repo &#39;a&#39; should pass&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="c1"># missing repo -&gt; non-zero + &quot;not a git repo&quot;</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span>validate_repo_subset<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">&quot;</span><span class="w"> </span>ghost<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: missing repo should fail&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;not a git repo&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected &#39;not a git repo&#39;: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># non-git dir -&gt; non-zero</span>
+<span class="k">if</span><span class="w"> </span>validate_repo_subset<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">&quot;</span><span class="w"> </span>notrepo<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: non-git dir should fail&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="c1"># path-like name -&gt; non-zero + &quot;invalid repo name&quot;</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span>validate_repo_subset<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;a/b&quot;</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: path-like name should fail&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;invalid repo name&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected &#39;invalid repo name&#39;: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># dash-like name -&gt; non-zero (validate_repo_name rejects -*)</span>
+<span class="k">if</span><span class="w"> </span>validate_repo_subset<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;-x&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: dash name should be rejected&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="c1"># reports ALL failures, still non-zero</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>validate_repo_subset<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">&quot;</span><span class="w"> </span>ghost<span class="w"> </span><span class="s2">&quot;a/b&quot;</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="nv">n</span><span class="o">=</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-c<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;not a git repo&#39;</span><span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;invalid repo name&#39;</span><span class="k">)</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$n</span><span class="s2">&quot;</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: should report all failures (got </span><span class="nv">$n</span><span class="s2">): </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="c1"># mixed valid+invalid -&gt; the whole set fails</span>
+<span class="k">if</span><span class="w"> </span>validate_repo_subset<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">&quot;</span><span class="w"> </span>a<span class="w"> </span>ghost<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: any bad name fails the set&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VS</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL output <code>validate_repo_subset: command not found</code> (or non-zero exit) for the new block.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Write the implementation</strong> (add to <code>lib/pr-ops.sh</code>, after <code>order_repos_by_deps</code>, before <code>pr_repo</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># Validate an explicit repo subset against the workspace: each name must pass</span>
+<span class="c1"># validate_repo_name and resolve to a non-skipped git repo. Reports ALL failures,</span>
+<span class="c1"># returns non-zero if any. Side-effect-free (no gh, no writes) so the dispatch can</span>
+<span class="c1"># call it before the gh-auth preflight.</span>
+validate_repo_subset<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="m">0</span><span class="w"> </span>r<span class="w"> </span>dir
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$@</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>validate_repo_name<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_error<span class="w"> </span><span class="s2">&quot;invalid repo name: &#39;</span><span class="nv">$r</span><span class="s2">&#39;&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="k">$((</span><span class="nv">failed</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">    </span><span class="nv">dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">: not a git repo&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="k">$((</span><span class="nv">failed</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$failed</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS (no new FAIL lines; final summary shows 0 errors).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/pr-ops.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(pr-ops): validate_repo_subset (names + existence, fail-fast)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-2-warn_excluded_feature_deps-helper">Task 2: <code>warn_excluded_feature_deps</code> helper</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_pr_ops.sh</code> (append tests)
+- Modify: <code>lib/pr-ops.sh</code> (add function)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> (append at end of <code>tests/test_pr_ops.sh</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- warn_excluded_feature_deps: warn only for excluded deps that are on a feature branch ---</span>
+<span class="nv">WE</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">/.collab&quot;</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">/.collab/dep-graph.json&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;JSON&#39;</span>
+<span class="s">{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{&quot;a&quot;:{&quot;deps&quot;:{&quot;api&quot;:[&quot;b&quot;]},&quot;consumedBy&quot;:[]},&quot;b&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[&quot;a&quot;]}}}</span>
+<span class="s">JSON</span>
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>i<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">done</span>
+<span class="nv">GF2</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+<span class="c1"># b on a feature branch, excluded from subset {a} -&gt; warn</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">/b&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>warn_excluded_feature_deps<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GF2</span><span class="s2">&quot;</span><span class="w"> </span>a<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;depends on &#39;b&#39;&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: should warn about excluded feature-branch dep b: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># b included in subset {a b} -&gt; no warn</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>warn_excluded_feature_deps<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GF2</span><span class="s2">&quot;</span><span class="w"> </span>a<span class="w"> </span>b<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="k">if</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s2">&quot;depends on&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: dep in subset should not warn: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="c1"># b on default branch (not a feature branch) and excluded -&gt; no warn</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">/b&quot;</span><span class="w"> </span>checkout<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>warn_excluded_feature_deps<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GF2</span><span class="s2">&quot;</span><span class="w"> </span>a<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="k">if</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s2">&quot;depends on&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: excluded dep on default branch should not warn: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WE</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL <code>warn_excluded_feature_deps: command not found</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write the implementation</strong> (add to <code>lib/pr-ops.sh</code>, after <code>validate_repo_subset</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># Advisory warning: for each repo in the subset, if it depends (per the dep graph)</span>
+<span class="c1"># on a repo that is itself on a feature branch but NOT in the subset, warn (the</span>
+<span class="c1"># PR/merge order may be incomplete). Pure logging — never changes control flow.</span>
+<span class="c1"># Signature: warn_excluded_feature_deps workspace graph_file subset...</span>
+warn_excluded_feature_deps<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">graph_file</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="m">2</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">subset</span><span class="o">=(</span><span class="s2">&quot;</span><span class="nv">$@</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">subset_str</span><span class="o">=</span><span class="s2">&quot; </span><span class="si">${</span><span class="nv">subset</span><span class="p">[*]</span><span class="si">}</span><span class="s2"> &quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>r<span class="w"> </span>dep<span class="w"> </span>ddir<span class="w"> </span>dbr<span class="w"> </span>ddef
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">subset</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="nv">IFS</span><span class="o">=</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>dep<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dep</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$subset_str</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*<span class="s2">&quot; </span><span class="nv">$dep</span><span class="s2"> &quot;</span>*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span><span class="w">   </span><span class="c1"># dep is in the subset — fine</span>
+<span class="w">      </span><span class="nv">ddir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">/</span><span class="nv">$dep</span><span class="s2">&quot;</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ddir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ddir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span><span class="nv">dbr</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ddir</span><span class="s2">&quot;</span><span class="w"> </span>symbolic-ref<span class="w"> </span>--short<span class="w"> </span>-q<span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;(detached)&quot;</span><span class="k">)</span>
+<span class="w">      </span><span class="nv">ddef</span><span class="o">=</span><span class="k">$(</span>get_default_branch<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ddir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dbr</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;(detached)&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dbr</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ddef</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">: depends on &#39;</span><span class="nv">$dep</span><span class="s2">&#39; (on feature branch &#39;</span><span class="nv">$dbr</span><span class="s2">&#39;, not in selected subset) — PR/merge order may be incomplete&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">    </span><span class="k">done</span><span class="w"> </span>&lt;<span class="w"> </span>&lt;<span class="o">(</span>get_project_deps<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS (0 errors).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/pr-ops.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(pr-ops): warn_excluded_feature_deps (advisory cross-subset dep warning)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-3-pr_workspace-accepts-an-optional-subset">Task 3: <code>pr_workspace</code> accepts an optional subset</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_pr_ops.sh</code> (append tests)
+- Modify: <code>lib/pr-ops.sh</code> (replace <code>pr_workspace</code>)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> (append at end of <code>tests/test_pr_ops.sh</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- pr_workspace subset: only named repos previewed; no-subset unchanged ---</span>
+<span class="nv">PS</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">/.collab&quot;</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">/.collab/dep-graph.json&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;JSON&#39;</span>
+<span class="s">{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{&quot;a&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]},&quot;b&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]},&quot;c&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]}}}</span>
+<span class="s">JSON</span>
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="w"> </span>c<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>i<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>work<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">done</span>
+<span class="c1"># subset {a c} -&gt; a and c previewed, b excluded</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>pr_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span>a<span class="w"> </span>c<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;a:.*would open&#39;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: a should be previewed: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;c:.*would open&#39;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: c should be previewed: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;b:.*would open&#39;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: b (excluded) should not be previewed: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="c1"># no subset -&gt; all three previewed (unchanged behavior)</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>pr_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="w"> </span>c<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">:.*would open&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: no-subset should preview </span><span class="nv">$r</span><span class="s2">: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PS</span><span class="s2">&quot;</span>
+
+<span class="c1"># --- pr_workspace subset: a named repo on the default branch -&gt; skip+info, others proceed ---</span>
+<span class="nv">PD</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD</span><span class="s2">/.collab&quot;</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{&quot;a&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]},&quot;b&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]}}}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>i<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">done</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>w<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>pr_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span>a<span class="w"> </span>b<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;a:.*would open&#39;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: a should preview: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;b: on base branch&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: b on default should skip with info: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">if</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;b:.*would open&#39;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: b should not be PR&#39;d: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PD</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL — <code>pr_workspace</code> ignores the extra args today, so <code>b:.*would open</code> appears (b not excluded) and the default-branch skip message is absent.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write the implementation</strong> (replace the entire <code>pr_workspace</code> function in <code>lib/pr-ops.sh</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># Open PRs across feature-branch repos in dependency order. Optional trailing</span>
+<span class="c1"># repo names restrict the operation to that subset (default-branch repos in the</span>
+<span class="c1"># subset are skipped with info; excluded feature-branch deps trigger a warning).</span>
+<span class="c1"># No subset args = full-workspace scan (unchanged). Returns non-zero if any failed.</span>
+pr_workspace<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">base</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">3</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">subset</span><span class="o">=(</span><span class="s2">&quot;</span><span class="si">${</span><span class="p">@:</span><span class="nv">4</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>graph_file<span class="p">;</span><span class="w"> </span><span class="nv">graph_file</span><span class="o">=</span><span class="k">$(</span>get_dep_graph_path<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="k">)</span>
+
+<span class="w">  </span><span class="c1"># Names to consider: explicit subset, or every workspace git repo.</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">consider</span><span class="o">=()</span><span class="w"> </span>dir<span class="w"> </span>name
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">subset</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nv">consider</span><span class="o">=(</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">subset</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span>dir<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span>/*/<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span><span class="nv">name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>.*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span><span class="nv">consider</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">    </span><span class="k">done</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="c1"># Keep only feature-branch repos; in subset mode, info-skip default-branch ones.</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">candidates</span><span class="o">=()</span><span class="w"> </span>br<span class="w"> </span>base_ref
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>name<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">consider</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="nv">dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">/</span><span class="nv">$name</span><span class="s2">&quot;</span>
+<span class="w">    </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span><span class="nv">br</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span>symbolic-ref<span class="w"> </span>--short<span class="w"> </span>-q<span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;(detached)&quot;</span><span class="k">)</span>
+<span class="w">    </span><span class="nv">base_ref</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$base</span><span class="s2">&quot;</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">base_ref</span><span class="o">=</span><span class="k">$(</span>get_default_branch<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$br</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;(detached)&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$br</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nv">candidates</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">    </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">subset</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">: on base branch &#39;</span><span class="nv">$base_ref</span><span class="s2">&#39; — nothing to PR, skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">done</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">candidates</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_info<span class="w"> </span><span class="s2">&quot;no feature-branch repos to PR&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">subset</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>warn_excluded_feature_deps<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">candidates</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">ordered</span><span class="o">=()</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="m">0</span><span class="w"> </span>r
+<span class="w">  </span><span class="k">while</span><span class="w"> </span><span class="nv">IFS</span><span class="o">=</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>r<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">ordered</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="k">done</span><span class="w"> </span>&lt;<span class="w"> </span>&lt;<span class="o">(</span>order_repos_by_deps<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">candidates</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">ordered</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>pr_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="k">$((</span><span class="nv">failed</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$failed</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS (0 errors) — including the pre-existing <code>pr_workspace</code> tests (no-subset path unchanged).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/pr-ops.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(pr-ops): pr_workspace optional [repos...] subset&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-4-merge_workspace-accepts-an-optional-subset">Task 4: <code>merge_workspace</code> accepts an optional subset</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_pr_ops.sh</code> (append tests)
+- Modify: <code>lib/pr-ops.sh</code> (replace <code>merge_workspace</code>)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> (append at end of <code>tests/test_pr_ops.sh</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- merge_workspace subset: only named repos merged (stubbed merge_repo) ---</span>
+<span class="nv">MS_DIR</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">/.collab&quot;</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">/.collab/dep-graph.json&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;JSON&#39;</span>
+<span class="s">{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{&quot;a&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]},&quot;b&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]}}}</span>
+<span class="s">JSON</span>
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>i<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">done</span>
+<span class="nv">MS_LOG</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+merge_repo<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="c1"># subset {a} -&gt; only a merged, b excluded</span>
+merge_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">&quot;</span><span class="w"> </span>merge<span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span>a<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+grep<span class="w"> </span>-qx<span class="w"> </span>a<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_LOG</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: subset {a} should merge a&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-qx<span class="w"> </span>b<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: b (excluded) should not be merged&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="c1"># named repo on default branch -&gt; skip+info, not passed to merge_repo</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_LOG</span><span class="s2">&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">/b&quot;</span><span class="w"> </span>checkout<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>merge_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">&quot;</span><span class="w"> </span>merge<span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span>a<span class="w"> </span>b<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+grep<span class="w"> </span>-qx<span class="w"> </span>a<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_LOG</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: a should still merge: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-qx<span class="w"> </span>b<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: b on default should not reach merge_repo&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;b: on default branch&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: b on default should info-skip: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="nb">unset</span><span class="w"> </span>-f<span class="w"> </span>merge_repo
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MS_LOG</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL — current <code>merge_workspace</code> ignores extra args, so <code>b</code> is merged (appears in <code>$MS_LOG</code>) and the default-branch info-skip message is absent.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write the implementation</strong> (replace the entire <code>merge_workspace</code> function in <code>lib/pr-ops.sh</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># Merge open PRs across feature-branch repos in dependency order (deps first).</span>
+<span class="c1"># Optional trailing repo names restrict to that subset (default-branch repos in</span>
+<span class="c1"># the subset are skipped with info; excluded feature-branch deps trigger a warning).</span>
+<span class="c1"># No subset args = full-workspace scan (unchanged). Stop-on-first-failure.</span>
+merge_workspace<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">merge</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">3</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">4</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">subset</span><span class="o">=(</span><span class="s2">&quot;</span><span class="si">${</span><span class="p">@:</span><span class="nv">5</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>graph_file<span class="p">;</span><span class="w"> </span><span class="nv">graph_file</span><span class="o">=</span><span class="k">$(</span>get_dep_graph_path<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="k">)</span>
+
+<span class="w">  </span><span class="c1"># Names to consider: explicit subset, or every workspace git repo.</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">consider</span><span class="o">=()</span><span class="w"> </span>dir<span class="w"> </span>name
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">subset</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nv">consider</span><span class="o">=(</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">subset</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span>dir<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span>/*/<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span><span class="nv">name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>.*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span><span class="nv">consider</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">    </span><span class="k">done</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="c1"># Keep only feature-branch repos; in subset mode, info-skip default-branch ones.</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">candidates</span><span class="o">=()</span><span class="w"> </span>br<span class="w"> </span>def
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>name<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">consider</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="nv">dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">/</span><span class="nv">$name</span><span class="s2">&quot;</span>
+<span class="w">    </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span><span class="nv">br</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span>symbolic-ref<span class="w"> </span>--short<span class="w"> </span>-q<span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;(detached)&quot;</span><span class="k">)</span>
+<span class="w">    </span><span class="nv">def</span><span class="o">=</span><span class="k">$(</span>get_default_branch<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$br</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;(detached)&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$br</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$def</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nv">candidates</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">    </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">subset</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">: on default branch &#39;</span><span class="nv">$def</span><span class="s2">&#39; — nothing to merge, skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">done</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">candidates</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_info<span class="w"> </span><span class="s2">&quot;no feature-branch repos to merge&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">subset</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>warn_excluded_feature_deps<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">candidates</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">ordered</span><span class="o">=()</span><span class="w"> </span>r
+<span class="w">  </span><span class="k">while</span><span class="w"> </span><span class="nv">IFS</span><span class="o">=</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>r<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">ordered</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="k">done</span><span class="w"> </span>&lt;<span class="w"> </span>&lt;<span class="o">(</span>order_repos_by_deps<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">candidates</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">ordered</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span>merge_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$delete_branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS (0 errors) — including pre-existing <code>merge_workspace</code> order + stop-on-first-failure tests.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/pr-ops.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(pr-ops): merge_workspace optional [repos...] subset&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-5-wire-branch-pr-dispatch-usage">Task 5: Wire <code>branch pr</code> dispatch + usage</h2>
+<p><strong>Files:</strong>
+- Modify: <code>bin/mra.sh</code> — <code>pr)</code> sub-dispatch (currently <code>bin/mra.sh:654-669</code>) and usage line (<code>bin/mra.sh:104</code>)
+- Modify: <code>tests/test_pr_ops.sh</code> (append integration tests)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> (append at end of <code>tests/test_pr_ops.sh</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- branch pr dispatch: subset validation runs BEFORE gh-auth; unknown flag rejected ---</span>
+<span class="nv">DP</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DP</span><span class="s2">/.collab&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{}}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DP</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+<span class="c1"># missing repo -&gt; abort with &quot;not a git repo&quot;, and NOT a gh-auth error (ordering proof)</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DP</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>branch<span class="w"> </span>pr<span class="w"> </span>ghost<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: branch pr with missing repo should exit non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;not a git repo&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected &#39;not a git repo&#39;: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;gh authentication&quot;</span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: must fail on subset validation before gh-auth: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># unknown flag -&gt; &quot;unknown option&quot;</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DP</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>branch<span class="w"> </span>pr<span class="w"> </span>-x<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;unknown option&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: unknown flag should error: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DP</span><span class="s2">&quot;</span>
+<span class="c1"># usage line advertises [repos...]</span>
+grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;branch pr .*\[repos\.\.\.\]&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: usage should advertise &#39;branch pr ... [repos...]&#39;&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL — today <code>branch pr ghost</code> hits <code>*) unknown option: ghost</code> (positional repos not yet supported) and the usage grep finds no <code>[repos...]</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Replace the <code>pr)</code> sub-dispatch</strong> in <code>bin/mra.sh</code> (the block starting <code>pr)</code> at line 654)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="w">        </span>pr<span class="o">)</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span><span class="nv">base</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">repos</span><span class="o">=()</span>
+<span class="w">          </span><span class="k">while</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">            </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">              </span>--base<span class="o">)</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;--base requires a ref&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span><span class="p">;</span><span class="w"> </span><span class="nv">base</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--dry-run<span class="o">)</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>-*<span class="o">)</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;unknown option: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>*<span class="o">)</span><span class="w"> </span><span class="nv">repos</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">            </span><span class="k">esac</span>
+<span class="w">          </span><span class="k">done</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span>workspace<span class="p">;</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="k">$(</span>resolve_workspace<span class="k">)</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>validate_repo_subset<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">          </span><span class="k">fi</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>check_gh_auth<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span>log_error<span class="w"> </span><span class="s2">&quot;branch pr requires gh authentication (run: gh auth login)&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">          </span><span class="k">fi</span>
+<span class="w">          </span>pr_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="si">${</span><span class="nv">repos</span><span class="p">[@]+</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="si">}</span>
+<span class="w">          </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">          </span><span class="p">;;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Update the usage line</strong> in <code>bin/mra.sh</code> (line 104)</li>
+</ul>
+<p>Replace:</p>
+<div class="highlight"><pre><span></span><code>  branch pr [--base &lt;ref&gt;] [--dry-run]  Push feature branches and open PRs across repos (deps first)
+</code></pre></div>
+
+<p>with:</p>
+<div class="highlight"><pre><span></span><code>  branch pr [--base &lt;ref&gt;] [--dry-run] [repos...]  Push feature branches and open PRs across repos (deps first; repos... = subset)
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS (0 errors).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(branch): branch pr [repos...] subset (validate before gh-auth) + usage&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-6-wire-branch-merge-dispatch-usage">Task 6: Wire <code>branch merge</code> dispatch + usage</h2>
+<p><strong>Files:</strong>
+- Modify: <code>bin/mra.sh</code> — <code>merge)</code> sub-dispatch (currently <code>bin/mra.sh:670-690</code>) and usage line (<code>bin/mra.sh:105</code>)
+- Modify: <code>tests/test_pr_ops.sh</code> (append integration tests)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> (append at end of <code>tests/test_pr_ops.sh</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- branch merge dispatch: subset validation runs BEFORE gh-auth; strategy still checked ---</span>
+<span class="nv">DM</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DM</span><span class="s2">/.collab&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{}}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DM</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+<span class="c1"># missing repo -&gt; abort with &quot;not a git repo&quot;, NOT a gh-auth error</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DM</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>branch<span class="w"> </span>merge<span class="w"> </span>ghost<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: branch merge with missing repo should exit non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;not a git repo&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected &#39;not a git repo&#39;: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;gh authentication&quot;</span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: must fail on subset validation before gh-auth: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># invalid --strategy still rejected even with a repo arg</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DM</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>branch<span class="w"> </span>merge<span class="w"> </span>--strategy<span class="w"> </span>bogus<span class="w"> </span>somerepo<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;merge|squash|rebase&quot;</span>*<span class="p">|</span>*strategy*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: invalid strategy should error: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DM</span><span class="s2">&quot;</span>
+<span class="c1"># usage line advertises [repos...]</span>
+grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;branch merge .*\[repos\.\.\.\]&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: usage should advertise &#39;branch merge ... [repos...]&#39;&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL — <code>branch merge ghost</code> hits <code>*) unknown option: ghost</code> today, and the usage grep finds no <code>[repos...]</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Replace the <code>merge)</code> sub-dispatch</strong> in <code>bin/mra.sh</code> (the block starting <code>merge)</code> at line 670)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="w">        </span>merge<span class="o">)</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;merge&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">repos</span><span class="o">=()</span>
+<span class="w">          </span><span class="k">while</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">            </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">              </span>--strategy<span class="o">)</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;--strategy requires merge|squash|rebase&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span><span class="p">;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--dry-run<span class="o">)</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--delete-branch<span class="o">)</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>-*<span class="o">)</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;unknown option: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>*<span class="o">)</span><span class="w"> </span><span class="nv">repos</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">            </span><span class="k">esac</span>
+<span class="w">          </span><span class="k">done</span>
+<span class="w">          </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">            </span>merge<span class="p">|</span>squash<span class="p">|</span>rebase<span class="o">)</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">            </span>*<span class="o">)</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;branch merge: --strategy must be merge|squash|rebase&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">          </span><span class="k">esac</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span>workspace<span class="p">;</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="k">$(</span>resolve_workspace<span class="k">)</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>validate_repo_subset<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">          </span><span class="k">fi</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>check_gh_auth<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span>log_error<span class="w"> </span><span class="s2">&quot;branch merge requires gh authentication (run: gh auth login)&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">          </span><span class="k">fi</span>
+<span class="w">          </span>merge_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$delete_branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="si">${</span><span class="nv">repos</span><span class="p">[@]+</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="si">}</span>
+<span class="w">          </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">          </span><span class="p">;;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Update the usage line</strong> in <code>bin/mra.sh</code> (line 105)</li>
+</ul>
+<p>Replace:</p>
+<div class="highlight"><pre><span></span><code>  branch merge [--strategy S] [--dry-run] [--delete-branch]  Merge open PRs across repos (deps first; gated on mergeable+CI)
+</code></pre></div>
+
+<p>with:</p>
+<div class="highlight"><pre><span></span><code>  branch merge [--strategy S] [--dry-run] [--delete-branch] [repos...]  Merge open PRs across repos (deps first; gated on mergeable+CI; repos... = subset)
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS (0 errors).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(branch): branch merge [repos...] subset (validate before gh-auth) + usage&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-7-full-regression-spec-status">Task 7: Full regression + spec status</h2>
+<p><strong>Files:</strong>
+- Modify: <code>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code> (§17 status note) + re-render <code>.html</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: <code>shell tests: 44 passed, 0 failed</code> and <code>mcp-server : ok</code>. (No new suite file is added — Phase 9 tests live inside the existing <code>tests/test_pr_ops.sh</code>.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Flip the §17 status note</strong> in the spec</li>
+</ul>
+<p>Replace the <code>**Status:**</code> line under <code>## 17. Phase 9 …</code>:</p>
+<div class="highlight"><pre><span></span><code>**Status:** Approved (design) — 2026-06-05. Implementation scope for the next plan. One capability; no new subsystem. Reactivates §11.6.2.
+</code></pre></div>
+
+<p>with:</p>
+<div class="highlight"><pre><span></span><code>**Status:** Implemented — 2026-06-05. `branch pr`/`branch merge` accept `[repos…]`; `validate_repo_subset` + `warn_excluded_feature_deps` in `lib/pr-ops.sh`. Reactivated §11.6.2.
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Re-render the spec HTML</strong></li>
+</ul>
+<p>Run: <code>python3 docs/superpowers/render-html.py docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code>
+Expected: <code>✓ …-design.md -&gt; …-design.html</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md<span class="w"> </span>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.html
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;docs(spec): mark Phase 9 (branch pr/merge subset) implemented&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="self-review-notes">Self-Review Notes</h2>
+<ul>
+<li><strong>Spec coverage:</strong> §17.1 surface → Tasks 5/6 (dispatch + usage). §17.2 dispatch ordering / fail-fast → Task 1 (helper) + Tasks 5/6 (ordering proof tests). §17.2 candidate filter (default-branch skip) → Tasks 3/4. §17.2 dep warning → Task 2 + wired in Tasks 3/4. §17.3 architecture → all tasks. §17.4 error handling → Tasks 1/5/6. §17.5 testing items 1–8 → distributed across Tasks 3–6. §17.6 out-of-scope → respected (no sync/review changes, no auto-include, no CI polling).</li>
+<li><strong>No placeholders:</strong> every code step shows full function bodies / exact replacement text.</li>
+<li><strong>Type/name consistency:</strong> <code>validate_repo_subset workspace repos…</code> and <code>warn_excluded_feature_deps workspace graph_file subset…</code> used identically in helper definition (Tasks 1/2) and callers (Tasks 3/4/5/6). Note: the §17.3 spec sketched <code>warn_excluded_feature_deps graph_file subset… -- feature_repos…</code>; this plan uses the spec-sanctioned "equivalent signature" <code>workspace graph_file subset…</code> (lazy per-dep branch check — no full second scan), which the spec explicitly permits.</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

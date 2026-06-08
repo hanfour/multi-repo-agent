@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Branch-aware Sync & Review — Phase 1 Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-title">Branch-aware Sync & Review — Phase 1 Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#file-structure">File Structure</a></li>
+<li><a href="#task-1-validate_branch_name-libbranch-opssh-skeleton">Task 1: validate_branch_name() + lib/branch-ops.sh skeleton</a></li>
+<li><a href="#task-2-push-decision-engine-branch_push_action">Task 2: Push decision engine branch_push_action()</a></li>
+<li><a href="#task-3-create_branch_in_repo-create_branch_workspace">Task 3: create_branch_in_repo() + create_branch_workspace()</a></li>
+<li><a href="#task-4-switch_branch_in_repo-switch_branch_workspace">Task 4: switch_branch_in_repo() + switch_branch_workspace()</a></li>
+<li><a href="#task-5-push_repo-push_workspace">Task 5: push_repo() + push_workspace()</a></li>
+<li><a href="#task-6-wire-branch-new-branch-switch-dispatch">Task 6: Wire branch new / branch switch dispatch</a></li>
+<li><a href="#task-7-wire-sync-push-dry-run-dispatch">Task 7: Wire sync --push [--dry-run] dispatch</a></li>
+<li><a href="#done-phase-1-complete">Done — Phase 1 complete</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>Branch-aware Sync & Review — Phase 1 Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Add cross-repo branch lifecycle to <code>mra</code>: <code>branch new &lt;name&gt; [repos…]</code>, <code>branch switch &lt;name&gt;</code>, and <code>sync --push [--dry-run]</code>.</p>
+<p><strong>Architecture:</strong> A pure push decision engine (<code>branch_push_action</code>) joins <code>lib/branch.sh</code>. Mutating cross-repo branch ops live in a new <code>lib/branch-ops.sh</code> (keeping <code>lib/branch.sh</code> read-only/pure). Push lives in <code>lib/sync.sh</code> beside <code>safe_sync_repo</code>. <code>bin/mra.sh</code> restructures the <code>branch)</code> dispatch to support positional subcommands and adds <code>--push</code>/<code>--dry-run</code> to <code>sync)</code>. All per-repo work is isolated with a <code>failed</code> counter; any failure → non-zero exit.</p>
+<p><strong>Tech Stack:</strong> Bash, git CLI, existing <code>lib/colors.sh</code> log helpers, plain-bash tests under <code>tests/</code> auto-discovered by <code>test.sh</code>.</p>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<ul>
+<li><strong>Create <code>lib/branch-ops.sh</code></strong> — <code>validate_branch_name()</code>, <code>create_branch_in_repo()</code>, <code>create_branch_workspace()</code>, <code>switch_branch_in_repo()</code>, <code>switch_branch_workspace()</code>. The write side of branch ops.</li>
+<li><strong>Create <code>tests/test_branch_ops.sh</code></strong> — validation + create/switch behavior against multi-repo fixtures.</li>
+<li><strong>Modify <code>lib/branch.sh</code></strong> — add pure <code>branch_push_action()</code>.</li>
+<li><strong>Modify <code>lib/sync.sh</code></strong> — add <code>push_repo()</code> + <code>push_workspace()</code>.</li>
+<li><strong>Modify <code>bin/mra.sh</code></strong> — source <code>branch-ops.sh</code>; restructure <code>branch)</code> dispatch (status/new/switch); add <code>--push</code>/<code>--dry-run</code> to <code>sync)</code>; usage.</li>
+<li><strong>Modify <code>tests/test_branch.sh</code></strong> — <code>branch_push_action</code> cases.</li>
+<li><strong>Modify <code>tests/test_sync.sh</code></strong> — push behavior against bare-repo fixtures.</li>
+</ul>
+<p>Dependency order: T1 validate → T2 push engine → T3 create → T4 switch → T5 push → T6 branch dispatch → T7 sync --push dispatch.</p>
+<hr />
+<h2 id="task-1-validate_branch_name-libbranch-opssh-skeleton">Task 1: <code>validate_branch_name()</code> + <code>lib/branch-ops.sh</code> skeleton</h2>
+<p><strong>Files:</strong>
+- Create: <code>lib/branch-ops.sh</code>
+- Test: <code>tests/test_branch_ops.sh</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Create <code>tests/test_branch_ops.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+
+<span class="nv">SCRIPT_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/colors.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/sync.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/branch-ops.sh&quot;</span>
+
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span>
+
+<span class="c1"># valid names</span>
+<span class="k">for</span><span class="w"> </span>n<span class="w"> </span><span class="k">in</span><span class="w"> </span>feat/x<span class="w"> </span>bugfix-123<span class="w"> </span>release/v1.2.0<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>validate_branch_name<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$n</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: &#39;</span><span class="nv">$n</span><span class="s2">&#39; should be valid&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">done</span>
+<span class="c1"># invalid: empty, leading dash, git-invalid</span>
+<span class="k">for</span><span class="w"> </span>n<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;-foo&quot;</span><span class="w"> </span><span class="s2">&quot;--all&quot;</span><span class="w"> </span><span class="s2">&quot;feat/x..y&quot;</span><span class="w"> </span><span class="s2">&quot;feat~1&quot;</span><span class="w"> </span><span class="s2">&quot;feat^&quot;</span><span class="w"> </span><span class="s2">&quot;with space&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>validate_branch_name<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$n</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: &#39;</span><span class="nv">$n</span><span class="s2">&#39; should be INVALID&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">done</span>
+
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$errors</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: branch-ops validation tests passed&quot;</span>
+<span class="k">else</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$errors</span><span class="s2"> tests failed&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_branch_ops.sh</code>
+Expected: FAIL — <code>validate_branch_name: command not found</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write minimal implementation</strong></li>
+</ul>
+<p>Create <code>lib/branch-ops.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="c1"># Mutating cross-repo branch operations (create / switch).</span>
+<span class="c1"># Read-only introspection lives in lib/branch.sh; this file is the write side.</span>
+
+<span class="c1"># Validate a branch name. Returns 0 if valid, non-zero otherwise.</span>
+<span class="c1"># Rejects: empty, leading dash (git option injection), and git-invalid ref names.</span>
+validate_branch_name<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">name</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>-*<span class="o">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="w">  </span>git<span class="w"> </span>check-ref-format<span class="w"> </span><span class="s2">&quot;refs/heads/</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_branch_ops.sh</code>
+Expected: PASS. Then <code>bash test.sh</code> — all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/branch-ops.sh<span class="w"> </span>tests/test_branch_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(branch): validate_branch_name + branch-ops.sh skeleton&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-2-push-decision-engine-branch_push_action">Task 2: Push decision engine <code>branch_push_action()</code></h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/branch.sh</code>
+- Test: <code>tests/test_branch.sh</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Append to <code>tests/test_branch.sh</code>, immediately BEFORE the final <code>if [[ $errors -eq 0 ]]</code> block:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- branch_push_action (args: ahead behind upstream branch) ---</span>
+assert_push<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="c1"># ahead behind upstream branch expected</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>got
+<span class="w">  </span><span class="nv">got</span><span class="o">=</span><span class="k">$(</span>branch_push_action<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$3</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$4</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$got</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$5</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: branch_push_action(</span><span class="nv">$1</span><span class="s2">,</span><span class="nv">$2</span><span class="s2">,</span><span class="nv">$3</span><span class="s2">,</span><span class="nv">$4</span><span class="s2">) =&gt; &#39;</span><span class="nv">$got</span><span class="s2">&#39;, expected &#39;</span><span class="nv">$5</span><span class="s2">&#39;&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="o">}</span>
+<span class="c1"># Rule 1: detached wins over no-upstream</span>
+assert_push<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="s2">&quot;(none)&quot;</span><span class="w">      </span><span class="s2">&quot;(detached)&quot;</span><span class="w"> </span><span class="s2">&quot;skip-detached&quot;</span>
+assert_push<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="s2">&quot;(none)&quot;</span><span class="w">      </span><span class="s2">&quot;(detached)&quot;</span><span class="w"> </span><span class="s2">&quot;skip-detached&quot;</span>
+<span class="c1"># Rule 2: real branch, no upstream</span>
+assert_push<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="s2">&quot;(none)&quot;</span><span class="w">      </span><span class="s2">&quot;feat/x&quot;</span><span class="w">     </span><span class="s2">&quot;push-new&quot;</span>
+assert_push<span class="w"> </span><span class="m">3</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="s2">&quot;(none)&quot;</span><span class="w">      </span><span class="s2">&quot;feat/x&quot;</span><span class="w">     </span><span class="s2">&quot;push-new&quot;</span>
+<span class="c1"># Rule 3: even</span>
+assert_push<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="s2">&quot;origin/main&quot;</span><span class="w"> </span><span class="s2">&quot;main&quot;</span><span class="w">       </span><span class="s2">&quot;up-to-date&quot;</span>
+<span class="c1"># Rule 4: ahead only</span>
+assert_push<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="s2">&quot;origin/main&quot;</span><span class="w"> </span><span class="s2">&quot;main&quot;</span><span class="w">       </span><span class="s2">&quot;push&quot;</span>
+<span class="c1"># Rule 5: diverged</span>
+assert_push<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="m">3</span><span class="w"> </span><span class="s2">&quot;origin/main&quot;</span><span class="w"> </span><span class="s2">&quot;main&quot;</span><span class="w">       </span><span class="s2">&quot;skip-diverged&quot;</span>
+<span class="c1"># Rule 6: behind only</span>
+assert_push<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="s2">&quot;origin/main&quot;</span><span class="w"> </span><span class="s2">&quot;main&quot;</span><span class="w">       </span><span class="s2">&quot;skip-behind&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_branch.sh</code>
+Expected: FAIL — <code>branch_push_action: command not found</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write minimal implementation</strong></li>
+</ul>
+<p>Append to <code>lib/branch.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Pure push decision engine, sibling to branch_sync_action. First matching rule wins.</span>
+<span class="c1"># Args: ahead behind upstream branch  -&gt; prints one action string.</span>
+<span class="c1"># Does NOT consider dirty (uncommitted files don&#39;t affect pushing committed refs).</span>
+<span class="c1"># `branch` distinguishes a real unpublished branch from a detached HEAD (both have upstream=(none)).</span>
+branch_push_action<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">ahead</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">behind</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">upstream</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$3</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">branch</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$4</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;(detached)&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;skip-detached&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$upstream</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;(none)&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;push-new&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$behind</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ahead</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;up-to-date&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$behind</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ahead</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;push&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ahead</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$behind</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;skip-diverged&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;skip-behind&quot;</span><span class="w">   </span><span class="c1"># ahead==0 &amp;&amp; behind&gt;0</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_branch.sh</code>
+Expected: PASS. Then <code>bash test.sh</code> — all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/branch.sh<span class="w"> </span>tests/test_branch.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(branch): branch_push_action push decision engine&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-3-create_branch_in_repo-create_branch_workspace">Task 3: <code>create_branch_in_repo()</code> + <code>create_branch_workspace()</code></h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/branch-ops.sh</code>
+- Test: <code>tests/test_branch_ops.sh</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Append to <code>tests/test_branch_ops.sh</code>, immediately BEFORE the final <code>if [[ $errors -eq 0 ]]</code> block:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- create_branch_workspace across a multi-repo fixture ---</span>
+<span class="nv">WS</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span>
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>.<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>init<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">done</span>
+<span class="c1"># repo b already has feat/x (should be switched, not fail)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/b&quot;</span><span class="w"> </span>branch<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+
+create_branch_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="nv">cur</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--abbrev-ref<span class="w"> </span>HEAD<span class="k">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$cur</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;feat/x&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$r</span><span class="s2"> should be on feat/x, got </span><span class="nv">$cur</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">done</span>
+
+<span class="c1"># invalid name =&gt; non-zero, no repo changed</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">before</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--abbrev-ref<span class="w"> </span>HEAD<span class="k">)</span>
+<span class="k">if</span><span class="w"> </span>create_branch_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;feat/x..y&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: invalid name should make create_branch_workspace return non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span>
+<span class="k">fi</span>
+<span class="nv">after</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--abbrev-ref<span class="w"> </span>HEAD<span class="k">)</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$before</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$after</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: invalid name must not change any branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># named-repo subset: only repo a</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+create_branch_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>feat/y<span class="w"> </span>a<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--abbrev-ref<span class="w"> </span>HEAD<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;feat/y&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: repo a should be on feat/y&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span>
+<span class="k">fi</span>
+<span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/b&quot;</span><span class="w"> </span>show-ref<span class="w"> </span>--verify<span class="w"> </span>--quiet<span class="w"> </span>refs/heads/feat/y<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: repo b should NOT have feat/y (not in subset)&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span>
+<span class="k">fi</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_branch_ops.sh</code>
+Expected: FAIL — <code>create_branch_workspace: command not found</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write minimal implementation</strong></li>
+</ul>
+<p>Append to <code>lib/branch-ops.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Create+checkout a branch in one repo (base = current HEAD).</span>
+<span class="c1"># If the branch already exists, switch to it and warn. Returns non-zero on failure.</span>
+create_branch_in_repo<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">name</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>repo_name<span class="p">;</span><span class="w"> </span><span class="nv">repo_name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>show-ref<span class="w"> </span>--verify<span class="w"> </span>--quiet<span class="w"> </span><span class="s2">&quot;refs/heads/</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: branch &#39;</span><span class="nv">$name</span><span class="s2">&#39; already exists, switching&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>checkout<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: on &#39;</span><span class="nv">$name</span><span class="s2">&#39;&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">    </span><span class="k">else</span>
+<span class="w">      </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: cannot switch to &#39;</span><span class="nv">$name</span><span class="s2">&#39; (working tree?)&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: created &#39;</span><span class="nv">$name</span><span class="s2">&#39;&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: failed to create &#39;</span><span class="nv">$name</span><span class="s2">&#39;&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="o">}</span>
+
+<span class="c1"># Create the branch across a repo set. Extra args = repo names; if none, all workspace git repos.</span>
+<span class="c1"># Validates the name first (fail fast, no repo touched). Returns non-zero if any repo failed.</span>
+create_branch_workspace<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">name</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="m">2</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>validate_branch_name<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_error<span class="w"> </span><span class="s2">&quot;invalid branch name: &#39;</span><span class="nv">$name</span><span class="s2">&#39;&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="m">0</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repos</span><span class="o">=(</span><span class="s2">&quot;</span><span class="nv">$@</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span>dir<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span>/*/<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="nv">b</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$b</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>.*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>create_branch_in_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="k">$((</span><span class="nv">failed</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">    </span><span class="k">done</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span><span class="nv">dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">: not a git repo&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="k">$((</span><span class="nv">failed</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>create_branch_in_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="k">$((</span><span class="nv">failed</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">    </span><span class="k">done</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$failed</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_branch_ops.sh</code>
+Expected: PASS. Then <code>bash test.sh</code> — all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/branch-ops.sh<span class="w"> </span>tests/test_branch_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(branch): create_branch_in_repo + create_branch_workspace&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-4-switch_branch_in_repo-switch_branch_workspace">Task 4: <code>switch_branch_in_repo()</code> + <code>switch_branch_workspace()</code></h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/branch-ops.sh</code>
+- Test: <code>tests/test_branch_ops.sh</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Append to <code>tests/test_branch_ops.sh</code>, immediately BEFORE the final <code>if [[ $errors -eq 0 ]]</code> block:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- switch_branch_workspace: switch where branch exists, leave others untouched ---</span>
+<span class="nv">WS2</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span>
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>.<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>init<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">done</span>
+<span class="c1"># only repo a has feat/x; both currently on main</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">/a&quot;</span><span class="w"> </span>branch<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+
+switch_branch_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">&quot;</span><span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">/a&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--abbrev-ref<span class="w"> </span>HEAD<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;feat/x&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: repo a should switch to feat/x&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span>
+<span class="k">fi</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">/b&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--abbrev-ref<span class="w"> </span>HEAD<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;main&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: repo b (no feat/x) should remain on main&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span>
+<span class="k">fi</span>
+
+<span class="c1"># invalid name =&gt; non-zero</span>
+<span class="k">if</span><span class="w"> </span>switch_branch_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;-foo&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: invalid name should make switch_branch_workspace return non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span>
+<span class="k">fi</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS2</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_branch_ops.sh</code>
+Expected: FAIL — <code>switch_branch_workspace: command not found</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write minimal implementation</strong></li>
+</ul>
+<p>Append to <code>lib/branch-ops.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Switch one repo to an EXISTING branch. Missing branch or a dirty/conflict</span>
+<span class="c1"># checkout failure are non-fatal skips (warn, return 0) — never -f, never discard.</span>
+switch_branch_in_repo<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">name</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>repo_name<span class="p">;</span><span class="w"> </span><span class="nv">repo_name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>show-ref<span class="w"> </span>--verify<span class="w"> </span>--quiet<span class="w"> </span><span class="s2">&quot;refs/heads/</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: no branch &#39;</span><span class="nv">$name</span><span class="s2">&#39; — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>checkout<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: on &#39;</span><span class="nv">$name</span><span class="s2">&#39;&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: cannot switch to &#39;</span><span class="nv">$name</span><span class="s2">&#39; (dirty/conflict) — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="o">}</span>
+
+<span class="c1"># Switch every workspace git repo that has the branch. Validates name first.</span>
+<span class="c1"># Returns non-zero only on an invalid name (per-repo skips are expected, not failures).</span>
+switch_branch_workspace<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">name</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>validate_branch_name<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_error<span class="w"> </span><span class="s2">&quot;invalid branch name: &#39;</span><span class="nv">$name</span><span class="s2">&#39;&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>dir<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span>/*/<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="nv">b</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$b</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>.*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span>switch_branch_in_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_branch_ops.sh</code>
+Expected: PASS. Then <code>bash test.sh</code> — all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/branch-ops.sh<span class="w"> </span>tests/test_branch_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(branch): switch_branch_in_repo + switch_branch_workspace&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-5-push_repo-push_workspace">Task 5: <code>push_repo()</code> + <code>push_workspace()</code></h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/sync.sh</code>
+- Test: <code>tests/test_sync.sh</code></p>
+<p><code>tests/test_sync.sh</code> already sources <code>lib/branch.sh</code> (Phase 0 Task 5), so <code>branch_push_action</code>/<code>get_branch_state</code> are available.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>In <code>tests/test_sync.sh</code>, append immediately before the final <code>rm -rf "$TEST_DIR"</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- push_repo: pushes a local-ahead branch to the bare remote ---</span>
+<span class="nv">PUSH_DIR</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>--bare<span class="w"> </span>up<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>clone<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/up&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>push<span class="w"> </span>-u<span class="w"> </span>origin<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c2<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="w">   </span><span class="c1"># now ahead by 1</span>
+<span class="nv">before</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/up&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>main<span class="k">)</span>
+push_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">after</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/up&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>main<span class="k">)</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$before</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$after</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: push_repo should advance the bare remote&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># --- push_repo dry-run: does NOT advance the remote even when ahead ---</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c3<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="w">   </span><span class="c1"># ahead again</span>
+<span class="nv">before</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/up&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>main<span class="k">)</span>
+push_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">after</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/up&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>main<span class="k">)</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$before</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$after</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: dry-run push must NOT advance the remote&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># --- push_repo: new branch with no upstream gets pushed with -u ---</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/new<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>f1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+push_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">if</span><span class="w"> </span>!<span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--abbrev-ref<span class="w"> </span>--symbolic-full-name<span class="w"> </span><span class="s1">&#39;@{upstream}&#39;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: push_repo push-new should set upstream&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span>
+<span class="k">fi</span>
+
+<span class="c1"># --- push_repo: behind branch is NOT pushed ---</span>
+git<span class="w"> </span>clone<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/up&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/b&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/b&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/b&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/b&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>adv<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/b&quot;</span><span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="w">   </span><span class="c1"># advance remote main</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>fetch<span class="w"> </span>--quiet
+<span class="nv">before</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/up&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>main<span class="k">)</span>
+push_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">after</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">/up&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>main<span class="k">)</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$before</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$after</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: behind branch must not be pushed&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">((</span>errors++<span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PUSH_DIR</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync.sh</code>
+Expected: FAIL — <code>push_repo: command not found</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write minimal implementation</strong></li>
+</ul>
+<p>Append to <code>lib/sync.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Push one repo per the push decision engine. dry_run=&quot;true&quot; previews only.</span>
+<span class="c1"># Never force-pushes. Returns non-zero on push failure.</span>
+push_repo<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>repo_name<span class="p">;</span><span class="w"> </span><span class="nv">repo_name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>fetch<span class="w"> </span>--quiet<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>state<span class="w"> </span>branch<span class="w"> </span>upstream<span class="w"> </span>ahead<span class="w"> </span>behind<span class="w"> </span>dirty<span class="w"> </span>action
+<span class="w">  </span><span class="nv">state</span><span class="o">=</span><span class="k">$(</span>get_branch_state<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="nv">branch</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>branch<span class="k">)</span>
+<span class="w">  </span><span class="nv">upstream</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>upstream<span class="k">)</span>
+<span class="w">  </span><span class="nv">ahead</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>ahead<span class="k">)</span>
+<span class="w">  </span><span class="nv">behind</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>behind<span class="k">)</span>
+<span class="w">  </span><span class="nv">dirty</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>dirty<span class="k">)</span>
+<span class="w">  </span><span class="nv">action</span><span class="o">=</span><span class="k">$(</span>branch_push_action<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ahead</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$behind</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$upstream</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="k">)</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">dirty_note</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dirty</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">dirty_note</span><span class="o">=</span><span class="s2">&quot; (</span><span class="nv">$dirty</span><span class="s2"> uncommitted files remain local)&quot;</span>
+
+<span class="w">  </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$action</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">    </span>push-new<span class="o">)</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: would push -u origin </span><span class="nv">$branch</span><span class="s2"> (new branch)</span><span class="nv">$dirty_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>push<span class="w"> </span>-u<span class="w"> </span>origin<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: pushed new branch &#39;</span><span class="nv">$branch</span><span class="s2">&#39;</span><span class="nv">$dirty_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">      </span><span class="k">else</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: push -u failed&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="p">;;</span>
+<span class="w">    </span>push<span class="o">)</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: would push </span><span class="nv">$branch</span><span class="s2"> (</span><span class="nv">$ahead</span><span class="s2"> ahead)</span><span class="nv">$dirty_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>push<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: pushed</span><span class="nv">$dirty_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">      </span><span class="k">else</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: push failed&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="p">;;</span>
+<span class="w">    </span>up-to-date<span class="o">)</span>
+<span class="w">      </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: up-to-date (nothing to push)&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>skip-detached<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: detached HEAD — skipping (check out a branch first)&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>skip-diverged<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: diverged — skipping (pull/reconcile first, never force)&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>skip-behind<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: behind upstream — skipping (pull first)&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>*<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: unknown push state &#39;</span><span class="nv">$action</span><span class="s2">&#39; — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">  </span><span class="k">esac</span>
+<span class="o">}</span>
+
+<span class="c1"># Push every git repo in a workspace. Returns non-zero if any push failed.</span>
+push_workspace<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="m">0</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>dir<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span>/*/<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span>name<span class="p">;</span><span class="w"> </span><span class="nv">name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>.*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>push_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="k">$((</span><span class="nv">failed</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$failed</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync.sh</code>
+Expected: PASS. Then <code>bash test.sh</code> — all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/sync.sh<span class="w"> </span>tests/test_sync.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(sync): push_repo/push_workspace (decision-engine driven, dry-run, never force)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-6-wire-branch-new-branch-switch-dispatch">Task 6: Wire <code>branch new</code> / <code>branch switch</code> dispatch</h2>
+<p><code>bin/mra.sh</code> is <code>set -euo pipefail</code> — use <code>x=$((x+1))</code> never <code>((x++))</code>. The current <code>branch)</code> case parses flags BEFORE switching on the subcommand, which breaks positional args for <code>new</code>/<code>switch</code>. This task restructures so each subcommand parses its own args (the <code>status</code> body is unchanged, only moved inside its arm).</p>
+<p><strong>Files:</strong>
+- Modify: <code>bin/mra.sh</code>
+- Test: manual smoke + full suite</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Source <code>lib/branch-ops.sh</code></strong></li>
+</ul>
+<p>In <code>bin/mra.sh</code>, find <code>source "$MRA_DIR/lib/branch.sh"</code> and add immediately after it:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/branch-ops.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Replace the entire <code>branch)</code> dispatch case</strong></li>
+</ul>
+<p>Find the existing <code>branch)</code> case (it begins with <code>branch)</code> and ends at its matching <code>;;</code> — it currently parses <code>--all</code>/<code>--fetch</code> then <code>case "$sub" in status) ... *) ... esac</code>). Replace the WHOLE case with:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>branch<span class="o">)</span>
+<span class="w">      </span><span class="nb">shift</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span><span class="nv">sub</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">1</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="w">      </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$sub</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">        </span>status<span class="o">)</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span><span class="nv">show_all</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">do_fetch</span><span class="o">=</span><span class="nb">false</span>
+<span class="w">          </span><span class="k">while</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">            </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">              </span>--all<span class="o">)</span><span class="w"> </span><span class="nv">show_all</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--fetch<span class="o">)</span><span class="w"> </span><span class="nv">do_fetch</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>*<span class="o">)</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;unknown option: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">            </span><span class="k">esac</span>
+<span class="w">          </span><span class="k">done</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span>workspace<span class="p">;</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="k">$(</span>resolve_workspace<span class="k">)</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span><span class="nv">shown</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="m">0</span>
+<span class="w">          </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%-20s %-24s %-5s%-5s%-5s %s\n&#39;</span><span class="w"> </span><span class="s2">&quot;REPO&quot;</span><span class="w"> </span><span class="s2">&quot;BRANCH&quot;</span><span class="w"> </span><span class="s2">&quot;AHEAD&quot;</span><span class="w"> </span><span class="s2">&quot;BEHIND&quot;</span><span class="w"> </span><span class="s2">&quot;DIRTY&quot;</span><span class="w"> </span><span class="s2">&quot;ACTION&quot;</span>
+<span class="w">          </span><span class="k">for</span><span class="w"> </span>dir<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span>/*/<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">            </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">            </span><span class="nb">local</span><span class="w"> </span>name<span class="p">;</span><span class="w"> </span><span class="nv">name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">            </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>.*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">            </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$do_fetch</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">              </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="w"> </span>fetch<span class="w"> </span>--quiet<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">                </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$name</span><span class="s2">: fetch failed&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">failed</span><span class="o">=</span><span class="k">$((</span><span class="nv">failed</span><span class="o">+</span><span class="m">1</span><span class="k">))</span>
+<span class="w">              </span><span class="k">fi</span>
+<span class="w">            </span><span class="k">fi</span>
+<span class="w">            </span><span class="nb">local</span><span class="w"> </span>state<span class="w"> </span>on_default<span class="w"> </span>ahead<span class="w"> </span>behind<span class="w"> </span>dirty
+<span class="w">            </span><span class="nv">state</span><span class="o">=</span><span class="k">$(</span>get_branch_state<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">            </span><span class="nv">ahead</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>ahead<span class="k">)</span>
+<span class="w">            </span><span class="nv">behind</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>behind<span class="k">)</span>
+<span class="w">            </span><span class="nv">dirty</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>dirty<span class="k">)</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span>is_on_default_branch<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dir</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">on_default</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">on_default</span><span class="o">=</span>false<span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$show_all</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>branch_row_needs_attention<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ahead</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$behind</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dirty</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$on_default</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">              </span>branch_format_row<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;\n&#39;</span><span class="p">;</span><span class="w"> </span><span class="nv">shown</span><span class="o">=</span><span class="k">$((</span><span class="nv">shown</span><span class="o">+</span><span class="m">1</span><span class="k">))</span>
+<span class="w">            </span><span class="k">fi</span>
+<span class="w">          </span><span class="k">done</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$shown</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$show_all</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;false&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span>log_success<span class="w"> </span><span class="s2">&quot;all repos clean and up to date&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span>
+<span class="w">          </span><span class="k">fi</span>
+<span class="w">          </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$failed</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">          </span><span class="nb">exit</span><span class="w"> </span><span class="m">0</span>
+<span class="w">          </span><span class="p">;;</span>
+<span class="w">        </span>new<span class="o">)</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span><span class="nv">bname</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">1</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$bname</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;usage: mra branch new &lt;name&gt; [repos...]&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span>workspace<span class="p">;</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="k">$(</span>resolve_workspace<span class="k">)</span>
+<span class="w">          </span>create_branch_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$bname</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$@</span><span class="s2">&quot;</span>
+<span class="w">          </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">          </span><span class="p">;;</span>
+<span class="w">        </span>switch<span class="o">)</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span><span class="nv">bname</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">1</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$bname</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;usage: mra branch switch &lt;name&gt;&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span>workspace<span class="p">;</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="k">$(</span>resolve_workspace<span class="k">)</span>
+<span class="w">          </span>switch_branch_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$bname</span><span class="s2">&quot;</span>
+<span class="w">          </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">          </span><span class="p">;;</span>
+<span class="w">        </span>*<span class="o">)</span>
+<span class="w">          </span>log_error<span class="w"> </span><span class="s2">&quot;usage: mra branch status|new|switch ...&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">      </span><span class="k">esac</span>
+<span class="w">      </span><span class="p">;;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Update usage text</strong></li>
+</ul>
+<p>In the usage heredoc, replace the existing <code>branch status ...</code> line with:</p>
+<div class="highlight"><pre><span></span><code>  branch status [--all] [--fetch]  Cross-repo branch overview (default: repos needing attention)
+  branch new &lt;name&gt; [repos...]  Create+checkout a branch across repos
+  branch switch &lt;name&gt;          Switch repos that have &lt;name&gt; to it
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Smoke test <code>new</code> and <code>switch</code></strong></li>
+</ul>
+<p>Run:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">WS</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="o">(</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>.<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>-c<span class="w"> </span>user.email<span class="o">=</span>t@t.t<span class="w"> </span>-c<span class="w"> </span>user.name<span class="o">=</span>t<span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>init<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="w"> </span><span class="o">)</span>
+<span class="k">done</span>
+<span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span>bin/mra.sh<span class="w"> </span>branch<span class="w"> </span>new<span class="w"> </span>feat/x<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;new exit=</span><span class="nv">$?</span><span class="s2">&quot;</span>
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">: </span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--abbrev-ref<span class="w"> </span>HEAD<span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+<span class="o">(</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>checkout<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="w"> </span><span class="o">)</span>
+<span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span>bin/mra.sh<span class="w"> </span>branch<span class="w"> </span>switch<span class="w"> </span>feat/x<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;switch exit=</span><span class="nv">$?</span><span class="s2">&quot;</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;a now: </span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>--abbrev-ref<span class="w"> </span>HEAD<span class="k">)</span><span class="s2">&quot;</span>
+<span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span>bin/mra.sh<span class="w"> </span>branch<span class="w"> </span>new<span class="w"> </span><span class="s2">&quot;-bad&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;invalid exit=</span><span class="nv">$?</span><span class="s2"> (expect non-zero)&quot;</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>Expected: <code>new exit=0</code>, both repos on <code>feat/x</code>; after switching a back, <code>switch exit=0</code> and <code>a now: feat/x</code>; <code>invalid exit=1</code> (leading-dash rejected). <code>branch status</code> still works unchanged.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>bin/mra.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(branch): wire mra branch new/switch dispatch + usage&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-7-wire-sync-push-dry-run-dispatch">Task 7: Wire <code>sync --push [--dry-run]</code> dispatch</h2>
+<p><strong>Files:</strong>
+- Modify: <code>bin/mra.sh</code>
+- Test: manual smoke + full suite</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Replace the <code>sync)</code> dispatch case</strong></li>
+</ul>
+<p>Find the existing <code>sync)</code> case and replace the WHOLE case with (adds <code>--push</code>/<code>--dry-run</code>; push takes precedence over safe; default path unchanged):</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>sync<span class="o">)</span>
+<span class="w">      </span><span class="nb">shift</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span><span class="nv">safe</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">push</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="nb">false</span>
+<span class="w">      </span><span class="k">while</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">          </span>--safe<span class="o">)</span><span class="w"> </span><span class="nv">safe</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">          </span>--push<span class="o">)</span><span class="w"> </span><span class="nv">push</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">          </span>--dry-run<span class="o">)</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">          </span>*<span class="o">)</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;unknown option: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">        </span><span class="k">esac</span>
+<span class="w">      </span><span class="k">done</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span>workspace<span class="p">;</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="k">$(</span>resolve_workspace<span class="k">)</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$push</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>push_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span>
+<span class="w">        </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">      </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$safe</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>safe_sync_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span>
+<span class="w">        </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">      </span><span class="k">else</span>
+<span class="w">        </span><span class="c1"># Default: reproduce existing helper behavior as a public command.</span>
+<span class="w">        </span><span class="nb">local</span><span class="w"> </span>graph_file<span class="w"> </span>git_org
+<span class="w">        </span><span class="nv">graph_file</span><span class="o">=</span><span class="k">$(</span>get_dep_graph_path<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">        </span><span class="nv">git_org</span><span class="o">=</span><span class="k">$(</span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.gitOrg&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">        </span>sync_from_repos_json<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$git_org</span><span class="s2">&quot;</span>
+<span class="w">        </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="p">;;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Update usage text</strong></li>
+</ul>
+<p>In the usage heredoc, replace the existing <code>sync [--safe]</code> line with:</p>
+<div class="highlight"><pre><span></span><code>  sync [--safe] [--push] [--dry-run]  Clone/pull; --safe ff-only; --push pushes per decision engine
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Smoke test <code>--push</code> and <code>--push --dry-run</code></strong></li>
+</ul>
+<p>Run:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">WS</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>--bare<span class="w"> </span>up<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>clone<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/up&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>push<span class="w"> </span>-u<span class="w"> </span>origin<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c2<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="w">   </span><span class="c1"># ahead by 1</span>
+<span class="nv">before</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/up&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>main<span class="k">)</span>
+<span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span>bin/mra.sh<span class="w"> </span>sync<span class="w"> </span>--push<span class="w"> </span>--dry-run<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;dry exit=</span><span class="nv">$?</span><span class="s2">&quot;</span>
+<span class="nv">mid</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/up&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>main<span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$before</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mid</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;OK: dry-run did not push&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;BAD: dry-run pushed&quot;</span>
+<span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span>bin/mra.sh<span class="w"> </span>sync<span class="w"> </span>--push<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;push exit=</span><span class="nv">$?</span><span class="s2">&quot;</span>
+<span class="nv">after</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">/up&quot;</span><span class="w"> </span>rev-parse<span class="w"> </span>main<span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mid</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$after</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;OK: real push advanced remote&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;BAD: push did nothing&quot;</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>Expected: <code>dry exit=0</code>, <code>OK: dry-run did not push</code>; <code>push exit=0</code>, <code>OK: real push advanced remote</code>. (The bare <code>up</code> dir is skipped by <code>should_skip_dir</code> since it has no working <code>.git</code> subdir layout it iterates — confirm no error.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: all green.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>bin/mra.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(sync): wire mra sync --push [--dry-run] dispatch + usage&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="done-phase-1-complete">Done — Phase 1 complete</h2>
+<p>After Task 7 the lifecycle journey works end to end: <code>mra branch new feat/x</code> → commit → <code>mra sync --push --dry-run</code> → <code>mra sync --push</code>. Deferred to Phase 2 (spec §8 / §8.1): <code>review --range</code>/<code>--head</code>, the five §8.1 follow-ups, <code>sync --review</code>, <code>branch pr</code>.</p>
+<blockquote>
+<p><strong>Historical note:</strong> the phase numbering of deferred items above reflects this plan's authoring moment and was later re-assigned across Phases 2–5. The authoritative, current phase map is <strong>spec §8</strong> (this plan and its commits are unchanged / already merged).</p>
+</blockquote>
+  </main>
+</div>
+</body>
+</html>

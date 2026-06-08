@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CI-polling auto-merge (Phase 10) Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-title">CI-polling auto-merge (Phase 10) Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#file-structure">File Structure</a></li>
+<li><a href="#task-1-wait_for_pr_checks-poll-loop-teststest_cish">Task 1: wait_for_pr_checks poll loop + tests/test_ci.sh</a></li>
+<li><a href="#task-2-merge_repo-gains-ci_wait_timeout-poll-vs-one-shot-ci-gate">Task 2: merge_repo gains ci_wait_timeout (poll-vs-one-shot CI gate)</a></li>
+<li><a href="#task-3-merge_workspace-threads-ci_wait_timeout-subset-shifts-to-6">Task 3: merge_workspace threads ci_wait_timeout (subset shifts to ${@:6})</a></li>
+<li><a href="#task-4-wire-branch-merge-wait-ci-ci-timeout-dispatch-usage">Task 4: Wire branch merge --wait-ci [--ci-timeout] dispatch + usage</a></li>
+<li><a href="#task-5-full-regression-spec-status">Task 5: Full regression + spec status</a></li>
+<li><a href="#self-review-notes">Self-Review Notes</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>CI-polling auto-merge (Phase 10) Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Add an opt-in <code>--wait-ci [--ci-timeout &lt;sec&gt;]</code> to <code>mra branch merge</code> that polls each PR's CI checks until they finish, then merges.</p>
+<p><strong>Architecture:</strong> A new <code>wait_for_pr_checks</code> poll loop in <code>lib/ci.sh</code> drives off <code>gh pr checks</code>'s exit codes (<code>0</code>=green, <code>8</code>=pending→keep polling, other non-zero=stop). <code>merge_repo</code> gains one new param <code>ci_wait_timeout</code> (empty = current one-shot gate, unchanged; a positive integer = poll). <code>merge_workspace</code> threads it; the <code>merge)</code> dispatch parses the flags with order-independent post-parse validation.</p>
+<p><strong>Tech Stack:</strong> Bash (shell library + <code>bin/mra.sh</code> dispatch), custom PASS/FAIL test harness (<code>tests/test_*.sh</code>), <code>gh</code>/<code>git</code>/<code>jq</code>.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code> §18.</p>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<ul>
+<li><strong><code>lib/ci.sh</code></strong> (modify) — add <code>CI_POLL_INTERVAL</code> constant + <code>wait_for_pr_checks</code> (first runtime function; previously only the workflow generator).</li>
+<li><strong><code>lib/pr-ops.sh</code></strong> (modify) — <code>merge_repo</code> gains 5th param <code>ci_wait_timeout</code>; CI gate branches poll-vs-one-shot; dry-run preview gains a wait clause. <code>merge_workspace</code> gains <code>ci_wait_timeout</code> (5th param, subset shifts to <code>${@:6}</code>) and threads it through.</li>
+<li><strong><code>bin/mra.sh</code></strong> (modify) — <code>merge)</code> dispatch parses <code>--wait-ci</code> / <code>--ci-timeout</code>, validates post-parse, threads <code>ci_wait_timeout</code>; usage line updated. <code>pr)</code> untouched.</li>
+<li><strong><code>tests/test_ci.sh</code></strong> (create) — <code>wait_for_pr_checks</code> unit tests (auto-discovered by <code>test.sh</code>, suite count 44→45).</li>
+<li><strong><code>tests/test_pr_ops.sh</code></strong> (modify) — source <code>ci.sh</code>; CI-gate tests (open-PR stub); merge_workspace signature/thread-through; dispatch tests; update 3 Phase 9 subset calls with the <code>""</code> slot.</li>
+</ul>
+<p>Reference facts (read before starting):
+- <code>gh pr checks</code> exit codes: <code>0</code> = all passed, <code>8</code> = pending (documented in <code>gh pr checks --help</code>), other non-zero = failed OR no-checks-reported. Current one-shot gate <code>lib/pr-ops.sh:173</code>: <code>if ! (cd … gh pr checks …); then … "CI not green — stopping"; return 1</code>.
+- <code>merge_repo</code> signature today: <code>(repo_dir, strategy, dry_run, delete_branch)</code> (<code>lib/pr-ops.sh:143</code>). CI gate at 173-175; dry-run preview at 181-183.
+- <code>merge_workspace</code> today: <code>(workspace, strategy, dry_run, delete_branch, [subset…])</code> with subset <code>${@:5}</code> (<code>lib/pr-ops.sh:194-196</code>); calls <code>merge_repo … || return 1</code> at 244.
+- <code>merge)</code> dispatch: <code>bin/mra.sh:674-697</code>. Usage line: <code>bin/mra.sh:105</code>.
+- A <code>(cd "$repo_dir" &amp;&amp; gh …)</code> subshell isolates variable mutations — test stubs that count calls MUST use a <strong>file-based</strong> counter, not a shell var.
+- <code>test.sh</code> auto-discovers <code>tests/test_*.sh</code> (line 32).</p>
+<hr />
+<h2 id="task-1-wait_for_pr_checks-poll-loop-teststest_cish">Task 1: <code>wait_for_pr_checks</code> poll loop + <code>tests/test_ci.sh</code></h2>
+<p><strong>Files:</strong>
+- Create: <code>tests/test_ci.sh</code>
+- Modify: <code>lib/ci.sh</code> (add constant + function)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — create <code>tests/test_ci.sh</code> with this exact content:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+
+<span class="nv">SCRIPT_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/colors.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/ci.sh&quot;</span>
+
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span>
+<span class="nv">D</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="w">   </span><span class="c1"># a dir for the (cd &quot;$repo_dir&quot; ...) subshell to cd into</span>
+
+<span class="c1"># CI_POLL_INTERVAL constant is defined and numeric</span>
+<span class="k">if</span><span class="w"> </span>!<span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">CI_POLL_INTERVAL</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^<span class="o">[</span><span class="m">0</span>-9<span class="o">]</span>+$<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: CI_POLL_INTERVAL should be a number (got &#39;</span><span class="si">${</span><span class="nv">CI_POLL_INTERVAL</span><span class="k">:-</span><span class="si">}</span><span class="s2">&#39;)&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># --- 1. all checks pass on first poll -&gt; 0 ---</span>
+gh<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span>wait_for_pr_checks<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$D</span><span class="s2">&quot;</span><span class="w"> </span>feat/x<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>:<span class="w"> </span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: all-pass should return 0&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># --- 2. pending,pending,pass across polls -&gt; 0 (proves re-poll); pending uses gh exit 8 ---</span>
+<span class="nv">CNT</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="m">0</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CNT</span><span class="s2">&quot;</span>
+gh<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">local</span><span class="w"> </span>n<span class="p">;</span><span class="w"> </span><span class="nv">n</span><span class="o">=</span><span class="k">$(</span>&lt;<span class="s2">&quot;</span><span class="nv">$CNT</span><span class="s2">&quot;</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="nv">n</span><span class="o">=</span><span class="k">$((</span><span class="nv">n</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$n</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CNT</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">case</span><span class="w"> </span><span class="nv">$n</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span><span class="p">|</span><span class="m">2</span><span class="o">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span>wait_for_pr_checks<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$D</span><span class="s2">&quot;</span><span class="w"> </span>feat/x<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>:<span class="w"> </span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: pending-then-pass should return 0&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="nv">n_final</span><span class="o">=</span><span class="k">$(</span>&lt;<span class="s2">&quot;</span><span class="nv">$CNT</span><span class="s2">&quot;</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$n_final</span><span class="s2">&quot;</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">3</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: should have polled at least 3 times (got </span><span class="nv">$n_final</span><span class="s2">)&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CNT</span><span class="s2">&quot;</span>
+
+<span class="c1"># --- 3. a failed check (exit 1, not 8) -&gt; 1 immediately (fail-fast) ---</span>
+gh<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span>wait_for_pr_checks<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$D</span><span class="s2">&quot;</span><span class="w"> </span>feat/x<span class="w"> </span><span class="m">60</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: failed check should return non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rc</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: failed check should return 1 (got </span><span class="nv">$rc</span><span class="s2">)&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># --- 4. always pending (exit 8) + tiny timeout -&gt; 2 (timed out) ---</span>
+gh<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">8</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span>wait_for_pr_checks<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$D</span><span class="s2">&quot;</span><span class="w"> </span>feat/x<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: timeout should return non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rc</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: timeout should return 2 (got </span><span class="nv">$rc</span><span class="s2">)&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># --- 5. no checks reported (gh exits non-zero, non-8 e.g. 1) -&gt; 1 (NOT silently green) ---</span>
+gh<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span>wait_for_pr_checks<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$D</span><span class="s2">&quot;</span><span class="w"> </span>feat/x<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: no-checks (non-zero) must NOT be green&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rc</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: no-checks should return 1 (got </span><span class="nv">$rc</span><span class="s2">)&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="nb">unset</span><span class="w"> </span>-f<span class="w"> </span>gh
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$D</span><span class="s2">&quot;</span>
+
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$errors</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: ci poll tests passed&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== ci: </span><span class="nv">$errors</span><span class="s2"> failed ===&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_ci.sh</code>
+Expected: FAIL — <code>wait_for_pr_checks: command not found</code> and/or the <code>CI_POLL_INTERVAL</code> assertion fails (neither exists yet).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write the implementation</strong> — add to <code>lib/ci.sh</code>, immediately after the header comment lines (before <code>generate_ci_workflow</code>):</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># Seconds between gh pr checks polls while CI is pending (overridable for tests).</span>
+<span class="nv">CI_POLL_INTERVAL</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">CI_POLL_INTERVAL</span><span class="k">:-</span><span class="nv">30</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="c1"># Poll a PR&#39;s CI checks until they finish, by inspecting `gh pr checks` exit codes.</span>
+<span class="c1"># Args: repo_dir branch timeout_sec [interval_sec]</span>
+<span class="c1"># Exit codes used: 0 = all passed; 8 = pending (keep waiting); any other non-zero</span>
+<span class="c1"># = not green (a failed check OR &quot;no checks reported&quot; — both stop, matching the</span>
+<span class="c1"># one-shot gate in merge_repo).</span>
+<span class="c1"># Returns: 0 green | 1 not green (failed/no-checks) | 2 timed out.</span>
+wait_for_pr_checks<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">branch</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">timeout_sec</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$3</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">interval_sec</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">4</span><span class="k">:-</span><span class="nv">$CI_POLL_INTERVAL</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">start</span><span class="o">=</span><span class="nv">$SECONDS</span><span class="w"> </span>rc
+<span class="w">  </span><span class="k">while</span><span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="o">(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>gh<span class="w"> </span>pr<span class="w"> </span>checks<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rc</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">      </span><span class="m">0</span><span class="o">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span><span class="w">   </span><span class="c1"># all checks passed</span>
+<span class="w">      </span><span class="m">8</span><span class="o">)</span><span class="w"> </span><span class="p">;;</span><span class="w">            </span><span class="c1"># pending — fall through to timeout check, then sleep</span>
+<span class="w">      </span>*<span class="o">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span><span class="w">   </span><span class="c1"># failed / no-checks / other -&gt; not green</span>
+<span class="w">    </span><span class="k">esac</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">((</span><span class="w"> </span>SECONDS<span class="w"> </span>-<span class="w"> </span>start<span class="w"> </span>&gt;<span class="o">=</span><span class="w"> </span>timeout_sec<span class="w"> </span><span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="m">2</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">    </span>sleep<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$interval_sec</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_ci.sh</code>
+Expected: <code>PASS: ci poll tests passed</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/ci.sh<span class="w"> </span>tests/test_ci.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(ci): wait_for_pr_checks — poll gh pr checks exit codes (0/8/other)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-2-merge_repo-gains-ci_wait_timeout-poll-vs-one-shot-ci-gate">Task 2: <code>merge_repo</code> gains <code>ci_wait_timeout</code> (poll-vs-one-shot CI gate)</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_pr_ops.sh</code> (add <code>source ci.sh</code>; append CI-gate tests)
+- Modify: <code>lib/pr-ops.sh</code> (replace the whole <code>merge_repo</code> function)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Add the ci.sh source line</strong> — in <code>tests/test_pr_ops.sh</code>, after the existing <code>source "$SCRIPT_DIR/lib/pr-ops.sh"</code> line (near the top, ~line 10), add:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/ci.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Write the failing tests</strong> — append at the END of <code>tests/test_pr_ops.sh</code>, BEFORE the final summary/exit block. These stub <code>gh pr view</code> to report an OPEN+MERGEABLE PR so execution actually reaches the CI gate:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- merge_repo CI gate: ci_wait_timeout=&quot;&quot; uses one-shot gh pr checks; non-empty uses wait_for_pr_checks ---</span>
+<span class="nv">CG_DIR</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_DIR</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>repo<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">CGR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$CG_DIR</span><span class="s2">/repo&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CGR</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CGR</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CGR</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CGR</span><span class="s2">&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CGR</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>work<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">CG_LOG</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+<span class="c1"># stub gh: pr view -&gt; OPEN+MERGEABLE; pr checks -&gt; record + pass; pr merge -&gt; ok</span>
+gh<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">    </span>view<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;number&quot;:7,&quot;state&quot;:&quot;OPEN&quot;,&quot;mergeable&quot;:&quot;MERGEABLE&quot;}&#39;</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>checks<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;checks-called&quot;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>merge<span class="o">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>*<span class="o">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">  </span><span class="k">esac</span>
+<span class="o">}</span>
+<span class="c1"># stub wait_for_pr_checks: record + green</span>
+wait_for_pr_checks<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;WAIT_CALLED&quot;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+<span class="c1"># 6. ci_wait_timeout=&quot;&quot; (default) -&gt; one-shot gate (gh pr checks), NOT wait_for_pr_checks</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span>
+merge_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CGR</span><span class="s2">&quot;</span><span class="w"> </span>merge<span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;checks-called&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: empty ci_wait_timeout should call one-shot gh pr checks: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;WAIT_CALLED&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: empty ci_wait_timeout must NOT poll wait_for_pr_checks&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># 7. ci_wait_timeout=60 (non-dry-run) -&gt; wait_for_pr_checks, NOT one-shot</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span>
+merge_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CGR</span><span class="s2">&quot;</span><span class="w"> </span>merge<span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="m">60</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;WAIT_CALLED&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: non-empty ci_wait_timeout should poll wait_for_pr_checks: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;checks-called&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: poll path must NOT call one-shot gh pr checks&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># 8. dry-run + ci_wait_timeout=60 -&gt; preview mentions wait; wait_for_pr_checks NOT called</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>merge_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CGR</span><span class="s2">&quot;</span><span class="w"> </span>merge<span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="m">60</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;would wait for CI (timeout 60s)&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: dry-run preview should mention CI wait: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;WAIT_CALLED&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: dry-run must NOT poll&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="nb">unset</span><span class="w"> </span>-f<span class="w"> </span>gh<span class="w"> </span>wait_for_pr_checks
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/ci.sh&quot;</span><span class="w">   </span><span class="c1"># restore real wait_for_pr_checks</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CG_LOG</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL — <code>merge_repo</code> ignores a 5th arg today, so the poll path (test 7) calls the one-shot gate (no <code>WAIT_CALLED</code>), and the dry-run preview (test 8) has no wait clause.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Write the implementation</strong> — replace the ENTIRE <code>merge_repo</code> function in <code>lib/pr-ops.sh</code> with:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>merge_repo<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">merge</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">3</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">4</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">ci_wait_timeout</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">5</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>repo_name<span class="p">;</span><span class="w"> </span><span class="nv">repo_name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>branch<span class="p">;</span><span class="w"> </span><span class="nv">branch</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>symbolic-ref<span class="w"> </span>--short<span class="w"> </span>-q<span class="w"> </span>HEAD<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;(detached)&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;(detached)&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: detached HEAD — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>def<span class="p">;</span><span class="w"> </span><span class="nv">def</span><span class="o">=</span><span class="k">$(</span>get_default_branch<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$def</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: on default branch &#39;</span><span class="nv">$def</span><span class="s2">&#39; — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>pr_json
+<span class="w">  </span><span class="nv">pr_json</span><span class="o">=</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>gh<span class="w"> </span>pr<span class="w"> </span>view<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span>--json<span class="w"> </span>number,state,mergeable<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pr_json</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: no open PR for &#39;</span><span class="nv">$branch</span><span class="s2">&#39; — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>state<span class="w"> </span>number<span class="w"> </span>mergeable
+<span class="w">  </span><span class="nv">state</span><span class="o">=</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pr_json</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.state&#39;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span>
+<span class="w">  </span><span class="nv">number</span><span class="o">=</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pr_json</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.number&#39;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span>
+<span class="w">  </span><span class="nv">mergeable</span><span class="o">=</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pr_json</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.mergeable&#39;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;OPEN&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: PR #</span><span class="nv">$number</span><span class="s2"> not open (</span><span class="nv">$state</span><span class="s2">) — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mergeable</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;MERGEABLE&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: PR #</span><span class="nv">$number</span><span class="s2"> not mergeable (</span><span class="nv">$mergeable</span><span class="s2">) — stopping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="c1"># CI gate: poll when ci_wait_timeout is set (and not dry-run), else the one-shot</span>
+<span class="w">  </span><span class="c1"># check (unchanged). Dry-run with a wait skips polling — it is previewed below.</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ci_wait_timeout</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span><span class="nv">crc</span><span class="o">=</span><span class="m">0</span>
+<span class="w">      </span>wait_for_pr_checks<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ci_wait_timeout</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">crc</span><span class="o">=</span><span class="nv">$?</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$crc</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: PR #</span><span class="nv">$number</span><span class="s2"> CI did not finish within </span><span class="si">${</span><span class="nv">ci_wait_timeout</span><span class="si">}</span><span class="s2">s — stopping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$crc</span><span class="s2">&quot;</span><span class="w"> </span>-ne<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: PR #</span><span class="nv">$number</span><span class="s2"> CI not green — stopping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span><span class="o">(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>gh<span class="w"> </span>pr<span class="w"> </span>checks<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: PR #</span><span class="nv">$number</span><span class="s2"> CI not green — stopping&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">del_note</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">merge_args</span><span class="o">=(</span>--<span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$delete_branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">del_note</span><span class="o">=</span><span class="s2">&quot; (+delete-branch)&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">merge_args</span><span class="o">+=(</span>--delete-branch<span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ci_wait_timeout</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: would wait for CI (timeout </span><span class="si">${</span><span class="nv">ci_wait_timeout</span><span class="si">}</span><span class="s2">s) then merge PR #</span><span class="nv">$number</span><span class="s2"> (</span><span class="nv">$strategy</span><span class="s2">)</span><span class="nv">$del_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span>
+<span class="w">    </span><span class="k">else</span>
+<span class="w">      </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: would merge PR #</span><span class="nv">$number</span><span class="s2"> (</span><span class="nv">$strategy</span><span class="s2">)</span><span class="nv">$del_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>gh<span class="w"> </span>pr<span class="w"> </span>merge<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">merge_args</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: merged PR #</span><span class="nv">$number</span><span class="s2"> (</span><span class="nv">$strategy</span><span class="s2">)</span><span class="nv">$del_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: gh pr merge failed for PR #</span><span class="nv">$number</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS (0 errors) — including the pre-existing <code>merge_repo</code> skip-path / delete_branch tests (the 4-arg call sites still work; <code>ci_wait_timeout</code> defaults to <code>""</code> = one-shot gate, unchanged).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/pr-ops.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(pr-ops): merge_repo --wait-ci gate via ci_wait_timeout param&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-3-merge_workspace-threads-ci_wait_timeout-subset-shifts-to-6">Task 3: <code>merge_workspace</code> threads <code>ci_wait_timeout</code> (subset shifts to <code>${@:6}</code>)</h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/pr-ops.sh</code> (<code>merge_workspace</code> signature + the <code>merge_repo</code> call; update doc comment)
+- Modify: <code>tests/test_pr_ops.sh</code> (update 3 Phase 9 subset calls with the <code>""</code> slot; append thread-through test)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Update the 3 Phase 9 subset call sites first</strong> — in <code>tests/test_pr_ops.sh</code>, the Phase 9 subset tests call <code>merge_workspace</code> with the subset as the 5th arg. With the new signature the 5th arg is <code>ci_wait_timeout</code>, so insert an empty <code>""</code> before the repo names. Make these three exact replacements:</li>
+</ul>
+<p><code>merge_workspace "$MS_DIR" merge true false a &amp;&gt;/dev/null</code>
+→ <code>merge_workspace "$MS_DIR" merge true false "" a &amp;&gt;/dev/null</code></p>
+<p><code>out=$(merge_workspace "$MS_DIR" merge true false a b 2&gt;&amp;1) || true</code>
+→ <code>out=$(merge_workspace "$MS_DIR" merge true false "" a b 2&gt;&amp;1) || true</code></p>
+<p><code>out=$(merge_workspace "$MH_DIR" merge true false a 2&gt;&amp;1) || true</code>
+→ <code>out=$(merge_workspace "$MH_DIR" merge true false "" a 2&gt;&amp;1) || true</code></p>
+<p>(The non-subset calls <code>merge_workspace "$MW_DIR" merge true</code> and <code>merge_workspace "$DBW_DIR" merge true true</code> need NO change — they never reach the 5th positional, so <code>ci_wait_timeout</code> defaults to <code>""</code>.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Write the failing test</strong> — append at the END of <code>tests/test_pr_ops.sh</code>, BEFORE the final summary/exit block:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- merge_workspace threads ci_wait_timeout (5th arg) through to merge_repo ---</span>
+<span class="nv">TW_DIR</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_DIR</span><span class="s2">/.collab&quot;</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{&quot;a&quot;:{&quot;deps&quot;:{},&quot;consumedBy&quot;:[]}}}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_DIR</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_DIR</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>a<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>i<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_DIR</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">TW_LOG</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+merge_repo<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;ci=</span><span class="nv">$5</span><span class="s2">&quot;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="c1"># subset {a}, ci_wait_timeout=120</span>
+merge_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_DIR</span><span class="s2">&quot;</span><span class="w"> </span>merge<span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="m">120</span><span class="w"> </span>a<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_LOG</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;ci=120&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: merge_workspace should thread ci_wait_timeout=120 to merge_repo: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_LOG</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># default (no ci arg, no subset) -&gt; merge_repo gets empty ci_wait_timeout</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_LOG</span><span class="s2">&quot;</span>
+merge_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_DIR</span><span class="s2">&quot;</span><span class="w"> </span>merge<span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_LOG</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;ci=&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: merge_repo should be invoked in default path: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_LOG</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;ci=120&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_LOG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: default path should not carry a timeout&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="nb">unset</span><span class="w"> </span>-f<span class="w"> </span>merge_repo
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TW_LOG</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL — current <code>merge_workspace</code> treats the 5th arg as the start of the subset (so <code>120</code> would be a repo name, not threaded as <code>ci_wait_timeout</code>), and <code>merge_repo</code>'s <code>$5</code> is empty → no <code>ci=120</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Write the implementation</strong> — in <code>lib/pr-ops.sh</code>, change the <code>merge_workspace</code> signature lines (currently <code>local workspace="$1" strategy="${2:-merge}" dry_run="${3:-false}" delete_branch="${4:-false}"</code> then <code>local subset=("${@:5}")</code>) to:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">merge</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">3</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">4</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">ci_wait_timeout</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">5</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">subset</span><span class="o">=(</span><span class="s2">&quot;</span><span class="si">${</span><span class="p">@:</span><span class="nv">6</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">)</span>
+</code></pre></div>
+
+<p>And change the <code>merge_repo</code> call line (currently <code>merge_repo "$workspace/$r" "$strategy" "$dry_run" "$delete_branch" || return 1</code>) to:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>merge_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$delete_branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ci_wait_timeout</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+</code></pre></div>
+
+<p>Also update the <code>merge_workspace</code> doc comment (the block above the function) to add a line:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># A non-empty ci_wait_timeout (5th arg) is threaded to merge_repo to poll CI.</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS (0 errors) — including the updated Phase 9 subset tests and the pre-existing order / stop-on-first-failure / delete_branch-threading tests.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/pr-ops.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(pr-ops): merge_workspace threads ci_wait_timeout (subset -&gt; \${@:6})&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-4-wire-branch-merge-wait-ci-ci-timeout-dispatch-usage">Task 4: Wire <code>branch merge --wait-ci [--ci-timeout]</code> dispatch + usage</h2>
+<p><strong>Files:</strong>
+- Modify: <code>bin/mra.sh</code> — the <code>merge)</code> sub-dispatch + usage line (<code>bin/mra.sh:105</code>)
+- Modify: <code>tests/test_pr_ops.sh</code> (append dispatch integration tests)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing tests</strong> — append at the END of <code>tests/test_pr_ops.sh</code>, BEFORE the final summary/exit block:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- branch merge dispatch: --wait-ci / --ci-timeout parsing + order-independent validation ---</span>
+<span class="nv">DC</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DC</span><span class="s2">/.collab&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;gitOrg&quot;:&quot;x&quot;,&quot;projects&quot;:{}}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DC</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+<span class="c1"># 10. --ci-timeout without --wait-ci -&gt; error, non-zero</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DC</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>branch<span class="w"> </span>merge<span class="w"> </span>--ci-timeout<span class="w"> </span><span class="m">60</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --ci-timeout without --wait-ci should exit non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;requires --wait-ci&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected &#39;requires --wait-ci&#39;: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># 11. --ci-timeout BEFORE --wait-ci -&gt; accepted (no validation error), order-independent</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DC</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>branch<span class="w"> </span>merge<span class="w"> </span>--ci-timeout<span class="w"> </span><span class="m">60</span><span class="w"> </span>--wait-ci<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;requires --wait-ci&quot;</span>*<span class="p">|</span>*<span class="s2">&quot;positive integer&quot;</span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: timeout-before-wait should be accepted: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># 12. non-integer --ci-timeout -&gt; error</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DC</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>branch<span class="w"> </span>merge<span class="w"> </span>--ci-timeout<span class="w"> </span>abc<span class="w"> </span>--wait-ci<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: non-integer --ci-timeout should exit non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;positive integer&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected &#39;positive integer&#39;: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># 13. --wait-ci with a bad subset repo -&gt; subset validation before gh-auth (Phase 9 ordering proof)</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$DC</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>branch<span class="w"> </span>merge<span class="w"> </span>--wait-ci<span class="w"> </span>ghost<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: bad subset repo should exit non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;not a git repo&quot;</span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: expected &#39;not a git repo&#39;: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;gh authentication&quot;</span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: subset validation must precede gh-auth: </span><span class="nv">$out</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$DC</span><span class="s2">&quot;</span>
+<span class="c1"># usage advertises --wait-ci / --ci-timeout</span>
+grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;branch merge .*--wait-ci&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: usage should advertise --wait-ci&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: FAIL — <code>--wait-ci</code>/<code>--ci-timeout</code> are unknown options today (<code>branch merge --ci-timeout 60</code> hits <code>-*) unknown option</code>), and usage has no <code>--wait-ci</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Replace the <code>merge)</code> sub-dispatch</strong> in <code>bin/mra.sh</code> with:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="w">        </span>merge<span class="o">)</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;merge&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">wait_ci</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">ci_timeout</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nv">repos</span><span class="o">=()</span>
+<span class="w">          </span><span class="k">while</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">            </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">              </span>--strategy<span class="o">)</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;--strategy requires merge|squash|rebase&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span><span class="p">;</span><span class="w"> </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--dry-run<span class="o">)</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--delete-branch<span class="o">)</span><span class="w"> </span><span class="nv">delete_branch</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--wait-ci<span class="o">)</span><span class="w"> </span><span class="nv">wait_ci</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>--ci-timeout<span class="o">)</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;--ci-timeout requires a positive integer (seconds)&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span><span class="p">;</span><span class="w"> </span><span class="nv">ci_timeout</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>-*<span class="o">)</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;unknown option: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">              </span>*<span class="o">)</span><span class="w"> </span><span class="nv">repos</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="o">)</span><span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">            </span><span class="k">esac</span>
+<span class="w">          </span><span class="k">done</span>
+<span class="w">          </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">            </span>merge<span class="p">|</span>squash<span class="p">|</span>rebase<span class="o">)</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">            </span>*<span class="o">)</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;branch merge: --strategy must be merge|squash|rebase&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">          </span><span class="k">esac</span>
+<span class="w">          </span><span class="c1"># Validate CI flags post-parse (order-independent), before any side effect.</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ci_timeout</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$wait_ci</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span>log_error<span class="w"> </span><span class="s2">&quot;--ci-timeout requires --wait-ci&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">          </span><span class="k">fi</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ci_timeout</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>!<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ci_timeout</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^<span class="o">[</span><span class="m">1</span>-9<span class="o">][</span><span class="m">0</span>-9<span class="o">]</span>*$<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span>log_error<span class="w"> </span><span class="s2">&quot;--ci-timeout must be a positive integer (seconds): &#39;</span><span class="nv">$ci_timeout</span><span class="s2">&#39;&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">          </span><span class="k">fi</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span><span class="nv">ci_wait_timeout</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$wait_ci</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">ci_wait_timeout</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">ci_timeout</span><span class="k">:-</span><span class="nv">1800</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span>workspace<span class="p">;</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="k">$(</span>resolve_workspace<span class="k">)</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>validate_repo_subset<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="w">          </span><span class="k">fi</span>
+<span class="w">          </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>check_gh_auth<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">            </span>log_error<span class="w"> </span><span class="s2">&quot;branch merge requires gh authentication (run: gh auth login)&quot;</span><span class="w"> </span><span class="s2">&quot;branch&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">          </span><span class="k">fi</span>
+<span class="w">          </span>merge_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$delete_branch</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ci_wait_timeout</span><span class="s2">&quot;</span><span class="w"> </span><span class="si">${</span><span class="nv">repos</span><span class="p">[@]+</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">repos</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="si">}</span>
+<span class="w">          </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">          </span><span class="p">;;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Update the usage line</strong> in <code>bin/mra.sh</code>. Find:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>  branch merge [--strategy S] [--dry-run] [--delete-branch] [repos...]  Merge open PRs across repos (deps first; gated on mergeable+CI; repos... = subset)
+</code></pre></div>
+
+<p>Replace with:</p>
+<div class="highlight"><pre><span></span><code>  branch merge [--strategy S] [--dry-run] [--delete-branch] [--wait-ci] [--ci-timeout &lt;sec&gt;] [repos...]  Merge open PRs across repos (deps first; mergeable+CI gated; --wait-ci polls CI; repos... = subset)
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pr_ops.sh</code>
+Expected: PASS (0 errors).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests/test_pr_ops.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(branch): branch merge --wait-ci [--ci-timeout] dispatch + usage&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-5-full-regression-spec-status">Task 5: Full regression + spec status</h2>
+<p><strong>Files:</strong>
+- Modify: <code>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code> (§18 status) + re-render <code>.html</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: <code>shell tests: 45 passed, 0 failed</code> (the new <code>tests/test_ci.sh</code> brings the count from 44 to 45) and <code>mcp-server : ok</code>. If anything fails, STOP and report BLOCKED with the output.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Flip the §18 status note</strong> in the spec. Find the <code>**Status:**</code> line directly under <code>## 18. Phase 10 …</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>**Status:** Approved (design) — 2026-06-05. Implementation scope for the next plan. One opt-in capability; first real use of `lib/ci.sh` at merge time.
+</code></pre></div>
+
+<p>Replace it with:</p>
+<div class="highlight"><pre><span></span><code>**Status:** Implemented — 2026-06-05. `branch merge --wait-ci [--ci-timeout &lt;sec&gt;]` polls CI via `wait_for_pr_checks` in `lib/ci.sh` (exit-code driven); `ci_wait_timeout` threaded through `merge_workspace`/`merge_repo`.
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Re-render the spec HTML</strong></li>
+</ul>
+<p>Run: <code>python3 docs/superpowers/render-html.py docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code>
+Expected: <code>✓ …-design.md -&gt; …-design.html</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md<span class="w"> </span>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.html
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;docs(spec): mark Phase 10 (CI-polling auto-merge) implemented&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="self-review-notes">Self-Review Notes</h2>
+<ul>
+<li><strong>Spec coverage:</strong> §18.1 surface → Task 4 (dispatch + usage). §18.2 poll behaviour (0/8/other, timeout, fail-fast, no-checks=stop) → Task 1 (<code>wait_for_pr_checks</code>) + Task 2 (gate mapping). §18.2 dry-run-no-poll → Task 2. §18.3 <code>wait_for_pr_checks</code> in ci.sh → Task 1; single <code>ci_wait_timeout</code> param + signatures → Tasks 2/3; dispatch threading → Task 4; Phase 9 <code>""</code> knock-on → Task 3 Step 1. §18.4 error handling (post-parse, before side effects) → Task 4. §18.5 tests 1–5 → Task 1; 6–8 → Task 2; 9 → Task 3; 10–13 → Task 4; regression → Task 5. §18.6 out-of-scope respected (no <code>branch pr</code> wait, no configurable interval, no retry, mergeable unchanged).</li>
+<li><strong>No placeholders:</strong> every code step shows full function bodies / exact replacement text.</li>
+<li><strong>Type/name consistency:</strong> <code>wait_for_pr_checks repo_dir branch timeout_sec [interval_sec]</code> and the <code>ci_wait_timeout</code> param name are used identically across Tasks 1–4. <code>merge_repo</code> 5th param and <code>merge_workspace</code> 5th param both named <code>ci_wait_timeout</code>; dispatch builds <code>ci_wait_timeout</code> from <code>wait_ci</code>/<code>ci_timeout</code>. Return-code contract (0/1/2) consistent between Task 1 definition and Task 2 mapping.</li>
+<li><strong>Subshell-counter pitfall:</strong> Task 1 test uses a file-based counter (the <code>(cd … gh …)</code> subshell would lose a shell-var counter) — called out in the plan header and applied in the test.</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

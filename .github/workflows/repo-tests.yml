@@ -1,0 +1,53 @@
+name: Repo Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # Opt into Node 24 ahead of the June 2026 forced switch.
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  shell-and-mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Configure git identity (several legacy tests run `git commit`)
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+
+      - name: Install mcp-server deps
+        run: npm --prefix mcp-server ci || npm --prefix mcp-server install
+
+      - name: Build mcp-server
+        run: npm --prefix mcp-server run build
+
+      - name: Run shell + mcp-server tests
+        run: bash test.sh
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Block on shellcheck errors
+        run: shellcheck -S error lib/*.sh bin/*.sh scanners/*.sh tests/*.sh test.sh
+      - name: Report shellcheck warnings (non-blocking)
+        continue-on-error: true
+        run: shellcheck -S warning lib/*.sh bin/*.sh scanners/*.sh tests/*.sh test.sh

@@ -1,0 +1,84 @@
+name: 'MRA Test'
+description: 'Run mra tests with API change detection'
+inputs:
+  workspace:
+    description: 'Workspace root path'
+    required: true
+  project:
+    description: 'Project to test'
+    required: true
+  mra-path:
+    description: 'Path to multi-repo-agent installation'
+    required: false
+    default: '${{ github.workspace }}/.mra'
+  mode:
+    description: 'Test mode: auto, integration, mock'
+    required: false
+    default: 'auto'
+  base-ref:
+    description: 'Base ref for change detection (default: main)'
+    required: false
+    default: 'main'
+
+outputs:
+  result:
+    description: 'Test result: passed, failed, skipped'
+    value: ${{ steps.test.outputs.result }}
+  change-level:
+    description: 'Detected change level: high, low, none'
+    value: ${{ steps.detect.outputs.level }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect change level
+      id: detect
+      shell: bash
+      run: |
+        export MRA_WORKSPACE="${{ inputs.workspace }}"
+        cd "${{ inputs.workspace }}/${{ inputs.project }}"
+
+        # Source change detector
+        source "${{ inputs.mra-path }}/lib/colors.sh"
+        source "${{ inputs.mra-path }}/lib/sync.sh"
+        source "${{ inputs.mra-path }}/lib/change-detector.sh"
+
+        # Get project type from dep-graph
+        project_type="unknown"
+        graph_file="${{ inputs.workspace }}/.collab/dep-graph.json"
+        if [[ -f "$graph_file" ]]; then
+          project_type=$(jq -r --arg p "${{ inputs.project }}" '.projects[$p].type // "unknown"' "$graph_file")
+        fi
+
+        result=$(is_api_change "${{ inputs.workspace }}/${{ inputs.project }}" "$project_type")
+        level="${result%%|*}"
+        echo "level=$level" >> "$GITHUB_OUTPUT"
+        echo "Change detection: $level"
+        if [[ "$level" == "high" ]]; then
+          echo "::warning::API change detected in ${{ inputs.project }}: ${result#*|}"
+        fi
+
+    - name: Run tests
+      id: test
+      shell: bash
+      run: |
+        export MRA_WORKSPACE="${{ inputs.workspace }}"
+
+        mode="${{ inputs.mode }}"
+        if [[ "$mode" == "auto" ]]; then
+          if [[ "${{ steps.detect.outputs.level }}" == "high" ]]; then
+            mode="integration"
+          else
+            mode="mock"
+          fi
+        fi
+
+        echo "Running mra test ${{ inputs.project }} --$mode"
+        if bash "${{ inputs.mra-path }}/bin/mra.sh" test "${{ inputs.project }}" "--$mode"; then
+          echo "result=passed" >> "$GITHUB_OUTPUT"
+          echo "::notice::Tests passed for ${{ inputs.project }}"
+        else
+          echo "result=failed" >> "$GITHUB_OUTPUT"
+          echo "::error::Tests failed for ${{ inputs.project }}"
+          exit 1
+        fi

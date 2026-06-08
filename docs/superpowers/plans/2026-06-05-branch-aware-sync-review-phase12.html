@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sync --json (Phase 12) Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-title">sync --json (Phase 12) Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#file-structure">File Structure</a></li>
+<li><a href="#task-1-sync_result_json-_sync_record-shared-helpers">Task 1: sync_result_json + _sync_record shared helpers</a></li>
+<li><a href="#task-2-instrument-safe_sync_repo-safe-worker">Task 2: instrument safe_sync_repo (--safe worker)</a></li>
+<li><a href="#task-3-instrument-push_repo-push-worker">Task 3: instrument push_repo (--push worker)</a></li>
+<li><a href="#task-4-instrument-sync_repo-default-worker">Task 4: instrument sync_repo (default worker)</a></li>
+<li><a href="#task-5-sync-json-dispatch-usage">Task 5: sync --json dispatch + usage</a></li>
+<li><a href="#task-6-full-regression-spec-status">Task 6: Full regression + spec status</a></li>
+<li><a href="#self-review-notes">Self-Review Notes</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>sync --json (Phase 12) Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Add <code>mra sync --json</code> for the default / <code>--safe</code> / <code>--push</code> modes — a per-repo <code>{repo, action, ok}</code> JSON array.</p>
+<p><strong>Architecture:</strong> A shared per-repo result model: a new pure <code>sync_result_json</code> (jq object, sibling of <code>branch_state_json</code>) and a <code>_sync_record</code> sink that appends <code>repo&lt;TAB&gt;action&lt;TAB&gt;ok</code> to the file named by <code>SYNC_RESULT_FILE</code> only when that env var is set (text mode = unset = no-op, unchanged). Each per-repo worker (<code>sync_repo</code>, <code>safe_sync_repo</code>, <code>push_repo</code>) calls <code>_sync_record</code> at each outcome alongside its existing <code>log_*</code>. The <code>sync</code> dispatch's <code>--json</code> mode sets up <code>SYNC_RESULT_FILE</code>, runs the chosen workspace fn with stdout→stderr (human logs to stderr), then emits the JSON array from the records.</p>
+<p><strong>Tech Stack:</strong> Bash (<code>lib/sync.sh</code> + <code>bin/mra.sh</code> dispatch), <code>jq</code>, <code>git</code>, custom PASS/FAIL test harness (<code>tests/test_sync.sh</code>, <code>tests/test_sync_flags.sh</code>).</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code> §20.</p>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<ul>
+<li><strong><code>lib/sync.sh</code></strong> (modify) — add pure <code>sync_result_json repo action ok</code> + <code>_sync_record repo action ok</code> sink; instrument the three workers <code>sync_repo</code> / <code>safe_sync_repo</code> / <code>push_repo</code> (add <code>_sync_record</code> at each outcome; human <code>log_*</code> preserved). Workspace drivers (<code>safe_sync_workspace</code>/<code>push_workspace</code>) unchanged.</li>
+<li><strong><code>lib/repos.sh</code></strong> — unchanged (<code>sync_from_repos_json</code> records via <code>sync_repo</code> at the worker layer).</li>
+<li><strong><code>bin/mra.sh</code></strong> (modify) — <code>sync</code> dispatch gains <code>--json</code> (reject <code>--review --json</code>; JSON mode sets <code>SYNC_RESULT_FILE</code>, runs workspace fn stdout→stderr, emits array, exits non-zero if any <code>ok=false</code>); usage line updated.</li>
+<li><strong><code>tests/test_sync.sh</code></strong> (modify) — unit tests for <code>sync_result_json</code> + <code>_sync_record</code> + worker recording.</li>
+<li><strong><code>tests/test_sync_flags.sh</code></strong> (modify) — <code>sync --json</code> dispatch tests (real CLI).</li>
+</ul>
+<p>Reference facts (read before starting):
+- Workers live in <code>lib/sync.sh</code>: <code>sync_repo</code> (default, ~line 41), <code>safe_sync_repo</code> (~96), <code>push_repo</code> (~152). Each does git side-effects, calls <code>log_*</code> (stdout), returns 0/1.
+- <code>should_skip_dir</code> early-returns (not a git repo) are NOT recorded (consistent with text mode where they never appear).
+- <code>_log</code>/<code>log_*</code> (<code>lib/colors.sh</code>) write to <strong>stdout</strong>.
+- The <code>sync</code> dispatch is in <code>bin/mra.sh</code> (<code>sync)</code> case): parses <code>--safe</code>/<code>--push</code>/<code>--dry-run</code>/<code>--review</code>, enforces mode mutual-exclusion + "<code>--dry-run</code> only with <code>--push</code>", then calls <code>sync_review_workspace</code> / <code>push_workspace</code> / <code>safe_sync_workspace</code> / <code>sync_from_repos_json</code> (default).
+- <code>resolve_workspace</code> honours <code>MRA_WORKSPACE</code>.
+- <code>tests/test_sync.sh</code> sources colors/sync/branch/review-select, uses <code>errors</code>, ends <code>if [[ $errors -eq 0 ]]; then echo "PASS: all sync tests passed"; else …; exit 1; fi</code>. Append before that block.
+- <code>tests/test_sync_flags.sh</code> has a <code>run() { if out=$(MRA_WORKSPACE="$WS" bash "$SCRIPT_DIR/bin/mra.sh" sync "$@" 2&gt;&amp;1); then rc=0; else rc=$?; fi; }</code> helper and a shared empty <code>$WS</code>; ends <code>if [[ $errors -eq 0 ]]; then echo "PASS: sync flag discipline tests passed"; …; fi</code>. Note <code>run()</code> merges stderr into <code>$out</code> (<code>2&gt;&amp;1</code>) — for JSON stdout/stderr-separation tests, do NOT use <code>run</code>; invoke the CLI directly capturing stdout and stderr separately.</p>
+<hr />
+<h2 id="task-1-sync_result_json-_sync_record-shared-helpers">Task 1: <code>sync_result_json</code> + <code>_sync_record</code> shared helpers</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_sync.sh</code> (append unit tests before the summary block)
+- Modify: <code>lib/sync.sh</code> (add two functions)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — append to <code>tests/test_sync.sh</code>, BEFORE the final <code>if [[ $errors -eq 0 ]]</code> summary block:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- sync_result_json: jq object, correct types, injection-safe ---</span>
+<span class="nv">o</span><span class="o">=</span><span class="k">$(</span>sync_result_json<span class="w"> </span>app<span class="w"> </span>pulled<span class="w"> </span><span class="nb">true</span><span class="k">)</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$o</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: sync_result_json not valid JSON: </span><span class="nv">$o</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$o</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.repo&#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;app&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: .repo wrong: </span><span class="nv">$o</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$o</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.action&#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;pulled&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: .action wrong: </span><span class="nv">$o</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$o</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;.ok==true and (.ok|type)==&quot;boolean&quot;&#39;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: .ok should be boolean true: </span><span class="nv">$o</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="nv">of</span><span class="o">=</span><span class="k">$(</span>sync_result_json<span class="w"> </span>x<span class="w"> </span>clone-failed<span class="w"> </span><span class="nb">false</span><span class="k">)</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$of</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;.ok==false&#39;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: .ok should be false: </span><span class="nv">$of</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="c1"># injection-safety: a repo name with a double-quote stays valid JSON</span>
+<span class="nv">oq</span><span class="o">=</span><span class="k">$(</span>sync_result_json<span class="w"> </span><span class="s1">&#39;a&quot;b&#39;</span><span class="w"> </span>pulled<span class="w"> </span><span class="nb">true</span><span class="k">)</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$oq</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: quote in repo broke JSON: </span><span class="nv">$oq</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$oq</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.repo&#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;a&quot;b&#39;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: quoted repo not preserved: </span><span class="nv">$oq</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="c1"># guard: non-boolean ok rejected (non-zero, no JSON)</span>
+<span class="k">if</span><span class="w"> </span>sync_result_json<span class="w"> </span>app<span class="w"> </span>pulled<span class="w"> </span>notabool<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: sync_result_json should reject non-boolean ok&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># --- _sync_record: file sink, no-op when SYNC_RESULT_FILE unset ---</span>
+<span class="nb">unset</span><span class="w"> </span>SYNC_RESULT_FILE<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+_sync_record<span class="w"> </span>app<span class="w"> </span>pulled<span class="w"> </span><span class="nb">true</span><span class="w">   </span><span class="c1"># must be a no-op, no error, no file</span>
+<span class="nv">RF</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span><span class="p">;</span><span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w">      </span><span class="c1"># a path that does not exist yet</span>
+<span class="nv">SYNC_RESULT_FILE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span>_sync_record<span class="w"> </span>app<span class="w"> </span>pulled<span class="w"> </span><span class="nb">true</span>
+<span class="nv">SYNC_RESULT_FILE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span>_sync_record<span class="w"> </span>lib<span class="w"> </span>up-to-date<span class="w"> </span><span class="nb">true</span>
+<span class="o">[[</span><span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: _sync_record should create the sink file&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>wc<span class="w"> </span>-l<span class="w"> </span>&lt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tr<span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39; &#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;2&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: _sync_record should append one line per call: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>head<span class="w"> </span>-1<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">$&#39;app\tpulled\ttrue&#39;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: _sync_record line format wrong: </span><span class="k">$(</span>head<span class="w"> </span>-1<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync.sh</code>
+Expected: FAIL — <code>sync_result_json: command not found</code> / <code>_sync_record: command not found</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write the implementation</strong> — add to <code>lib/sync.sh</code>, at the END of the file:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># Emit one per-repo sync result as a JSON object (jq-built; injection-safe).</span>
+<span class="c1"># Sibling of branch_state_json. Args: repo action ok</span>
+<span class="c1">#   - ok MUST be the string &quot;true&quot; or &quot;false&quot; (passed via --argjson to become a JSON boolean).</span>
+sync_result_json<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">action</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">ok</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$3</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ok</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ok</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;false&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;sync_result_json: ok must be &#39;true&#39; or &#39;false&#39;, got: &#39;</span><span class="nv">$ok</span><span class="s2">&#39;&quot;</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="w">  </span>jq<span class="w"> </span>-n<span class="w"> </span>--arg<span class="w"> </span>repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo</span><span class="s2">&quot;</span><span class="w"> </span>--arg<span class="w"> </span>action<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$action</span><span class="s2">&quot;</span><span class="w"> </span>--argjson<span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ok</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s1">&#39;{repo:$repo, action:$action, ok:$ok}&#39;</span>
+<span class="o">}</span>
+
+<span class="c1"># Record one per-repo sync outcome to the SYNC_RESULT_FILE sink, when set.</span>
+<span class="c1"># No-op (and side-effect-free) when SYNC_RESULT_FILE is unset — keeps text mode unchanged.</span>
+<span class="c1"># A file sink (not a shell var) is used so records survive subshell boundaries.</span>
+<span class="c1"># Args: repo action ok</span>
+_sync_record<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SYNC_RESULT_FILE</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\t%s\t%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$3</span><span class="s2">&quot;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SYNC_RESULT_FILE</span><span class="s2">&quot;</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync.sh</code>
+Expected: <code>PASS: all sync tests passed</code> (0 errors).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/sync.sh<span class="w"> </span>tests/test_sync.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(sync): sync_result_json + _sync_record (shared per-repo result model)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-2-instrument-safe_sync_repo-safe-worker">Task 2: instrument <code>safe_sync_repo</code> (--safe worker)</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_sync.sh</code> (append worker test)
+- Modify: <code>lib/sync.sh</code> (replace <code>safe_sync_repo</code>)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — append to <code>tests/test_sync.sh</code>, BEFORE the summary block:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- safe_sync_repo records its outcome to the SYNC_RESULT_FILE sink ---</span>
+<span class="c1"># up-to-date fixture: clone a bare origin, commit+push, so local == origin/main</span>
+<span class="nv">SS</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>--bare<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SS</span><span class="s2">/up.git&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>clone<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SS</span><span class="s2">/up.git&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SS</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SS</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SS</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SS</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SS</span><span class="s2">/a&quot;</span><span class="w"> </span>push<span class="w"> </span>-u<span class="w"> </span>origin<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">RF</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span><span class="p">;</span><span class="w"> </span>:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+<span class="nv">SYNC_RESULT_FILE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span>safe_sync_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SS</span><span class="s2">/a&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+grep<span class="w"> </span>-qx<span class="w"> </span><span class="s1">$&#39;a\tup-to-date\ttrue&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: safe_sync_repo should record &#39;up-to-date true&#39;: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SS</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+<span class="c1"># fetch-failure fixture: a repo with a bad origin</span>
+<span class="nv">FF</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$FF</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>a<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$FF</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$FF</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$FF</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$FF</span><span class="s2">/a&quot;</span><span class="w"> </span>remote<span class="w"> </span>add<span class="w"> </span>origin<span class="w"> </span>/nonexistent/x.git
+<span class="nv">RF</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span><span class="p">;</span><span class="w"> </span>:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+<span class="nv">SYNC_RESULT_FILE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span>safe_sync_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$FF</span><span class="s2">/a&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+grep<span class="w"> </span>-qx<span class="w"> </span><span class="s1">$&#39;a\tfetch-failed\tfalse&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: safe_sync_repo should record &#39;fetch-failed false&#39;: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$FF</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync.sh</code>
+Expected: FAIL — <code>safe_sync_repo</code> does not record yet, so <code>$RF</code> is empty and the <code>grep -qx</code> assertions fail.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write the implementation</strong> — replace the ENTIRE <code>safe_sync_repo</code> function in <code>lib/sync.sh</code> with:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>safe_sync_repo<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>repo_name<span class="p">;</span><span class="w"> </span><span class="nv">repo_name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>fetch<span class="w"> </span>--quiet<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: fetch failed&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span>
+<span class="w">    </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>fetch-failed<span class="w"> </span><span class="nb">false</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>state<span class="w"> </span>action
+<span class="w">  </span><span class="nv">state</span><span class="o">=</span><span class="k">$(</span>get_branch_state<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="nv">action</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>sync_action<span class="k">)</span>
+
+<span class="w">  </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$action</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">    </span>fast-forward<span class="o">)</span>
+<span class="w">      </span>log_progress<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: fast-forward&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>pull<span class="w"> </span>--ff-only<span class="w"> </span>--quiet<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: ok&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>pulled<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">      </span><span class="k">else</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: ff-only pull failed&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>ff-failed<span class="w"> </span>false<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="p">;;</span>
+<span class="w">    </span>up-to-date<span class="p">|</span>ahead-only<span class="o">)</span>
+<span class="w">      </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: </span><span class="nv">$action</span><span class="s2"> (no pull needed)&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$action</span><span class="s2">&quot;</span><span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>diverged<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: diverged (ahead &amp; behind) — skipping, resolve manually&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>diverged<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>dirty-skip<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: behind but working tree dirty — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>dirty-skip<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>no-upstream<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: no upstream branch set — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>no-upstream<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>*<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: unknown state &#39;</span><span class="nv">$action</span><span class="s2">&#39; — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>unknown<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">  </span><span class="k">esac</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync.sh</code>
+Expected: <code>PASS: all sync tests passed</code> (0 errors) — including the existing <code>safe_sync_repo</code> text tests (human <code>log_*</code> lines unchanged).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/sync.sh<span class="w"> </span>tests/test_sync.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(sync): record safe_sync_repo outcomes via _sync_record&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-3-instrument-push_repo-push-worker">Task 3: instrument <code>push_repo</code> (--push worker)</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_sync.sh</code> (append worker test)
+- Modify: <code>lib/sync.sh</code> (replace <code>push_repo</code>)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — append to <code>tests/test_sync.sh</code>, BEFORE the summary block:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- push_repo records its outcome (dry-run, no real push) ---</span>
+<span class="nv">PP</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>--bare<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/up.git&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>clone<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/up.git&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/a&quot;</span><span class="w"> </span>push<span class="w"> </span>-u<span class="w"> </span>origin<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="c1"># feature branch with no upstream + a commit -&gt; push-new -&gt; dry-run -&gt; would-push-new</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>work<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">RF</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span><span class="p">;</span><span class="w"> </span>:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+<span class="nv">SYNC_RESULT_FILE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span>push_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+grep<span class="w"> </span>-qE<span class="w"> </span><span class="s1">$&#39;^a\twould-push(-new)?\ttrue$&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: push_repo dry-run should record would-push*: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="c1"># back on default branch, up-to-date with origin -&gt; up-to-date</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+<span class="nv">SYNC_RESULT_FILE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span>push_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+grep<span class="w"> </span>-qx<span class="w"> </span><span class="s1">$&#39;a\tup-to-date\ttrue&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: push_repo should record up-to-date: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PP</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync.sh</code>
+Expected: FAIL — <code>push_repo</code> does not record yet; <code>$RF</code> empty.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write the implementation</strong> — replace the ENTIRE <code>push_repo</code> function in <code>lib/sync.sh</code> with:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>push_repo<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">false</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>repo_name<span class="p">;</span><span class="w"> </span><span class="nv">repo_name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>fetch<span class="w"> </span>--quiet<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>state<span class="w"> </span>branch<span class="w"> </span>upstream<span class="w"> </span>ahead<span class="w"> </span>behind<span class="w"> </span>dirty<span class="w"> </span>action
+<span class="w">  </span><span class="nv">state</span><span class="o">=</span><span class="k">$(</span>get_branch_state<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="nv">branch</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>branch<span class="k">)</span>
+<span class="w">  </span><span class="nv">upstream</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>upstream<span class="k">)</span>
+<span class="w">  </span><span class="nv">ahead</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>ahead<span class="k">)</span>
+<span class="w">  </span><span class="nv">behind</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>behind<span class="k">)</span>
+<span class="w">  </span><span class="nv">dirty</span><span class="o">=</span><span class="k">$(</span>branch_state_get<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$state</span><span class="s2">&quot;</span><span class="w"> </span>dirty<span class="k">)</span>
+<span class="w">  </span><span class="nv">action</span><span class="o">=</span><span class="k">$(</span>branch_push_action<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ahead</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$behind</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$upstream</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="k">)</span>
+
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">dirty_note</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dirty</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">dirty_note</span><span class="o">=</span><span class="s2">&quot; (</span><span class="nv">$dirty</span><span class="s2"> uncommitted files remain local)&quot;</span>
+
+<span class="w">  </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$action</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">    </span>push-new<span class="o">)</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: would push -u origin </span><span class="nv">$branch</span><span class="s2"> (new branch)</span><span class="nv">$dirty_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>would-push-new<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>push<span class="w"> </span>-u<span class="w"> </span>origin<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$branch</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: pushed new branch &#39;</span><span class="nv">$branch</span><span class="s2">&#39;</span><span class="nv">$dirty_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>pushed-new<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">      </span><span class="k">else</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: push -u failed&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>push-new-failed<span class="w"> </span>false<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="p">;;</span>
+<span class="w">    </span>push<span class="o">)</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: would push </span><span class="nv">$branch</span><span class="s2"> (</span><span class="nv">$ahead</span><span class="s2"> ahead)</span><span class="nv">$dirty_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>would-push<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>push<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: pushed</span><span class="nv">$dirty_note</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>pushed<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">      </span><span class="k">else</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: push failed&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>push-failed<span class="w"> </span>false<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="p">;;</span>
+<span class="w">    </span>up-to-date<span class="o">)</span>
+<span class="w">      </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: up-to-date (nothing to push)&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>up-to-date<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>skip-detached<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: detached HEAD — skipping (check out a branch first)&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>skip-detached<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>skip-diverged<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: diverged — skipping (pull/reconcile first, never force)&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>skip-diverged<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>skip-behind<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: behind upstream — skipping (pull first)&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>skip-behind<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>*<span class="o">)</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: unknown push state &#39;</span><span class="nv">$action</span><span class="s2">&#39; — skipping&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>unknown<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">  </span><span class="k">esac</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync.sh</code>
+Expected: <code>PASS: all sync tests passed</code> (0 errors) — including the existing <code>push_repo</code> text tests.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/sync.sh<span class="w"> </span>tests/test_sync.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(sync): record push_repo outcomes via _sync_record&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-4-instrument-sync_repo-default-worker">Task 4: instrument <code>sync_repo</code> (default worker)</h2>
+<p><strong>Files:</strong>
+- Modify: <code>tests/test_sync.sh</code> (append worker test)
+- Modify: <code>lib/sync.sh</code> (replace <code>sync_repo</code>)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — append to <code>tests/test_sync.sh</code>, BEFORE the summary block:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- sync_repo records its outcome ---</span>
+<span class="c1"># clone fixture: a missing dir cloned from a local bare origin -&gt; cloned</span>
+<span class="nv">SD</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SD</span><span class="s2">/origin&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SD</span><span class="s2">/ws&quot;</span>
+git<span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>--bare<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SD</span><span class="s2">/origin/a.git&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">RF</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span><span class="p">;</span><span class="w"> </span>:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+<span class="nv">SYNC_RESULT_FILE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span>sync_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SD</span><span class="s2">/ws/a&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SD</span><span class="s2">/origin&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+grep<span class="w"> </span>-qx<span class="w"> </span><span class="s1">$&#39;a\tcloned\ttrue&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: sync_repo should record cloned: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SD</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+<span class="c1"># feature-branch fixture -&gt; skipped-branch</span>
+<span class="nv">SB</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SB</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>a<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SB</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SB</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SB</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SB</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">RF</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span><span class="p">;</span><span class="w"> </span>:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+<span class="nv">SYNC_RESULT_FILE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span>sync_repo<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SB</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="s2">&quot;ignored-org&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+grep<span class="w"> </span>-qx<span class="w"> </span><span class="s1">$&#39;a\tskipped-branch\ttrue&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: sync_repo should record skipped-branch: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SB</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RF</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync.sh</code>
+Expected: FAIL — <code>sync_repo</code> does not record yet; <code>$RF</code> empty.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write the implementation</strong> — replace the ENTIRE <code>sync_repo</code> function in <code>lib/sync.sh</code> with:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>sync_repo<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">repo_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">git_org</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>repo_name
+<span class="w">  </span><span class="nv">repo_name</span><span class="o">=</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="c1"># Clone</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span><span class="nv">clone_url</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">git_org</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">repo_name</span><span class="si">}</span><span class="s2">.git&quot;</span>
+<span class="w">    </span>log_progress<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: git clone&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$clone_url</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: cloned&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span>
+<span class="w">      </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>cloned<span class="w"> </span><span class="nb">true</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">    </span><span class="k">else</span>
+<span class="w">      </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: clone failed (</span><span class="nv">$clone_url</span><span class="s2">)&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span>
+<span class="w">      </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>clone-failed<span class="w"> </span><span class="nb">false</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>should_skip_dir<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>is_on_default_branch<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span>branch
+<span class="w">    </span><span class="nv">branch</span><span class="o">=</span><span class="k">$(</span>get_current_branch<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">    </span>log_warn<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: on branch &#39;</span><span class="nv">$branch</span><span class="s2">&#39;, skipping sync&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span>
+<span class="w">    </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>skipped-branch<span class="w"> </span><span class="nb">true</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span>log_progress<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: git pull&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>fetch<span class="w"> </span>--quiet<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_dir</span><span class="s2">&quot;</span><span class="w"> </span>pull<span class="w"> </span>--quiet<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_success<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: ok&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span>
+<span class="w">    </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>pulled<span class="w"> </span><span class="nb">true</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span>log_error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">: sync failed&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span>
+<span class="w">    </span>_sync_record<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo_name</span><span class="s2">&quot;</span><span class="w"> </span>sync-failed<span class="w"> </span><span class="nb">false</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync.sh</code>
+Expected: <code>PASS: all sync tests passed</code> (0 errors) — including existing <code>sync_repo</code> text tests.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/sync.sh<span class="w"> </span>tests/test_sync.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(sync): record sync_repo outcomes via _sync_record&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-5-sync-json-dispatch-usage">Task 5: <code>sync --json</code> dispatch + usage</h2>
+<p><strong>Files:</strong>
+- Modify: <code>bin/mra.sh</code> — the <code>sync)</code> dispatch block + the <code>sync</code> usage line
+- Modify: <code>tests/test_sync_flags.sh</code> (append dispatch tests before the summary block)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing tests</strong> — append to <code>tests/test_sync_flags.sh</code>, BEFORE the final summary block. Do NOT use the <code>run()</code> helper (it merges stderr into <code>$out</code>); invoke the CLI directly, capturing stdout and stderr separately:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- sync --json dispatch ---</span>
+<span class="c1"># 9/12. default mode --json on the empty $WS -&gt; [] (valid array; exercises default-mode JSON dispatch)</span>
+<span class="nv">jout</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>sync<span class="w"> </span>--json<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;.&#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;[]&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: empty workspace --json should be []: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+<span class="c1"># 10. --safe --json over a populated workspace -&gt; array, clean stdout, logs on stderr</span>
+<span class="nv">WJ</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+<span class="k">for</span><span class="w"> </span>r<span class="w"> </span><span class="k">in</span><span class="w"> </span>a<span class="w"> </span>b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WJ</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WJ</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WJ</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+<span class="w">  </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WJ</span><span class="s2">/</span><span class="nv">$r</span><span class="s2">&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>init<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="k">done</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WJ</span><span class="s2">/b&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">EJ</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+<span class="nv">jout</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WJ</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>sync<span class="w"> </span>--safe<span class="w"> </span>--json<span class="w"> </span><span class="m">2</span>&gt;<span class="s2">&quot;</span><span class="nv">$EJ</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;type==&quot;array&quot;&#39;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --safe --json should be a JSON array: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;length&#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;2&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: array should have 2 repos: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;all(.[]; has(&quot;repo&quot;) and has(&quot;action&quot;) and has(&quot;ok&quot;))&#39;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: each object needs repo/action/ok: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>.<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --safe --json stdout must be pure JSON: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s1">&#39;[sync]&#39;</span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: stdout must not contain the [sync] log tag: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WJ</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$EJ</span><span class="s2">&quot;</span>
+
+<span class="c1"># 11. --review --json -&gt; error, non-zero, no JSON</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">jout</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WS</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>sync<span class="w"> </span>--review<span class="w"> </span>--json<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-ne<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --review --json should exit non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">if</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --review --json should produce no JSON on stdout: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+
+<span class="c1"># 13. failure path: a repo whose --safe fetch fails -&gt; non-zero exit, stdout still a JSON array with ok:false</span>
+<span class="nv">WF</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WF</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>a<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WF</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WF</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WF</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>init<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WF</span><span class="s2">/a&quot;</span><span class="w"> </span>remote<span class="w"> </span>add<span class="w"> </span>origin<span class="w"> </span>/nonexistent/x.git
+<span class="nv">EF</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+<span class="k">if</span><span class="w"> </span><span class="nv">jout</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WF</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>sync<span class="w"> </span>--safe<span class="w"> </span>--json<span class="w"> </span><span class="m">2</span>&gt;<span class="s2">&quot;</span><span class="nv">$EF</span><span class="s2">&quot;</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+<span class="o">[[</span><span class="w"> </span><span class="nv">$rc</span><span class="w"> </span>-ne<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: fetch-failure --safe --json should exit non-zero&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;type==&quot;array&quot;&#39;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: stdout should still be a JSON array on failure: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.[] | select(.repo==&quot;a&quot;) | .ok&#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;false&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: failed repo should have ok:false: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;fetch failed&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$EF</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: fetch-failure message should be on stderr: </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$EF</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WF</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$EF</span><span class="s2">&quot;</span>
+
+<span class="c1"># 14. --push --dry-run --json -&gt; array, would-push*, clean stdout, log on stderr</span>
+<span class="nv">WP</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">&quot;</span><span class="w"> </span>init<span class="w"> </span>-b<span class="w"> </span>main<span class="w"> </span>--bare<span class="w"> </span>up.git<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>clone<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">/up.git&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">/a&quot;</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>t@t.t<span class="p">;</span><span class="w"> </span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">/a&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>t
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>c1<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">/a&quot;</span><span class="w"> </span>push<span class="w"> </span>-u<span class="w"> </span>origin<span class="w"> </span>main<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">/a&quot;</span><span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>feat/x<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">/a&quot;</span><span class="w"> </span>commit<span class="w"> </span>--allow-empty<span class="w"> </span>-m<span class="w"> </span>work<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null
+<span class="nv">EP</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+<span class="nv">jout</span><span class="o">=</span><span class="k">$(</span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">&quot;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span>sync<span class="w"> </span>--push<span class="w"> </span>--dry-run<span class="w"> </span>--json<span class="w"> </span><span class="m">2</span>&gt;<span class="s2">&quot;</span><span class="nv">$EP</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;type==&quot;array&quot;&#39;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --push --dry-run --json should be a JSON array: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.[] | select(.repo==&quot;a&quot;) | .action&#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^<span class="o">(</span>would-push<span class="p">|</span>would-push-new<span class="p">|</span>up-to-date<span class="o">)</span>$<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: push dry-run action should be would-push*/up-to-date: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s1">&#39;[sync]&#39;</span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: --push --json stdout must not contain [sync] tag: </span><span class="nv">$jout</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>:<span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WP</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$EP</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>(Note: the <code>WP/up.git</code> bare lives inside the workspace dir; <code>branch status</code>-style loops skip non-repo dirs, but the <code>--bare up.git</code> dir IS a git dir. To keep it out of the workspace scan, create the bare OUTSIDE: use <code>git init -b main --bare "$WP/../up_$$.git"</code>? Simpler — put the clone target as the only workspace entry: create the bare in a sibling temp. Implement as: <code>BARE=$(mktemp -d)/up.git; git init -b main --bare "$BARE"; git clone "$BARE" "$WP/a"</code>. Adjust the fixture so only <code>a</code> is under <code>$WP</code>.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync_flags.sh</code>
+Expected: FAIL — <code>--json</code> is an unknown option today (<code>*) log_error "unknown option"</code>), so every <code>--json</code> invocation errors out with no JSON.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Replace the <code>sync)</code> dispatch block</strong> in <code>bin/mra.sh</code> with:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>sync<span class="o">)</span>
+<span class="w">      </span><span class="nb">shift</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span><span class="nv">safe</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">push</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">review</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">json</span><span class="o">=</span><span class="nb">false</span>
+<span class="w">      </span><span class="k">while</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$#</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<span class="w">          </span>--safe<span class="o">)</span><span class="w"> </span><span class="nv">safe</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">          </span>--push<span class="o">)</span><span class="w"> </span><span class="nv">push</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">          </span>--dry-run<span class="o">)</span><span class="w"> </span><span class="nv">dry_run</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">          </span>--review<span class="o">)</span><span class="w"> </span><span class="nv">review</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">          </span>--json<span class="o">)</span><span class="w"> </span><span class="nv">json</span><span class="o">=</span>true<span class="p">;</span><span class="w"> </span><span class="nb">shift</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">          </span>*<span class="o">)</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;unknown option: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">        </span><span class="k">esac</span>
+<span class="w">      </span><span class="k">done</span>
+<span class="w">      </span><span class="c1"># mode flags are mutually exclusive</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span><span class="nv">mode_count</span><span class="o">=</span><span class="m">0</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$safe</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">mode_count</span><span class="o">=</span><span class="k">$((</span><span class="nv">mode_count</span><span class="o">+</span><span class="m">1</span><span class="k">))</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$push</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">mode_count</span><span class="o">=</span><span class="k">$((</span><span class="nv">mode_count</span><span class="o">+</span><span class="m">1</span><span class="k">))</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">mode_count</span><span class="o">=</span><span class="k">$((</span><span class="nv">mode_count</span><span class="o">+</span><span class="m">1</span><span class="k">))</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode_count</span><span class="s2">&quot;</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;sync: choose only one of --safe / --push / --review&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$push</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;sync: --dry-run only applies to --push&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$json</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>log_error<span class="w"> </span><span class="s2">&quot;sync: --review does not support --json&quot;</span><span class="w"> </span><span class="s2">&quot;sync&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="nb">local</span><span class="w"> </span>workspace<span class="p">;</span><span class="w"> </span><span class="nv">workspace</span><span class="o">=</span><span class="k">$(</span>resolve_workspace<span class="k">)</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$json</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span><span class="nb">local</span><span class="w"> </span>rf<span class="p">;</span><span class="w"> </span><span class="nv">rf</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+<span class="w">        </span><span class="nb">export</span><span class="w"> </span><span class="nv">SYNC_RESULT_FILE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$rf</span><span class="s2">&quot;</span>
+<span class="w">        </span><span class="nb">local</span><span class="w"> </span><span class="nv">jrc</span><span class="o">=</span><span class="m">0</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$push</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">          </span>push_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">1</span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">jrc</span><span class="o">=</span><span class="nv">$?</span>
+<span class="w">        </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$safe</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">          </span>safe_sync_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">1</span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">jrc</span><span class="o">=</span><span class="nv">$?</span>
+<span class="w">        </span><span class="k">else</span>
+<span class="w">          </span><span class="nb">local</span><span class="w"> </span>graph_file<span class="w"> </span>git_org
+<span class="w">          </span><span class="nv">graph_file</span><span class="o">=</span><span class="k">$(</span>get_dep_graph_path<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">          </span><span class="nv">git_org</span><span class="o">=</span><span class="k">$(</span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.gitOrg&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">          </span>sync_from_repos_json<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$git_org</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">1</span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">jrc</span><span class="o">=</span><span class="nv">$?</span>
+<span class="w">        </span><span class="k">fi</span>
+<span class="w">        </span><span class="nb">unset</span><span class="w"> </span>SYNC_RESULT_FILE
+<span class="w">        </span><span class="nb">local</span><span class="w"> </span><span class="nv">json_objs</span><span class="o">=()</span><span class="w"> </span>repo<span class="w"> </span>action<span class="w"> </span>okv
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="nv">IFS</span><span class="o">=</span><span class="s1">$&#39;\t&#39;</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>repo<span class="w"> </span>action<span class="w"> </span>okv<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">          </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">          </span><span class="nv">json_objs</span><span class="o">+=(</span><span class="s2">&quot;</span><span class="k">$(</span>sync_result_json<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$repo</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$action</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$okv</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="o">)</span>
+<span class="w">        </span><span class="k">done</span><span class="w"> </span>&lt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rf</span><span class="s2">&quot;</span>
+<span class="w">        </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rf</span><span class="s2">&quot;</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="si">${#</span><span class="nv">json_objs</span><span class="p">[@]</span><span class="si">}</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">          </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;[]\n&#39;</span>
+<span class="w">        </span><span class="k">else</span>
+<span class="w">          </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">json_objs</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-s<span class="w"> </span><span class="s1">&#39;.&#39;</span>
+<span class="w">        </span><span class="k">fi</span>
+<span class="w">        </span><span class="nb">exit</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$jrc</span><span class="s2">&quot;</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>sync_review_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span>
+<span class="w">        </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">      </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$push</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>push_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$dry_run</span><span class="s2">&quot;</span>
+<span class="w">        </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">      </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$safe</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>safe_sync_workspace<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span>
+<span class="w">        </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">      </span><span class="k">else</span>
+<span class="w">        </span><span class="c1"># Default: reproduce existing helper behavior as a public command.</span>
+<span class="w">        </span><span class="nb">local</span><span class="w"> </span>graph_file<span class="w"> </span>git_org
+<span class="w">        </span><span class="nv">graph_file</span><span class="o">=</span><span class="k">$(</span>get_dep_graph_path<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">        </span><span class="nv">git_org</span><span class="o">=</span><span class="k">$(</span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.gitOrg&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">        </span>sync_from_repos_json<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$workspace</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$git_org</span><span class="s2">&quot;</span>
+<span class="w">        </span><span class="nb">exit</span><span class="w"> </span><span class="nv">$?</span>
+<span class="w">      </span><span class="k">fi</span>
+<span class="w">      </span><span class="p">;;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Update the usage line</strong> in <code>bin/mra.sh</code>. Find:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>  sync [--safe] [--push] [--dry-run] [--review]  Clone/pull; --safe ff-only; --push pushes; --review auto-reviews changed repos
+</code></pre></div>
+
+<p>Replace with:</p>
+<div class="highlight"><pre><span></span><code>  sync [--safe] [--push] [--dry-run] [--review] [--json]  Clone/pull; --safe ff-only; --push pushes; --review auto-reviews; --json per-repo {repo,action,ok} array (not with --review)
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_sync_flags.sh</code> then <code>bash tests/test_sync.sh</code>
+Expected: both PASS (0 errors).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests/test_sync_flags.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(sync): sync --json dispatch (default/--safe/--push, stdout JSON-only) + usage&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-6-full-regression-spec-status">Task 6: Full regression + spec status</h2>
+<p><strong>Files:</strong>
+- Modify: <code>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code> (§20 status) + re-render <code>.html</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: <code>shell tests: 45 passed, 0 failed</code> and <code>mcp-server : ok</code>. (No new suite — Phase 12 tests live in <code>tests/test_sync.sh</code> / <code>tests/test_sync_flags.sh</code>.) If anything fails, STOP and report BLOCKED with the output.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Flip the §20 status note</strong> in the spec. Find the <code>**Status:**</code> line directly under <code>## 20. Phase 12 —</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>**Status:** Approved (design) — 2026-06-05. Implementation scope for the next plan. Machine-readable sync output across the three sync-outcome modes, via a shared per-repo result model. `--review --json` is explicitly out of scope (freeform LLM output).
+</code></pre></div>
+
+<p>Replace with:</p>
+<div class="highlight"><pre><span></span><code>**Status:** Implemented — 2026-06-05. `sync --json` (default/`--safe`/`--push`) emits a per-repo `{repo, action, ok}` array via `sync_result_json` + the `SYNC_RESULT_FILE` sink in `lib/sync.sh`; JSON-mode stdout stays JSON-only (worker logs → stderr). `--review --json` rejected.
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Re-render the spec HTML</strong></li>
+</ul>
+<p>Run: <code>python3 docs/superpowers/render-html.py docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md</code>
+Expected: <code>✓ …-design.md -&gt; …-design.html</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.md<span class="w"> </span>docs/superpowers/specs/2026-05-29-branch-aware-sync-review-design.html
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;docs(spec): mark Phase 12 (sync --json) implemented&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="self-review-notes">Self-Review Notes</h2>
+<ul>
+<li><strong>Spec coverage:</strong> §20.1 surface (<code>--json</code> composes with default/--safe/--push; <code>--review --json</code> rejected) → Task 5. §20.2 result model (<code>{repo,action,ok}</code>, ok rule, skip-dir not recorded) → Task 1 (<code>sync_result_json</code>) + Tasks 2–4 (workers). §20.3 per-mode action vocab → Task 2 (--safe), Task 3 (--push), Task 4 (default). §20.4 mechanism (<code>_sync_record</code> sink, stdout→stderr) → Task 1 + Task 5. §20.5 architecture → all tasks. §20.6 error/consumer contract (review rejected, ok:false → non-zero, stdout JSON-only, stderr carries logs) → Task 5 + tests 11/13. §20.7 tests 1–5 → Task 1; 6 → Task 2; 7 → Task 3; 8 → Task 4; 9–15 → Task 5; regression → Task 6. §20.8 out-of-scope respected.</li>
+<li><strong>No placeholders:</strong> every code step shows the full function body / exact replacement / runnable test.</li>
+<li><strong>Type/name consistency:</strong> <code>sync_result_json repo action ok</code> and <code>_sync_record repo action ok</code> are defined in Task 1 and used identically in Tasks 2–5. The action strings in Tasks 2–4 exactly match the §20.3 vocab and the dispatch reads them back via <code>IFS=$'\t'</code>. <code>ok</code> is the string <code>true</code>/<code>false</code> throughout (workers pass literals; <code>sync_result_json</code> validates + <code>--argjson</code>).</li>
+<li><strong>stdout discipline:</strong> Task 5 runs each workspace fn with <code>1&gt;&amp;2</code>, so worker <code>log_*</code> (stdout) lands on stderr; the only stdout writers in JSON mode are <code>printf '[]\n'</code> and <code>jq -s '.'</code>. Tests 10/14 assert no <code>[sync]</code> tag on stdout; test 13 asserts stderr carries the failure. The empty-array guard mirrors Phase 11.</li>
+<li><strong>Text mode unchanged:</strong> <code>_sync_record</code> is a no-op when <code>SYNC_RESULT_FILE</code> is unset; the workers' human <code>log_*</code> lines are byte-identical, so existing <code>test_sync.sh</code>/<code>test_sync_flags.sh</code> text assertions keep passing (verified by Step 4 of each worker task + Task 6 regression).</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>
