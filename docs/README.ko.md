@@ -15,7 +15,7 @@
 
 > 리포지토리 A의 API를 변경하면, mra가 자동으로 리포지토리 B, C, D의 모든 다운스트림 소비자를 찾아 영향을 분석하고, 코드를 업데이트하고, PR을 생성합니다. 단 하나의 명령으로.
 
-**v2.2.0** | 28 CLI 명령어 | 6 AI 에이전트 | 9 MCP 도구 | 20 테스트 스위트
+**v2.3.0** | 32 CLI 명령어 | 6 AI 에이전트 | 9 MCP 도구 | 35 테스트 스위트 | 10 TM 추적 보안 제어
 
 ---
 
@@ -68,6 +68,27 @@ mra --all                    # 전체 로드
 
 오케스트레이터는 리포지토리별로 서브 에이전트를 배치하고, 의존성 순서에 따라 변경을 조율하며, 각 커밋 후 코드 리뷰를 실행합니다.
 
+### 1b. 브랜치 인식 동기화 & 크로스 리포지토리 PR (Branch-Aware Sync & Cross-Repo PRs)
+
+여러 리포지토리를 동일한 기능 브랜치에 유지한 다음, 함께 출시합니다. 모든 명령어는 의존성 순서로 실행되며 일부 리포지토리만 대상으로 지정할 수 있습니다.
+
+```bash
+mra branch status                 # Repos needing attention (ahead/behind/dirty/PR state)
+mra branch new feature/login      # Create the same branch across repos
+mra branch pr                     # Push branches + open PRs (deps first)
+mra branch merge --wait-ci        # Merge open PRs once CI is green
+```
+
+| 명령어 | 동작 |
+|---------|--------------|
+| `mra sync [--safe] [--push] [--review] [--json]` | 모든 리포지토리를 클론/풀합니다. `--safe`는 fast-forward 전용, `--push`는 푸시, `--review`는 자동 리뷰, `--json`은 리포지토리별 `{repo, action, ok}`를 출력 |
+| `mra branch status [--all] [--fetch] [--json]` | 크로스 리포지토리 브랜치 개요 (기본: 주의가 필요한 리포지토리, `--json`: 모든 리포지토리) |
+| `mra branch new\|switch <name>` | 모든 리포지토리에서 동일한 브랜치를 생성/전환 |
+| `mra branch pr [--base <ref>] [--dry-run] [repos…]` | 기능 브랜치를 푸시하고 PR을 생성 (의존성 우선, 선택적 `[repos…]` 서브셋) |
+| `mra branch merge [--strategy S] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [--dry-run] [repos…]` | mergeable + CI를 게이트로 하여 열린 PR을 병합. `--wait-ci`는 병합 전 CI를 폴링 |
+
+`--json` (`sync`와 `branch status`에서)은 다른 도구로 파이핑하도록 설계되었습니다 -- 워커 로그는 stderr로 가므로 stdout은 유효한 JSON으로 유지됩니다.
+
 ### 2. 토론 기반 AI 코드 리뷰 (AI Code Review with Debate)
 
 차이 크기에 따라 자동 선택되는 3가지 리뷰 전략:
@@ -99,6 +120,27 @@ mra review my-api --strategy debate  # 철저한 리뷰 강제
 ```
 
 모든 리뷰 에이전트는 **쓰기 보호** (`--disallowedTools "Write,Edit"`) 되어 있어 읽기 전용입니다.
+
+### 2b. 페르소나 기반 리뷰 (Persona-Based Review, 옵트인)
+
+일반적인 영향/품질 분석만으로 충분하지 않은 PR의 경우, 이름이 부여된 다섯 명의 도메인 전문가를 병렬로 실행합니다:
+
+```bash
+mra review my-api --personas          # Use 5 named domain experts
+mra review my-api --pr 123 --personas # PR review with personas
+```
+
+| 페르소나 | 초점 |
+|---------|-------|
+| `security-auditor` | 시크릿, 인젝션, 인증, 역직렬화 (Troy Hunt 스타일) |
+| `api-contract-guardian` | 크로스 리포지토리 시그니처 드리프트, 응답 형태 변경 |
+| `performance-hawk` | N+1 쿼리, 핫 패스 I/O, 번들 비대화 (Vercel 스타일) |
+| `refactoring-sage` | 코드 스멜, 네이밍, 응집도 (Martin Fowler 스타일) |
+| `test-architect` | Kent Beck 11원칙 |
+
+각 페르소나는 집중된 관점을 가지며 동일한 심각도 단계(CRITICAL/HIGH/MEDIUM)에 따라 작성합니다. 발견 사항은 디베이트 경로가 생성하는 것과 동일한 JSON으로 병합 및 종합되므로 -- PR 인라인 코멘트도 동일하게 작동합니다.
+
+`agents/personas/`에 마크다운 파일을 추가하여 직접 페르소나를 만들 수 있습니다. `agents/personas/README.md`를 참고하세요.
 
 ### 3. 프로젝트 지식 베이스 (Project Knowledge Base / PKB)
 
@@ -266,6 +308,12 @@ mra my-api --with-deps           # 오케스트레이터 실행
 mra ask my-api "list all order-related API endpoints"
 mra ask my-api --with-deps "API dependencies between my-api and frontend"
 
+# 리포지토리 간 동기화 & 기능 브랜치
+mra sync --safe                  # Fast-forward pull every repo
+mra branch status                # Which repos need attention
+mra branch pr                    # Open PRs across repos (deps first)
+mra branch merge --wait-ci       # Merge each PR once its CI is green
+
 # 코드 품질
 mra lint frontend-app            # BLOCKER 규칙 확인
 mra lint --all                   # 모든 프런트엔드 프로젝트
@@ -277,6 +325,26 @@ mra review my-api --pr 123       # 인라인 PR 리뷰
 # 문제가 생겼다면?
 mra rollback my-api              # 최신 스냅샷으로 복원
 ```
+
+#### 멀티 전문가 플래닝 (Multi-Expert Planning)
+
+```bash
+mra plan my-api "Migrate session tokens to JWT"
+mra plan my-api "Migrate session tokens to JWT" --dual   # claude + codex council
+```
+
+다섯 명의 도메인 전문가가 독립적으로 구현 전략을 제안한 다음, 신시사이저가 이를 하나의 통합된 계획(통합된 파일 목록, 위험도 순으로 정렬된 우려 사항, 실행 단계)으로 병합합니다. 출력은 stdout으로 가므로 파일로 파이핑하여 저장할 수 있습니다.
+
+`--dual`을 사용하면 각 페르소나가 `claude`와 `codex` CLI **양쪽**으로 실행되며, 신시사이저가 두 모델의 제안을 조정합니다(합의된 부분은 강조하고, 의견이 다른 부분은 드러냅니다). `PATH`에 `codex` CLI가 필요합니다.
+
+#### 테스트 품질 감사 (Test Quality Audit)
+
+```bash
+mra test-audit frontend-app        # Kent Beck 11-principles audit of all test files
+MRA_AUDIT_PARALLEL=3 mra test-audit frontend-app  # Cap concurrent audits
+```
+
+`*.test.*`, `*_test.*`, `*.spec.*` 파일을 (`node_modules`, `dist`, `build`, `vendor`, `.git` 제외) 발견하여, `test-architect` 페르소나를 통해 각 파일을 Kent Beck의 11가지 테스트 원칙에 대해 감사합니다.
 
 </details>
 
@@ -375,7 +443,7 @@ mra doctor
 ## 명령어 레퍼런스
 
 <details>
-<summary><strong>전체 28개 명령어</strong></summary>
+<summary><strong>전체 명령어</strong></summary>
 
 ### 코어 (Core)
 
@@ -387,6 +455,16 @@ mra doctor
 | `mra status` | 워크스페이스 개요 |
 | `mra diff` | 크로스 리포지토리 차이 요약 |
 | `mra log [project]` | 작업 이력 |
+
+### 브랜치 & 동기화 (Branch & Sync)
+
+| 명령어 | 설명 |
+|---------|-------------|
+| `mra sync [--safe] [--push] [--review] [--json]` | 모든 리포지토리 클론/풀 (`--json`: 리포지토리별 `{repo, action, ok}`) |
+| `mra branch status [--all] [--fetch] [--json]` | 크로스 리포지토리 브랜치 개요 |
+| `mra branch new\|switch <name>` | 모든 리포지토리에서 동일한 브랜치 생성/전환 |
+| `mra branch pr [--base <ref>] [--dry-run] [repos…]` | 브랜치를 푸시하고 PR 생성 (의존성 우선, 선택적 서브셋) |
+| `mra branch merge [--strategy S] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [--dry-run] [repos…]` | 열린 PR 병합 (mergeable + CI 게이트) |
 
 ### AI & 개발 (AI & Development)
 
@@ -400,7 +478,9 @@ mra doctor
 
 | 명령어 | 설명 |
 |---------|-------------|
-| `mra review <project> [--pr N] [--strategy S] [--base ref]` | 코드 리뷰 |
+| `mra review <project> [--pr N] [--strategy S] [--base ref] [--personas]` | 코드 리뷰 (--personas로 이름이 부여된 5명의 전문가 추가) |
+| `mra plan <project> "<task>" [--model M] [--dual]` | 멀티 전문가 계획 (`--dual`: claude + codex council) |
+| `mra test-audit <project> [--model M]` | Kent Beck 11원칙 테스트 감사 |
 | `mra analyze <project> [--model M]` | PKB 생성 |
 | `mra eval-review <project> --pr N [--baseline file]` | 리뷰 품질 평가 |
 
@@ -605,6 +685,11 @@ mra notify test     # 테스트 알림 전송
 
 ### 최근 추가된 기능
 
+- 브랜치 인식 동기화 & 크로스 리포지토리 PR (`mra sync`, `mra branch status|new|switch|pr|merge`)
+- CI 폴링 자동 병합 (`branch merge --wait-ci [--ci-timeout]`)
+- `branch pr|merge`의 리포지토리별 서브셋 지정 (`[repos…]`)
+- 머신 판독 가능한 JSON 출력 (`sync --json`, `branch status --json`)
+- 멀티 모델 플래닝 카운슬 (`mra plan --dual` -- claude + codex)
 - 자동 전략 리뷰 (light/standard/debate)
 - 메일박스 투표 디베이트 시스템
 - L0-L3 메모리 스택을 갖춘 프로젝트 지식 베이스

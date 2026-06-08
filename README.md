@@ -75,6 +75,27 @@ mra --all                    # Load everything
 
 The orchestrator dispatches sub-agents per repo, coordinates changes in dependency order, and runs code review after each commit.
 
+### 1b. Branch-Aware Sync & Cross-Repo PRs
+
+Keep many repos on the same feature branch, then ship them together. Every command runs in dependency order and can target a subset of repos.
+
+```bash
+mra branch status                 # Repos needing attention (ahead/behind/dirty/PR state)
+mra branch new feature/login      # Create the same branch across repos
+mra branch pr                     # Push branches + open PRs (deps first)
+mra branch merge --wait-ci        # Merge open PRs once CI is green
+```
+
+| Command | What it does |
+|---------|--------------|
+| `mra sync [--safe] [--push] [--review] [--json]` | Clone/pull every repo; `--safe` is ff-only, `--push` pushes, `--review` auto-reviews, `--json` emits per-repo `{repo, action, ok}` |
+| `mra branch status [--all] [--fetch] [--json]` | Cross-repo branch overview (default: repos needing attention; `--json`: every repo) |
+| `mra branch new\|switch <name>` | Create/switch the same branch across all repos |
+| `mra branch pr [--base <ref>] [--dry-run] [repos…]` | Push feature branches and open PRs (deps first; optional `[repos…]` subset) |
+| `mra branch merge [--strategy S] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [--dry-run] [repos…]` | Merge open PRs, gated on mergeable + CI; `--wait-ci` polls CI before merging |
+
+`--json` (on `sync` and `branch status`) is designed for piping into other tooling — worker logs go to stderr so stdout stays valid JSON.
+
 ### 2. AI Code Review with Debate
 
 Three review strategies auto-selected by diff size:
@@ -294,6 +315,12 @@ mra my-api --with-deps           # Launch orchestrator
 mra ask my-api "list all order-related API endpoints"
 mra ask my-api --with-deps "API dependencies between my-api and frontend"
 
+# Sync & feature branches across repos
+mra sync --safe                  # Fast-forward pull every repo
+mra branch status                # Which repos need attention
+mra branch pr                    # Open PRs across repos (deps first)
+mra branch merge --wait-ci       # Merge each PR once its CI is green
+
 # Code quality
 mra lint frontend-app            # Check BLOCKER rules
 mra lint --all                   # All frontend projects
@@ -310,9 +337,12 @@ mra rollback my-api              # Restore to latest snapshot
 
 ```bash
 mra plan my-api "Migrate session tokens to JWT"
+mra plan my-api "Migrate session tokens to JWT" --dual   # claude + codex council
 ```
 
 Five domain experts independently propose implementation strategies, then a synthesizer merges them into one unified plan (consolidated files, risk-ranked concerns, execution steps). Output goes to stdout — pipe to a file to save.
+
+With `--dual`, each persona is run through **both** the `claude` and `codex` CLIs and the synthesizer reconciles the two models' proposals (agreements highlighted, disagreements surfaced). Requires the `codex` CLI on `PATH`.
 
 #### Test Quality Audit
 
@@ -420,7 +450,7 @@ Generate templates: `mra template`
 ## Command Reference
 
 <details>
-<summary><strong>All 28 commands</strong></summary>
+<summary><strong>All commands</strong></summary>
 
 ### Core
 
@@ -432,6 +462,16 @@ Generate templates: `mra template`
 | `mra status` | Workspace overview |
 | `mra diff` | Cross-repo diff summary |
 | `mra log [project]` | Operation history |
+
+### Branch & Sync
+
+| Command | Description |
+|---------|-------------|
+| `mra sync [--safe] [--push] [--review] [--json]` | Clone/pull all repos (`--json`: per-repo `{repo, action, ok}`) |
+| `mra branch status [--all] [--fetch] [--json]` | Cross-repo branch overview |
+| `mra branch new\|switch <name>` | Create/switch the same branch across repos |
+| `mra branch pr [--base <ref>] [--dry-run] [repos…]` | Push branches and open PRs (deps first; optional subset) |
+| `mra branch merge [--strategy S] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [--dry-run] [repos…]` | Merge open PRs (mergeable + CI gated) |
 
 ### AI & Development
 
@@ -446,7 +486,7 @@ Generate templates: `mra template`
 | Command | Description |
 |---------|-------------|
 | `mra review <project> [--pr N] [--strategy S] [--base ref] [--personas]` | Code review (add --personas for 5 named experts) |
-| `mra plan <project> "<task>" [--model M]` | Multi-expert implementation plan |
+| `mra plan <project> "<task>" [--model M] [--dual]` | Multi-expert plan (`--dual`: claude + codex council) |
 | `mra test-audit <project> [--model M]` | Kent Beck 11-principles test audit |
 | `mra analyze <project> [--model M]` | Generate PKB |
 | `mra eval-review <project> --pr N [--baseline file]` | Evaluate review quality |
@@ -691,6 +731,11 @@ provisioning a CI workspace.
 
 ### Recently Added
 
+- Branch-aware sync & cross-repo PRs (`mra sync`, `mra branch status|new|switch|pr|merge`)
+- CI-polling auto-merge (`branch merge --wait-ci [--ci-timeout]`)
+- Per-repo subset targeting for `branch pr|merge` (`[repos…]`)
+- Machine-readable JSON output (`sync --json`, `branch status --json`)
+- Multi-model planning council (`mra plan --dual` — claude + codex)
 - Auto-strategy review (light/standard/debate)
 - Mailbox voting debate system
 - Project Knowledge Base with L0-L3 memory stack

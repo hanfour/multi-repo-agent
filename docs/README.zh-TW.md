@@ -18,7 +18,7 @@
 
 > 在 repo A 修改一個 API。mra 自動找到 repos B、C、D 中所有的下游使用者 — 檢視影響範圍、更新程式碼，並建立 PR。全部只需一個指令。
 
-**v2.2.0** | 31 個 CLI 指令 | 6 個 AI 代理 | 9 個 MCP 工具 | 24 個測試套件
+**v2.3.0** | 32 個 CLI 指令 | 6 個 AI 代理 | 9 個 MCP 工具 | 35 個測試套件 | 10 個 TM 追蹤的安全控制
 
 ---
 
@@ -74,6 +74,27 @@ mra --all                    # 載入全部
 ```
 
 協調器會為每個倉庫派遣子代理、依相依順序協調變更，並在每次提交後執行程式碼審查。
+
+### 1b. 分支感知同步與跨倉庫 PR
+
+讓多個倉庫保持在同一個功能分支上，然後一起出貨。每個指令都依相依順序執行，並可只針對一部分倉庫操作。
+
+```bash
+mra branch status                 # Repos needing attention (ahead/behind/dirty/PR state)
+mra branch new feature/login      # Create the same branch across repos
+mra branch pr                     # Push branches + open PRs (deps first)
+mra branch merge --wait-ci        # Merge open PRs once CI is green
+```
+
+| 指令 | 功能 |
+|---------|--------------|
+| `mra sync [--safe] [--push] [--review] [--json]` | 複製/拉取每個倉庫；`--safe` 僅 ff、`--push` 推送、`--review` 自動審查、`--json` 輸出每個倉庫的 `{repo, action, ok}` |
+| `mra branch status [--all] [--fetch] [--json]` | 跨倉庫分支總覽（預設：需要關注的倉庫；`--json`：每個倉庫） |
+| `mra branch new\|switch <name>` | 在所有倉庫上建立/切換同一個分支 |
+| `mra branch pr [--base <ref>] [--dry-run] [repos…]` | 推送功能分支並建立 PR（相依優先；可選的 `[repos…]` 子集） |
+| `mra branch merge [--strategy S] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [--dry-run] [repos…]` | 合併開啟中的 PR，以 mergeable + CI 為條件；`--wait-ci` 會在合併前輪詢 CI |
+
+`--json`（用於 `sync` 與 `branch status`）是為了管線導向其他工具而設計的 — worker 日誌走 stderr，stdout 因而維持有效的 JSON。
 
 ### 2. AI 程式碼審查（辯論模式）
 
@@ -294,6 +315,12 @@ mra my-api --with-deps           # 啟動協調器
 mra ask my-api "list all order-related API endpoints"
 mra ask my-api --with-deps "API dependencies between my-api and frontend"
 
+# 跨倉庫同步與功能分支
+mra sync --safe                  # Fast-forward pull every repo
+mra branch status                # Which repos need attention
+mra branch pr                    # Open PRs across repos (deps first)
+mra branch merge --wait-ci       # Merge each PR once its CI is green
+
 # 程式碼品質
 mra lint frontend-app            # 檢查 BLOCKER 規則
 mra lint --all                   # 所有前端專案
@@ -310,9 +337,12 @@ mra rollback my-api              # 還原至最新快照
 
 ```bash
 mra plan my-api "Migrate session tokens to JWT"
+mra plan my-api "Migrate session tokens to JWT" --dual   # claude + codex council
 ```
 
 五位領域專家各自獨立提出實作策略，接著由綜合器合併為一份統一計畫（合併後的檔案清單、依風險排序的疑慮、執行步驟）。輸出會寫到 stdout — 可透過管線導向檔案保存。
+
+加上 `--dual` 後，每個 persona 都會同時透過 `claude` 與 `codex` 兩個 CLI 執行，綜合器再協調兩個模型的提案（標出共識之處、凸顯分歧之處）。需要 `codex` CLI 存在於 `PATH` 上。
 
 #### 測試品質稽核
 
@@ -420,7 +450,7 @@ mra doctor
 ## 指令參考
 
 <details>
-<summary><strong>全部 28 個指令</strong></summary>
+<summary><strong>全部指令</strong></summary>
 
 ### 核心
 
@@ -432,6 +462,16 @@ mra doctor
 | `mra status` | 工作區總覽 |
 | `mra diff` | 跨倉庫差異摘要 |
 | `mra log [project]` | 操作歷史記錄 |
+
+### 分支與同步
+
+| 指令 | 說明 |
+|---------|-------------|
+| `mra sync [--safe] [--push] [--review] [--json]` | 複製/拉取所有倉庫（`--json`：每個倉庫的 `{repo, action, ok}`） |
+| `mra branch status [--all] [--fetch] [--json]` | 跨倉庫分支總覽 |
+| `mra branch new\|switch <name>` | 在各倉庫上建立/切換同一個分支 |
+| `mra branch pr [--base <ref>] [--dry-run] [repos…]` | 推送分支並建立 PR（相依優先；可選子集） |
+| `mra branch merge [--strategy S] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [--dry-run] [repos…]` | 合併開啟中的 PR（以 mergeable + CI 為條件） |
 
 ### AI 與開發
 
@@ -446,7 +486,7 @@ mra doctor
 | 指令 | 說明 |
 |---------|-------------|
 | `mra review <project> [--pr N] [--strategy S] [--base ref] [--personas]` | 程式碼審查（加上 --personas 啟用 5 位具名專家） |
-| `mra plan <project> "<task>" [--model M]` | 多專家實作計畫 |
+| `mra plan <project> "<task>" [--model M] [--dual]` | 多專家實作計畫（`--dual`：claude + codex council） |
 | `mra test-audit <project> [--model M]` | Kent Beck 11 條原則測試稽核 |
 | `mra analyze <project> [--model M]` | 產生 PKB |
 | `mra eval-review <project> --pr N [--baseline file]` | 評估審查品質 |
@@ -652,6 +692,11 @@ mra notify test     # 傳送測試通知
 
 ### 近期新增
 
+- 分支感知同步與跨倉庫 PR（`mra sync`、`mra branch status|new|switch|pr|merge`）
+- 輪詢 CI 的自動合併（`branch merge --wait-ci [--ci-timeout]`）
+- `branch pr|merge` 的每倉庫子集鎖定（`[repos…]`）
+- 機器可讀的 JSON 輸出（`sync --json`、`branch status --json`）
+- 多模型計畫 council（`mra plan --dual` — claude + codex）
 - 自動策略審查（輕量/標準/辯論）
 - 信箱投票辯論系統
 - 專案知識庫與 L0-L3 記憶堆疊
