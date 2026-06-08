@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2218
-# ^ file-wide: this suite uses functions sourced from lib/*.sh (e.g. merge_repo from
-#   pr-ops.sh) AND later defines same-name stubs as intentional test doubles. Older
-#   shellcheck versions misread the calls as "function defined later" (SC2218).
+# (file-wide) merge_repo and friends are sourced from lib/*.sh; this suite later
+# defines same-name stubs as intentional test doubles, which older linters misread
+# as "function defined later". The directive above silences that false positive.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
