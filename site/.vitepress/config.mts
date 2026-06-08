@@ -35,6 +35,8 @@ export default defineConfig({
           ]}],
           '/commands/': [ { text: 'Commands', items: [
             { text: 'Overview', link: '/commands/' },
+            { text: 'mra sync', link: '/commands/sync' },
+            { text: 'mra branch', link: '/commands/branch' },
             { text: 'mra review', link: '/commands/review' },
             { text: 'mra plan', link: '/commands/plan' },
             { text: 'mra test-audit', link: '/commands/test-audit' },
@@ -71,6 +73,8 @@ export default defineConfig({
           ]}],
           '/zh-TW/commands/': [ { text: '指令', items: [
             { text: '總覽', link: '/zh-TW/commands/' },
+            { text: 'mra sync', link: '/zh-TW/commands/sync' },
+            { text: 'mra branch', link: '/zh-TW/commands/branch' },
           ]}],
           '/zh-TW/features/': [ { text: '功能', items: [
             { text: 'Personas', link: '/zh-TW/features/personas' },
