@@ -39,8 +39,20 @@ mra my-api --with-deps
 
 Claude launches with `my-api` plus all its consumers/dependencies in context.
 
+## Sync & ship across repos
+
+```bash
+mra sync --safe          # fast-forward pull every repo
+mra branch status        # which repos need attention
+mra branch pr            # push branches + open PRs (deps first)
+mra branch merge --wait-ci   # merge each PR once CI is green
+```
+
+See [`mra sync`](/commands/sync) and [`mra branch`](/commands/branch) for the full workflow.
+
 ## Next steps
 
 - [Cross-repo development](/guide/cross-repo-dev)
+- [Branch-aware sync & PRs](/commands/branch)
 - [Code review](/commands/review)
 - [Project Knowledge Base](/commands/pkb)

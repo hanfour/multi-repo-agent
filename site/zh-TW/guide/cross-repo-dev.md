@@ -33,7 +33,23 @@ mra my-api --with-deps
 
 手動覆寫放在 `.collab/manual-deps.json`。
 
+## 跨 repo 出貨
+
+當改動橫跨多個 repo，branch-aware 指令會依相依順序一起搬動它們：
+
+```bash
+mra branch new feature/login    # 在每個 repo 建立同一條分支
+# ...各 repo 開發、commit...
+mra sync --safe                 # 把所有 repo pull 到最新
+mra branch status               # 一眼看 ahead/behind/dirty/PR 狀態
+mra branch pr                   # push 分支 + 開 PR（上游先）
+mra branch merge --wait-ci      # 每個 PR 等 CI 綠燈後合併
+```
+
+`branch pr` 與 `branch merge` 都接受 `[repos…]` 子集，`merge` 以 mergeable + CI 狀態為門檻。詳見 [`mra branch`](/zh-TW/commands/branch) 與 [`mra sync`](/zh-TW/commands/sync)。
+
 ## 延伸閱讀
 
 - [快速開始](/zh-TW/guide/getting-started)
+- [分支感知同步與 PR](/zh-TW/commands/branch)
 - [指令總覽](/zh-TW/commands/)

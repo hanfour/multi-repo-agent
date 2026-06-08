@@ -19,6 +19,11 @@ features:
     details: 一次啟動 Claude 同時看見多個 repo。改一個 API，mra 自動找到並更新所有下游使用者。
     link: /zh-TW/guide/cross-repo-dev
     linkText: 了解更多
+  - icon: 🔀
+    title: 分支感知同步與 PR
+    details: 讓多個 repo 保持在同一條功能分支，再依相依順序一起同步、開 PR、合併 — 並支援以 CI 為門檻的自動合併。
+    link: /zh-TW/commands/branch
+    linkText: 了解更多
   - icon: 🧠
     title: 專案知識庫
     details: 四層記憶堆疊。每次 review 喚醒成本從 150K tokens 降到 250。每次 review 後自動更新。
