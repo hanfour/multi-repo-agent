@@ -19,6 +19,11 @@ features:
     details: Launch Claude with visibility into multiple repos at once. Change an API in repo A — mra finds and updates every consumer.
     link: /guide/cross-repo-dev
     linkText: Learn more
+  - icon: 🔀
+    title: Branch-Aware Sync & PRs
+    details: Keep many repos on one feature branch, then sync, open PRs, and merge them together in dependency order — with CI-gated auto-merge.
+    link: /commands/branch
+    linkText: Learn more
   - icon: 🧠
     title: Project Knowledge Base
     details: 4-layer memory stack. Review wake-up drops from 150K tokens to 250. Auto-updates after each review.

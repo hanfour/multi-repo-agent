@@ -33,7 +33,23 @@ Five built-in scanners infer the graph automatically:
 
 Manual overrides go in `.collab/manual-deps.json`.
 
+## Shipping across repos
+
+Once changes span several repos, the branch-aware commands move them together — always in dependency order:
+
+```bash
+mra branch new feature/login    # same branch in every repo
+# ...work, commit per repo...
+mra sync --safe                 # pull everyone up to date
+mra branch status               # ahead/behind/dirty/PR state at a glance
+mra branch pr                   # push branches + open PRs (upstream first)
+mra branch merge --wait-ci      # merge each PR once its CI is green
+```
+
+`branch pr` and `branch merge` accept a `[repos…]` subset, and `merge` gates on mergeable + CI state. See [`mra branch`](/commands/branch) and [`mra sync`](/commands/sync).
+
 ## See also
 
 - [Getting Started](/guide/getting-started)
+- [Branch-aware sync & PRs](/commands/branch)
 - [Commands reference](/commands/)
