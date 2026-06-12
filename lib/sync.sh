@@ -71,7 +71,11 @@ sync_repo() {
   fi
 
   log_progress "$repo_name: git pull" "sync"
-  if git -C "$repo_dir" fetch --quiet 2>/dev/null && git -C "$repo_dir" pull --quiet 2>/dev/null; then
+  # --ff-only: sync means "catch up with remote", never "merge remote
+  # into local history". A diverged branch fails loudly instead of
+  # silently creating a merge commit (behaviour depends on the user's
+  # pull.rebase config otherwise).
+  if git -C "$repo_dir" fetch --quiet 2>/dev/null && git -C "$repo_dir" pull --ff-only --quiet 2>/dev/null; then
     log_success "$repo_name: ok" "sync"
     _sync_record "$repo_name" pulled true
     return 0
