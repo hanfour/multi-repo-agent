@@ -18,8 +18,14 @@ if [[ -z "$output" ]]; then echo "FAIL: log_info empty"; errors=$((errors+1)); f
 output=$(log_warn "testing warn")
 if [[ -z "$output" ]]; then echo "FAIL: log_warn empty"; errors=$((errors+1)); fi
 
-output=$(log_error "testing error")
-if [[ -z "$output" ]]; then echo "FAIL: log_error empty"; errors=$((errors+1)); fi
+# log_error must write to stderr, never stdout: many functions return
+# values via stdout command substitution, and an error printed to stdout
+# would be swallowed into the captured value instead of shown.
+output=$(log_error "testing error" 2>/dev/null)
+if [[ -n "$output" ]]; then echo "FAIL: log_error leaked to stdout"; errors=$((errors+1)); fi
+
+output=$(log_error "testing error" 2>&1 >/dev/null)
+if [[ "$output" != *"testing error"* ]]; then echo "FAIL: log_error missing on stderr"; errors=$((errors+1)); fi
 
 output=$(log_progress "hello" "test")
 if [[ "$output" != *"[test]"* ]]; then echo "FAIL: tag not found"; errors=$((errors+1)); fi
