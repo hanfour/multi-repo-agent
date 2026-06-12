@@ -251,6 +251,38 @@ SYNC_RESULT_FILE="$RF" sync_repo "$SB/a" "ignored-org" >/dev/null 2>&1 || true
 grep -qx $'a\tskipped-branch\ttrue' "$RF" || { echo "FAIL: sync_repo should record skipped-branch: $(cat "$RF")"; errors=$((errors+1)); }
 rm -rf "$SB" "$RF"
 
+# --- sync_repo: a diverged default branch must NOT produce a merge commit ---
+# Default sync means "bring local up to date with remote", never "merge
+# remote into local history". With pull.rebase=false (a common user
+# config) a plain `git pull` silently creates a merge commit.
+DV=$(mktemp -d)
+cd "$DV"   # earlier blocks may have removed the previous CWD
+git init -b main --bare "$DV/origin/a.git" &>/dev/null
+git clone "$DV/origin/a.git" "$DV/seed" &>/dev/null
+git -C "$DV/seed" config user.email t@t.t; git -C "$DV/seed" config user.name t
+git -C "$DV/seed" commit --allow-empty -m base &>/dev/null
+git -C "$DV/seed" push -q origin main &>/dev/null
+git clone "$DV/origin/a.git" "$DV/ws/a" &>/dev/null
+git -C "$DV/ws/a" config user.email t@t.t; git -C "$DV/ws/a" config user.name t
+git -C "$DV/ws/a" config pull.rebase false
+# remote advances...
+git -C "$DV/seed" commit --allow-empty -m remote-work &>/dev/null
+git -C "$DV/seed" push -q origin main &>/dev/null
+# ...and local advances too => diverged
+git -C "$DV/ws/a" commit --allow-empty -m local-work &>/dev/null
+LOCAL_HEAD=$(git -C "$DV/ws/a" rev-parse HEAD)
+RF=$(mktemp); : > "$RF"
+rc=0
+SYNC_RESULT_FILE="$RF" sync_repo "$DV/ws/a" "$DV/origin" >/dev/null 2>&1 || rc=$?
+if [[ $rc -eq 0 ]]; then echo "FAIL: sync_repo should fail on a diverged branch"; errors=$((errors+1)); fi
+after=$(git -C "$DV/ws/a" rev-parse HEAD)
+parents=$(git -C "$DV/ws/a" rev-list --parents -n1 HEAD | wc -w | tr -d ' ')
+if [[ "$after" != "$LOCAL_HEAD" || "$parents" != "2" ]]; then
+  echo "FAIL: sync_repo must not move HEAD or create a merge commit on diverge (parents=$parents)"; errors=$((errors+1))
+fi
+grep -qx $'a\tsync-failed\tfalse' "$RF" || { echo "FAIL: sync_repo should record sync-failed on diverge: $(cat "$RF")"; errors=$((errors+1)); }
+rm -rf "$DV" "$RF"
+
 if [[ $errors -eq 0 ]]; then
   echo "PASS: all sync tests passed"
 else
