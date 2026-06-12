@@ -508,7 +508,9 @@ Generate templates: `mra template`
 | `mra lint <project\|--all>` | JS/TS BLOCKER rules |
 | `mra cost [--reset]` | API usage tracking |
 | `mra snapshot [name]` | Create checkpoint |
+| `mra snapshots` | List snapshots |
 | `mra rollback <project> [name]` | Restore snapshot |
+| `mra trust <project>` | Grant Docker trust for a project |
 
 ### CI/CD & Collaboration
 
@@ -526,6 +528,8 @@ Generate templates: `mra template`
 | `mra dashboard` | Interactive TUI |
 | `mra open <project>` | Open in IDE |
 | `mra config <key> <value>` | Settings |
+| `mra alias <name> <path>` | Workspace alias |
+| `mra template [repos\|db\|deps\|all]` | Generate config templates |
 | `mra clean` | Cleanup |
 
 </details>

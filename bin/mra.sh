@@ -107,6 +107,8 @@ Commands:
   review <project> [--pr N] [--working] [--range A..B] [--head <ref>] [--no-debate]  Code review
   plan <project> "<task>" [--model M] [--dual]  Multi-expert plan; --dual = claude+codex council
   test-audit <project> [--model M]     Audit tests vs Kent Beck 11 principles
+  analyze <project> [--model M]        Generate/update project knowledge base (PKB)
+  eval-review <project> --pr <N> [--baseline <file>] [--strategy S]  Score AI review against a human baseline
   --all                         Load all projects
   <project...>                  Load specific projects
 
