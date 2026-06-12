@@ -51,7 +51,11 @@ pkb_age_hours() {
   last_updated=$(jq -r '.lastUpdated // "1970-01-01T00:00:00Z"' "$meta_file" 2>/dev/null)
   local now_epoch last_epoch
   now_epoch=$(date +%s)
-  last_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$last_updated" +%s 2>/dev/null || echo "0")
+  # The timestamp is UTC (trailing Z): BSD date needs -u or it parses it
+  # as local time. GNU date lacks -j entirely; -d handles the Z suffix.
+  last_epoch=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$last_updated" +%s 2>/dev/null \
+    || date -d "$last_updated" +%s 2>/dev/null \
+    || echo "0")
   echo $(( (now_epoch - last_epoch) / 3600 ))
 }
 
