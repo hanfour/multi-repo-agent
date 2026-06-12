@@ -4,6 +4,7 @@ set -euo pipefail
 
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$MRA_DIR/lib/colors.sh"
+source "$MRA_DIR/lib/project-path.sh"
 # review.sh sources several other libs at top of file via load order
 # from bin/mra.sh; for unit testing we only need the two helper
 # functions, which the file defines at the top.

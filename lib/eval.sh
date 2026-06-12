@@ -47,10 +47,8 @@ eval_review() {
     return 1
   fi
 
-  local project_dir="$workspace/$project"
-  if [[ ! -d "$project_dir" ]]; then
-    log_error "$project: directory not found" "eval"; return 1
-  fi
+  local project_dir
+  project_dir=$(resolve_project_dir "$workspace" "$project") || return 1
 
   # --- Step 1: Get human baseline ---
   log_progress "collecting baseline review..." "eval"

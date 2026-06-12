@@ -152,11 +152,8 @@ review_project() {
 
   local review_personas_flag="${MRA_REVIEW_PERSONAS:-false}"
 
-  local project_dir="$workspace/$project"
-  if [[ ! -d "$project_dir" ]]; then
-    log_error "$project: directory not found" "review"
-    return 1
-  fi
+  local project_dir
+  project_dir=$(resolve_project_dir "$workspace" "$project") || return 1
 
   local graph_file="$workspace/.collab/dep-graph.json"
 
