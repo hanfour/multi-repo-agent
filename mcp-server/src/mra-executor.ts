@@ -68,7 +68,14 @@ export async function executeMra(
   });
 }
 
-// Strip ANSI color codes from output
+// Strip terminal escape sequences so MCP clients receive plain text:
+// CSI (colors, cursor movement, erase), OSC (titles, hyperlinks,
+// terminated by BEL or ST), and carriage-return overwrites.
+const TERMINAL_ESCAPES = /\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*(?:\x07|\x1b\\)?)/g;
+
 export function stripAnsi(text: string): string {
-  return text.replace(/\x1b\[[0-9;]*m/g, "");
+  return text
+    .replace(TERMINAL_ESCAPES, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
 }
