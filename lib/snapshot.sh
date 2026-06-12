@@ -252,11 +252,16 @@ EOM
       "from_branch=$current_branch" "target_branch=$target_branch" \
       "uncommitted=$changes"
 
-  # Check for uncommitted changes
+  # Check for uncommitted changes. The confirmation prompt told the
+  # operator their work will be stashed; if the stash fails we must not
+  # proceed to the destructive reset.
   if [[ "$changes" -gt 0 ]]; then
     log_warn "$project: has $changes uncommitted changes" "rollback"
     log_warn "stashing changes before rollback" "rollback"
-    git -C "$project_dir" stash push -m "mra-rollback-$(date +%Y%m%d-%H%M%S)" 2>/dev/null
+    if ! git -C "$project_dir" stash push -m "mra-rollback-$(date +%Y%m%d-%H%M%S)" >/dev/null 2>&1; then
+      log_error "$project: failed to stash uncommitted changes; aborting rollback" "rollback"
+      return 1
+    fi
   fi
 
   log_progress "$project: rolling back to $snapshot_name ($target_commit)" "rollback"
@@ -319,12 +324,25 @@ EOM
 
   log_progress "rolling back all projects to '$snapshot_name'" "rollback"
 
+  # A failing project must not abort the loop (bin/mra.sh runs with
+  # set -e): finish the batch, then report exactly what failed so the
+  # operator never gets a silent partial rollback.
+  local succeeded=0 failed=0 failed_projects=()
   while IFS= read -r project; do
     [[ -z "$project" ]] && continue
-    MRA_ROLLBACK_FORCE=1 rollback_project "$workspace" "$project" "$snapshot_name"
+    if MRA_ROLLBACK_FORCE=1 rollback_project "$workspace" "$project" "$snapshot_name"; then
+      succeeded=$((succeeded+1))
+    else
+      failed=$((failed+1))
+      failed_projects+=("$project")
+    fi
   done < <(echo "$snapshot" | jq -r '.projects | keys[]')
 
-  log_success "rollback complete" "rollback"
+  if (( failed > 0 )); then
+    log_error "rollback finished with $failed failure(s) (${failed_projects[*]}); $succeeded project(s) rolled back" "rollback"
+    return 1
+  fi
+  log_success "rollback complete ($succeeded projects)" "rollback"
 }
 
 # Delete a snapshot
