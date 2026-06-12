@@ -22,4 +22,7 @@ log_progress() { _log "$CLR_WHITE" "$1" "${2:-}"; }
 log_success()  { _log "$CLR_GREEN" "$1" "${2:-}"; }
 log_info()     { _log "$CLR_CYAN"  "$1" "${2:-}"; }
 log_warn()     { _log "$CLR_YELLOW" "$1" "${2:-}"; }
-log_error()    { _log "$CLR_RED"   "$1" "${2:-}"; }
+# Errors go to stderr: callers often capture a function's stdout as its
+# return value, and an error printed to stdout would be silently
+# swallowed into that captured value.
+log_error()    { _log "$CLR_RED"   "$1" "${2:-}" >&2; }
