@@ -3,10 +3,42 @@
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-This project does not yet publish tagged releases; changes accumulate under
-**Unreleased** until a versioning scheme is adopted.
 
 ## [Unreleased]
+
+### Fixed
+- `log_error` now writes to stderr; error messages from functions that return
+  values via stdout (e.g. `resolve_project_dir`) were silently swallowed by
+  command substitution.
+- Default `mra sync` pulls with `--ff-only`: a diverged default branch now
+  fails loudly instead of silently creating a merge commit (behaviour
+  previously depended on the user's `pull.rebase` config).
+- Rollback is fail-safe: a failed stash aborts before the destructive
+  `git reset --hard`, and `mra rollback --all` finishes the whole batch,
+  names the failed projects, and exits non-zero instead of stopping silently
+  at the first failure.
+- Repo list in `mra init` interactive setup is now actually sorted by name
+  (the previous jq filter errored into a silenced fallback).
+- `mra config output-language` accepts values containing quotes, and config
+  setters clean up their temp file when jq rejects a value.
+- PKB age calculation: timestamps are parsed as UTC (previously off by the
+  local timezone offset on macOS) with a GNU `date` fallback so PKB freshness
+  works on Linux.
+
+### Security
+- Every user-facing `<project>` argument (`review`, `plan`, `analyze`,
+  `test-audit`, `eval-review`, `rollback`, and the default project-load
+  command) is now validated through `resolve_project_dir` — lexical
+  allowlist + realpath containment — closing path-traversal and
+  symlink-escape gaps (TM-001).
+- The MCP server enforces each tool's `inputSchema` server-side
+  (required/type/pattern/enum/maxLength) before arguments reach
+  `bin/mra.sh`; previously a non-compliant client could bypass the declared
+  pattern constraints. `mra_ask` questions are capped at 4096 characters.
+- `npm audit fix` for transitive `fast-uri` and `path-to-regexp` advisories
+  in the MCP server's dependency tree.
+
+## [2.3.0] - 2026-06-12
 
 ### Added
 - **Branch-aware sync & review suite** for working across many repos on feature branches:
@@ -36,3 +68,4 @@ This project does not yet publish tagged releases; changes accumulate under
   repository **and its git history**.
 
 [Unreleased]: https://github.com/hanfour/multi-repo-agent/commits/main
+[2.3.0]: https://github.com/hanfour/multi-repo-agent/commits/main
