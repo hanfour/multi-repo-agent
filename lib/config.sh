@@ -8,7 +8,27 @@ config_get() {
 config_set() {
   local key="$1" value="$2" config_file="${3:-$MRA_CONFIG}"
   local tmp; tmp=$(mktemp)
-  jq --argjson val "$value" ".$key = \$val" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+  if jq --argjson val "$value" ".$key = \$val" "$config_file" > "$tmp"; then
+    mv "$tmp" "$config_file"
+  else
+    rm -f "$tmp"
+    log_error "invalid JSON value for $key: $value" "config"
+    return 1
+  fi
+}
+
+# String values go through --arg (jq does the quoting); splicing the
+# value into a JSON literal breaks on embedded quotes.
+config_set_string() {
+  local key="$1" value="$2" config_file="${3:-$MRA_CONFIG}"
+  local tmp; tmp=$(mktemp)
+  if jq --arg val "$value" ".$key = \$val" "$config_file" > "$tmp"; then
+    mv "$tmp" "$config_file"
+  else
+    rm -f "$tmp"
+    log_error "failed to set $key" "config"
+    return 1
+  fi
 }
 config_get_alias() {
   local name="$1" config_file="${2:-$MRA_CONFIG}"
@@ -38,7 +58,7 @@ config_handle() {
         log_success "parallelTest $value" "config"
       else log_error "invalid value: $value (use on/off)" "config"; return 1; fi ;;
     output-language)
-      config_set "outputLanguage" "\"$value\""
+      config_set_string "outputLanguage" "$value"
       log_success "outputLanguage set to: $value" "config" ;;
     *) log_error "unknown config key: $key" "config"; return 1 ;;
   esac
