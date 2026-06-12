@@ -75,9 +75,14 @@ export default defineConfig({
             { text: '總覽', link: '/zh-TW/commands/' },
             { text: 'mra sync', link: '/zh-TW/commands/sync' },
             { text: 'mra branch', link: '/zh-TW/commands/branch' },
+            { text: 'mra review', link: '/zh-TW/commands/review' },
+            { text: 'mra plan', link: '/zh-TW/commands/plan' },
+            { text: 'mra test-audit', link: '/zh-TW/commands/test-audit' },
+            { text: 'mra analyze (PKB)', link: '/zh-TW/commands/pkb' },
           ]}],
           '/zh-TW/features/': [ { text: '功能', items: [
             { text: 'Personas', link: '/zh-TW/features/personas' },
+            { text: 'Mailbox 辯論', link: '/zh-TW/features/debate' },
           ]}],
         },
         footer: {
