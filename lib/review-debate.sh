@@ -11,19 +11,19 @@
 #
 # Usage: called from review.sh when strategy=debate
 
-DEBATE_MAX_ROUNDS=3
-
 # Run the full debate review pipeline
 # NOTE: All log_* calls use >&2 because this function runs inside $()
 # and stdout must contain only the final JSON result
 run_debate_review() {
   local project="$1"
   local project_dir="$2"
-  local graph_file="$3"
-  local base_ref="$4"
+  # $3 (graph_file), $4 (base_ref), $7 (deps) are reserved slots in the
+  # review-strategy call signature; this strategy does not use them.
+  local _graph_file="$3"
+  local _base_ref="$4"
   local project_type="$5"
   local consumers="$6"
-  local deps="$7"
+  local _deps="$7"
   local has_api_change="$8"
   local output_language="$9"
   local model="${10:-sonnet}"
