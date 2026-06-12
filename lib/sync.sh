@@ -22,7 +22,9 @@ get_default_branch() {
 
 get_current_branch() {
   local repo_dir="$1"
-  git -C "$repo_dir" rev-parse --abbrev-ref HEAD 2>/dev/null
+  # symbolic-ref fails on detached HEAD (rev-parse would return the
+  # confusing literal "HEAD"); report "(detached)" like lib/branch.sh.
+  git -C "$repo_dir" symbolic-ref --short -q HEAD 2>/dev/null || echo "(detached)"
 }
 
 is_on_default_branch() {

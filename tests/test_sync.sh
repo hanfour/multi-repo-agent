@@ -251,6 +251,21 @@ SYNC_RESULT_FILE="$RF" sync_repo "$SB/a" "ignored-org" >/dev/null 2>&1 || true
 grep -qx $'a\tskipped-branch\ttrue' "$RF" || { echo "FAIL: sync_repo should record skipped-branch: $(cat "$RF")"; errors=$((errors+1)); }
 rm -rf "$SB" "$RF"
 
+# --- get_current_branch: detached HEAD reports "(detached)", not "HEAD" ---
+# Matches get_branch_state in lib/branch.sh so log messages never show
+# the confusing literal branch name "HEAD".
+DH=$(mktemp -d)
+cd "$DH"
+git init -b main r &>/dev/null
+git -C "$DH/r" config user.email t@t.t; git -C "$DH/r" config user.name t
+git -C "$DH/r" commit --allow-empty -m c1 &>/dev/null
+git -C "$DH/r" checkout --detach -q
+result=$(get_current_branch "$DH/r")
+if [[ "$result" != "(detached)" ]]; then
+  echo "FAIL: detached HEAD should report '(detached)', got '$result'"; errors=$((errors+1))
+fi
+rm -rf "$DH"
+
 # --- sync_repo: a diverged default branch must NOT produce a merge commit ---
 # Default sync means "bring local up to date with remote", never "merge
 # remote into local history". With pull.rebase=false (a common user
