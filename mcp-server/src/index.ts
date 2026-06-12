@@ -8,6 +8,11 @@ import {
 import { TOOLS, findTool } from "./tools.js";
 import { executeMra, stripAnsi } from "./mra-executor.js";
 import {
+  validateToolInput,
+  toolTimeout,
+  InputValidationError,
+} from "./input-validation.js";
+import {
   loadWorkspacePolicy,
   assertWorkspaceAllowed,
   WorkspaceNotAllowedError,
@@ -50,9 +55,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
-  const input = (args ?? {}) as Record<string, string>;
-  const workspace = input.workspace;
+  let input: Record<string, string>;
+  try {
+    input = validateToolInput(tool, args);
+  } catch (error) {
+    if (error instanceof InputValidationError) {
+      return {
+        content: [{ type: "text", text: error.message }],
+        isError: true,
+      };
+    }
+    throw error;
+  }
 
+  const workspace = input.workspace;
   if (!workspace) {
     return {
       content: [{ type: "text", text: "workspace parameter is required" }],
@@ -73,7 +89,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   const mraArgs = tool.mraArgs(input);
-  const timeout = "timeout" in tool ? (tool as { timeout: number }).timeout : 180000;
+  const timeout = toolTimeout(tool);
 
   try {
     const result = await executeMra(mraArgs, workspace, timeout);

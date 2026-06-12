@@ -63,6 +63,7 @@ export const TOOLS = [
         },
         question: {
           type: "string",
+          maxLength: 4096,
           description: "Technical question about the codebase",
         },
       },
