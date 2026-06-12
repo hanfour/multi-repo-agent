@@ -25,6 +25,18 @@ pkb_dir() {
   echo "$project_dir/$PKB_DIR_NAME"
 }
 
+# Self-ignore the .mra cache directory so mra's per-project artifacts never
+# pollute the target project's git origin. Mirrors the .collab/.gitignore that
+# `mra init` writes for the workspace. Idempotent; leaves an existing file alone.
+pkb_ensure_gitignore() {
+  local project_dir="$1"
+  local mra_root="$project_dir/${PKB_DIR_NAME%%/*}"   # <project_dir>/.mra
+  local ignore_file="$mra_root/.gitignore"
+  [[ -f "$ignore_file" ]] && return 0
+  mkdir -p "$mra_root"
+  printf '*\n' > "$ignore_file"
+}
+
 pkb_exists() {
   local project_dir="$1"
   [[ -f "$(pkb_dir "$project_dir")/meta.json" ]]
@@ -50,6 +62,7 @@ pkb_init_meta() {
   local project_dir="$1" project="$2"
   local pkb="$(pkb_dir "$project_dir")"
   mkdir -p "$pkb/modules"
+  pkb_ensure_gitignore "$project_dir"
 
   cat > "$pkb/meta.json" <<EOF
 {
