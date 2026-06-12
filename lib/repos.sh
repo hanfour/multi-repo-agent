@@ -28,6 +28,14 @@ fetch_org_repos() {
     || { log_error "failed to fetch repos (check: gh auth status)" "repos"; return 1; }
 }
 
+# Emit one compact JSON object per repo, sorted by name. Falls back to
+# API order if the sort fails (e.g. unexpected shape).
+repos_sorted_entries() {
+  local org_repos="$1"
+  echo "$org_repos" | jq -c 'sort_by(.name) | .[]' 2>/dev/null \
+    || echo "$org_repos" | jq -c '.[]'
+}
+
 # Interactive: ask user about each repo
 interactive_repo_setup() {
   local workspace="$1" git_org="$2"
@@ -95,7 +103,7 @@ interactive_repo_setup() {
       --argjson clone "$should_clone" \
       '. + [{"name": $name, "clone": $clone, "branch": "main", "description": $desc, "archived": false}]')
 
-  done < <(echo "$org_repos" | jq -c '.[] | sort_by(.name)' 2>/dev/null || echo "$org_repos" | jq -c '.[]')
+  done < <(repos_sorted_entries "$org_repos")
 
   # Write repos.json
   echo "$repos_array" | jq '{repos: .}' > "$repos_file"
