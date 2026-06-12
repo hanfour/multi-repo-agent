@@ -508,7 +508,9 @@ mra doctor
 | `mra lint <project\|--all>` | JS/TS BLOCKER 規則 |
 | `mra cost [--reset]` | API 用量追蹤 |
 | `mra snapshot [name]` | 建立檢查點 |
+| `mra snapshots` | 列出快照 |
 | `mra rollback <project> [name]` | 還原快照 |
+| `mra trust <project>` | 授予專案 Docker 信任 |
 
 ### CI/CD 與協作
 
@@ -526,6 +528,8 @@ mra doctor
 | `mra dashboard` | 互動式 TUI |
 | `mra open <project>` | 在 IDE 中開啟 |
 | `mra config <key> <value>` | 設定 |
+| `mra alias <name> <path>` | 工作區別名 |
+| `mra template [repos\|db\|deps\|all]` | 產生設定範本 |
 | `mra clean` | 清理 |
 
 </details>

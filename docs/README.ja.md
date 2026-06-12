@@ -501,7 +501,9 @@ mra doctor
 | `mra lint <project\|--all>` | JS/TS BLOCKERルール |
 | `mra cost [--reset]` | API使用量の追跡 |
 | `mra snapshot [name]` | チェックポイントの作成 |
+| `mra snapshots` | スナップショットの一覧表示 |
 | `mra rollback <project> [name]` | スナップショットの復元 |
+| `mra trust <project>` | プロジェクトへのDocker信頼の付与 |
 
 ### CI/CD & コラボレーション (CI/CD & Collaboration)
 
@@ -519,6 +521,8 @@ mra doctor
 | `mra dashboard` | インタラクティブTUI |
 | `mra open <project>` | IDEで開く |
 | `mra config <key> <value>` | 設定 |
+| `mra alias <name> <path>` | ワークスペースエイリアス |
+| `mra template [repos\|db\|deps\|all]` | 設定テンプレートの生成 |
 | `mra clean` | クリーンアップ |
 
 </details>

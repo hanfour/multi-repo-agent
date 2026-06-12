@@ -501,7 +501,9 @@ mra doctor
 | `mra lint <project\|--all>` | JS/TS BLOCKER 규칙 |
 | `mra cost [--reset]` | API 사용량 추적 |
 | `mra snapshot [name]` | 체크포인트 생성 |
+| `mra snapshots` | 스냅샷 목록 조회 |
 | `mra rollback <project> [name]` | 스냅샷 복원 |
+| `mra trust <project>` | 프로젝트에 Docker 신뢰 부여 |
 
 ### CI/CD & 협업 (CI/CD & Collaboration)
 
@@ -519,6 +521,8 @@ mra doctor
 | `mra dashboard` | 인터랙티브 TUI |
 | `mra open <project>` | IDE에서 열기 |
 | `mra config <key> <value>` | 설정 |
+| `mra alias <name> <path>` | 워크스페이스 별칭 |
+| `mra template [repos\|db\|deps\|all]` | 설정 템플릿 생성 |
 | `mra clean` | 정리 |
 
 </details>
