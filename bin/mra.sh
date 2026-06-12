@@ -813,10 +813,8 @@ main() {
       if [[ -z "$project" ]]; then
         log_error "usage: mra analyze <project> [--model <model>]" "analyze"; exit 1
       fi
-      local project_dir="$workspace/$project"
-      if [[ ! -d "$project_dir" ]]; then
-        log_error "$project: directory not found" "analyze"; exit 1
-      fi
+      local project_dir
+      project_dir=$(resolve_project_dir "$workspace" "$project") || exit 1
       local output_language=""
       output_language=$(config_get "outputLanguage" 2>/dev/null)
       [[ -z "$output_language" || "$output_language" == "null" ]] && output_language=""
@@ -846,8 +844,8 @@ main() {
         log_error "usage: mra plan <project> \"<task>\" [--model <model>] [--dual]" "plan"; exit 1
       fi
       local workspace; workspace=$(resolve_workspace)
-      local project_dir="$workspace/$plan_project"
-      [[ ! -d "$project_dir" ]] && { log_error "$plan_project: not found" "plan"; exit 1; }
+      local project_dir
+      project_dir=$(resolve_project_dir "$workspace" "$plan_project") || exit 1
 
       if [[ "$plan_dual" == "true" ]] && ! ensure_codex_available; then
         log_error "mra plan --dual requires the codex CLI (not found on PATH)" "plan"; exit 1
@@ -887,8 +885,8 @@ main() {
         log_error "usage: mra test-audit <project> [--model M]" "test-audit"; exit 1
       fi
       local workspace; workspace=$(resolve_workspace)
-      local project_dir="$workspace/$audit_project"
-      [[ ! -d "$project_dir" ]] && { log_error "$audit_project: not found" "test-audit"; exit 1; }
+      local project_dir
+      project_dir=$(resolve_project_dir "$workspace" "$audit_project") || exit 1
 
       local lang=""
       lang=$(config_get "outputLanguage" 2>/dev/null); [[ "$lang" == "null" ]] && lang=""
@@ -913,6 +911,15 @@ main() {
           *) projects+=("$1"); shift ;;
         esac
       done
+
+      # User-typed project names are joined onto the workspace path
+      # downstream (launch, sync, deps); reject traversal here (TM-001).
+      if (( ${#projects[@]} > 0 )); then
+        local p
+        for p in "${projects[@]}"; do
+          validate_project_name "$p" || exit 1
+        done
+      fi
 
       local workspace
       workspace=$(resolve_workspace)

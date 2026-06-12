@@ -173,7 +173,10 @@ list_snapshots() {
 rollback_project() {
   local workspace="$1" project="$2" snapshot_name="${3:-}"
   local snapshots_file; snapshots_file=$(get_snapshots_file "$workspace")
-  local project_dir="$workspace/$project"
+  # Fail closed before reading any snapshot state: project names may come
+  # from a hand-edited snapshots file or dep-graph (TM-001).
+  local project_dir
+  project_dir=$(resolve_project_dir "$workspace" "$project") || return 1
 
   if [[ ! -f "$snapshots_file" ]]; then
     log_error "no snapshots found" "rollback"
