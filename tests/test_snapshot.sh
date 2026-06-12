@@ -96,6 +96,59 @@ else
   fail_test "ignore-integrity flag should allow rollback"
 fi
 
+# --- Stash failure must abort rollback before the destructive reset ---
+# The confirmation prompt promises "uncommitted changes ... will be
+# stashed"; if the stash fails, proceeding to `git reset --hard` would
+# destroy the work the operator was told is safe.
+command git -C "$TEST_DIR/myapp" reset --hard "$COMMIT_V2" -q
+echo "dirty" >> "$TEST_DIR/myapp/file.txt"
+
+git() {
+  if [[ "$*" == *"stash push"* ]]; then return 1; fi
+  command git "$@"
+}
+rc=0
+MRA_ROLLBACK_FORCE=1 MRA_ROLLBACK_IGNORE_INTEGRITY=1 \
+  rollback_project "$TEST_DIR" "myapp" "test-snap" </dev/null >/dev/null 2>&1 || rc=$?
+unset -f git
+
+[[ $rc -ne 0 ]] && pass_test "rollback failed when stash failed" || fail_test "rollback should fail when stash fails"
+current=$(git -C "$TEST_DIR/myapp" rev-parse HEAD)
+[[ "$current" == "$COMMIT_V2" ]] && pass_test "HEAD did not move after stash failure" || fail_test "HEAD moved despite stash failure"
+grep -q "dirty" "$TEST_DIR/myapp/file.txt" && pass_test "uncommitted work preserved after stash failure" || fail_test "uncommitted work lost despite stash failure"
+command git -C "$TEST_DIR/myapp" checkout -- file.txt
+
+# --- rollback_all: continue past per-project failures, report at end ---
+# Under `set -e` (as in bin/mra.sh) a failing rollback_project must not
+# abort the loop and silently leave a partial rollback.
+cat > "$TEST_DIR/.collab/dep-graph.json" <<'EOF'
+{"version":1,"workspace":"test","projects":{"aaa":{"type":"rails-api","deps":{},"consumedBy":[]},"myapp":{"type":"rails-api","deps":{},"consumedBy":[]}}}
+EOF
+mkdir -p "$TEST_DIR/aaa"
+cd "$TEST_DIR/aaa"
+git init -b main . &>/dev/null
+git config user.email t@t
+git config user.name t
+echo "a1" > a.txt
+git add a.txt && git -c commit.gpgsign=false commit -m "a1" &>/dev/null
+
+command git -C "$TEST_DIR/myapp" reset --hard "$COMMIT_V2" -q
+create_snapshot "$TEST_DIR" "all-snap" 2>/dev/null
+
+# Break "aaa" (sorts before myapp in the rollback loop) and move myapp
+# away from the snapshotted commit so the rollback has real work to do.
+rm -rf "$TEST_DIR/aaa/.git"
+command git -C "$TEST_DIR/myapp" reset --hard "$COMMIT_V1" -q
+
+rc=0
+out=$( (set -e; MRA_ROLLBACK_FORCE=1 rollback_all "$TEST_DIR" "all-snap" </dev/null) 2>&1 ) || rc=$?
+
+[[ $rc -ne 0 ]] && pass_test "rollback_all reported failure" || fail_test "rollback_all should return non-zero when a project fails"
+current=$(git -C "$TEST_DIR/myapp" rev-parse HEAD)
+[[ "$current" == "$COMMIT_V2" ]] && pass_test "rollback_all continued past failing project" || fail_test "rollback_all aborted before rolling back myapp (got $current)"
+echo "$out" | grep -qi "fail" && pass_test "rollback_all summarized failures" || fail_test "rollback_all should summarize failures in output"
+delete_snapshot "$TEST_DIR" "all-snap" 2>/dev/null
+
 # --- Existing: list_snapshots output ---
 output=$(list_snapshots "$TEST_DIR" 2>&1)
 [[ "$output" == *"test-snap"* ]] && pass_test "list_snapshots shows test-snap" || fail_test "list should show test-snap"
