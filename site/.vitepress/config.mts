@@ -41,6 +41,10 @@ export default defineConfig({
             { text: 'mra plan', link: '/commands/plan' },
             { text: 'mra test-audit', link: '/commands/test-audit' },
             { text: 'mra analyze (PKB)', link: '/commands/pkb' },
+            { text: 'Workspace & Graph', link: '/commands/workspace' },
+            { text: 'Testing & Docker', link: '/commands/testing' },
+            { text: 'Snapshots & Rollback', link: '/commands/snapshots' },
+            { text: 'Status & Ops', link: '/commands/ops' },
           ]}],
           '/features/': [ { text: 'Features', items: [
             { text: 'Personas', link: '/features/personas' },
@@ -79,6 +83,10 @@ export default defineConfig({
             { text: 'mra plan', link: '/zh-TW/commands/plan' },
             { text: 'mra test-audit', link: '/zh-TW/commands/test-audit' },
             { text: 'mra analyze (PKB)', link: '/zh-TW/commands/pkb' },
+            { text: '工作區與依賴圖', link: '/zh-TW/commands/workspace' },
+            { text: '測試與 Docker', link: '/zh-TW/commands/testing' },
+            { text: '快照與回滾', link: '/zh-TW/commands/snapshots' },
+            { text: '狀態與維運', link: '/zh-TW/commands/ops' },
           ]}],
           '/zh-TW/features/': [ { text: '功能', items: [
             { text: 'Personas', link: '/zh-TW/features/personas' },
