@@ -103,14 +103,19 @@ fi
 command git -C "$TEST_DIR/myapp" reset --hard "$COMMIT_V2" -q
 echo "dirty" >> "$TEST_DIR/myapp/file.txt"
 
-git() {
-  if [[ "$*" == *"stash push"* ]]; then return 1; fi
-  command git "$@"
-}
+# Mock git inside a subshell so the override stays scoped to this one test.
+# A script-level git() would make shellcheck (SC2218) treat every real `git`
+# call above as a reference to this later definition. rollback_project still
+# resolves git() at call time within the subshell, so the stash-push mock holds.
 rc=0
-MRA_ROLLBACK_FORCE=1 MRA_ROLLBACK_IGNORE_INTEGRITY=1 \
-  rollback_project "$TEST_DIR" "myapp" "test-snap" </dev/null >/dev/null 2>&1 || rc=$?
-unset -f git
+(
+  git() {
+    if [[ "$*" == *"stash push"* ]]; then return 1; fi
+    command git "$@"
+  }
+  MRA_ROLLBACK_FORCE=1 MRA_ROLLBACK_IGNORE_INTEGRITY=1 \
+    rollback_project "$TEST_DIR" "myapp" "test-snap" </dev/null >/dev/null 2>&1
+) || rc=$?
 
 [[ $rc -ne 0 ]] && pass_test "rollback failed when stash failed" || fail_test "rollback should fail when stash fails"
 current=$(git -C "$TEST_DIR/myapp" rev-parse HEAD)
