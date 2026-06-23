@@ -29,4 +29,13 @@ out=$(pkb_build_context "$PROJ" "" "full")
 echo "$out" | grep -q 'VERBATIM_CONVENTIONS_MARKER' || fail "OFF: verbatim conventions must load"
 
 rm -rf "$PROJ"; rm -f "$MRA_CONFIG"
+
+# Sources-suffix helper: omit CLAUDE.md/rules from the read list when native loading is on
+MRA_CONFIG=$(mktemp)
+printf '{"loadProjectMemory": true}\n'  > "$MRA_CONFIG"
+[[ -z "$(_pkb_conventions_sources_suffix)" ]] || fail "suffix: ON must be empty"
+printf '{"loadProjectMemory": false}\n' > "$MRA_CONFIG"
+[[ "$(_pkb_conventions_sources_suffix)" == *"CLAUDE.md"* ]] || fail "suffix: OFF must list CLAUDE.md"
+rm -f "$MRA_CONFIG"
+
 if [[ $errors -eq 0 ]]; then echo "PASS: all pkb_context tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
