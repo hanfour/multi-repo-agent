@@ -59,6 +59,11 @@ run_launch ""
 grep -q 'Multi-Repo Orchestrator' "$CAPTURE"   || fail "case2: orchestrator prompt not inlined"
 grep -q 'Output Language:' "$CAPTURE"           && fail "case2: language directive should be absent"
 
+# --- Case 1b: interactive launch must restrict setting-sources to user,project ---
+run_launch "繁體中文台灣用語"
+grep -qx -- '--setting-sources' "$CAPTURE" || fail "case1b: --setting-sources missing"
+grep -qx -- 'user,project'      "$CAPTURE" || fail "case1b: expected setting-sources value user,project"
+
 rm -rf "$TEST_DIR" "$CAPTURE"
 
 if [[ $errors -eq 0 ]]; then

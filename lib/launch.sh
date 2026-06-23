@@ -27,6 +27,11 @@ launch_claude() {
     claude_args+=("$arg")
   done < <(build_add_dir_args "$workspace" "${projects[@]}")
 
+  # Restrict settings to user+project scope so the orchestrator keeps the
+  # operator's global settings.json but never loads each --add-dir repo's
+  # gitignored CLAUDE.local.md (local scope) when project-memory is on.
+  claude_args+=(--setting-sources user,project)
+
   # Display loaded projects
   local project_list
   project_list=$(printf '%s, ' "${projects[@]}")
