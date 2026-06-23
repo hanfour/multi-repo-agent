@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Render OneAD spec/plan markdown files to standalone HTML.
+"""Render spec/plan markdown files to standalone HTML.
 
 Outputs alongside each .md: <basename>.html — self-contained, no CDN runtime,
-just Google Fonts via @import for typography. Style aligns with the OneAD
-proposal deck (light theme, no gradients, blue #1E5BFC + orange #F36F3E).
+just Google Fonts via @import for typography. Style: light theme, no
+gradients, blue #1E5BFC + orange #F36F3E.
 
 Usage:
     python3 render-html.py                       # render default set
@@ -285,7 +285,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
 <div class="layout">
   <aside class="toc">
-    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
     <div class="toc-title">{title}</div>
     <div class="toc-rendered">{toc_html}</div>
   </aside>

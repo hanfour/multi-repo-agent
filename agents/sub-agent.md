@@ -204,7 +204,7 @@ Do NOT:
 
 Always use `mra test <project>` for Docker isolation. Report DONE only after `mra test` returns exit code 0.
 
-## OneAD Frontend Coding Standards
+## Frontend Coding Standards
 
 When writing TypeScript/JavaScript for frontend projects (node-frontend, nextjs), follow these rules:
 

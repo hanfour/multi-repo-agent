@@ -12,7 +12,7 @@ pass_test() { echo "PASS: $1"; ((pass++)) || true; }
 fail_test() { echo "FAIL: $1"; errors=$((errors+1)) || true; }
 
 WS=$(mktemp -d)
-mkdir -p "$WS/onead-api" "$WS/.collab"
+mkdir -p "$WS/web-api" "$WS/.collab"
 # Symlink that escapes the workspace — should be rejected by realpath containment check.
 mkdir -p "$WS/../escape-target"
 ln -s "$WS/../escape-target" "$WS/escape-link"
@@ -27,7 +27,7 @@ for bad in "" ".." "../etc" "/etc" "a/b" "a\\b" $'a\nb' ".hidden" "-leading-dash
 done
 
 # --- validate_project_name: accepts safe patterns ---
-for good in "onead-api" "user_service" "v0.5" "Alpha123" "a"; do
+for good in "web-api" "user_service" "v0.5" "Alpha123" "a"; do
   if validate_project_name "$good" 2>/dev/null; then
     pass_test "validate_project_name accepted: $good"
   else
@@ -57,8 +57,8 @@ else
 fi
 
 # --- resolve_project_dir: happy path returns absolute path under workspace ---
-resolved=$(resolve_project_dir "$WS" "onead-api" 2>/dev/null)
-expected=$(cd "$WS/onead-api" && pwd -P)
+resolved=$(resolve_project_dir "$WS" "web-api" 2>/dev/null)
+expected=$(cd "$WS/web-api" && pwd -P)
 if [[ "$resolved" == "$expected" ]]; then
   pass_test "resolve_project_dir returned realpath for safe project"
 else

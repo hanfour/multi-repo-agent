@@ -93,7 +93,7 @@ Severity levels:
 - **HIGH**: Should fix. Missing error handling, missing test coverage for important path, potential bug.
 - **MEDIUM**: Consider fixing. Code quality issue, minor improvement, non-blocking concern.
 
-## OneAD Frontend Standards (JS/TS)
+## Frontend Standards (JS/TS)
 
 When reviewing TypeScript or JavaScript files in frontend projects (node-frontend, nextjs), apply these standards from your team's frontend TypeScript/JavaScript best-practice guide (if the project defines one)
 
