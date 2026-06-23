@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project-Memory Loading Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-title">Project-Memory Loading Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#global-constraints">Global Constraints</a></li>
+<li><a href="#file-structure">File Structure</a></li>
+<li><a href="#phase-1-loading-hard-gate-tests-docs">Phase 1 — Loading + hard gate + tests + docs</a><ul>
+<li><a href="#task-1-apply_project_memory_env-helper-unit-test">Task 1: apply_project_memory_env helper + unit test</a></li>
+<li><a href="#task-2-wire-into-main-ordering-guard">Task 2: Wire into main() + ordering guard</a></li>
+<li><a href="#task-3-config_handle-cli-arm-mra-config-project-memory-onoff">Task 3: config_handle CLI arm (mra config project-memory on/off)</a></li>
+<li><a href="#task-4-interactive-launch-guard-setting-sources-userproject">Task 4: Interactive launch guard (--setting-sources user,project)</a></li>
+<li><a href="#task-5-default-the-flag-on-env-inheritance-integration-test">Task 5: Default the flag ON + env-inheritance integration test</a></li>
+<li><a href="#task-6-documentation-scope-statement-everywhere">Task 6: Documentation (scope statement everywhere)</a></li>
+</ul>
+</li>
+<li><a href="#phase-2-pkb-de-duplication-splittable-into-a-follow-up-pr">Phase 2 — PKB de-duplication (splittable into a follow-up PR)</a><ul>
+<li><a href="#task-7-pkb_build_context-drops-verbatim-conventions-when-native-loading-is-on">Task 7: pkb_build_context drops verbatim conventions when native loading is on</a></li>
+<li><a href="#task-8-optional-deferrable-stop-pkb-generators-re-reading-auto-loaded-files">Task 8 (optional, deferrable): stop PKB generators re-reading auto-loaded files</a></li>
+</ul>
+</li>
+<li><a href="#self-review">Self-Review</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>Project-Memory Loading Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Make each <code>--add-dir</code> project's native <code>CLAUDE.md</code>/<code>AGENTS.md</code>/<code>.claude/rules/</code> load into the <code>claude</code> CLI mra launches, gated by a config flag, guarded against cross-project leakage, and locked by offline tests.</p>
+<p><strong>Architecture:</strong> A single <code>apply_project_memory_env()</code> helper exports <code>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1</code> (or unsets it) at the top of <code>main()</code>; every child <code>claude</code> process inherits it. The interactive launch adds <code>--setting-sources user,project</code> so it never pulls each repo's gitignored <code>CLAUDE.local.md</code>. PKB stays complementary by dropping its verbatim conventions copy when native loading is on.</p>
+<p><strong>Tech Stack:</strong> Bash, jq, the existing <code>tests/test_*.sh</code> harness run by <code>test.sh</code>.</p>
+<h2 id="global-constraints">Global Constraints</h2>
+<ul>
+<li>Verified against claude <strong>2.1.186</strong>: <code>--add-dir</code> auto-loads <code>.claude/skills/</code>; <code>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1</code> is required for CLAUDE.md/AGENTS.md/<code>.claude/rules/</code>; <code>--setting-sources</code> excluding <code>local</code> drops add-dir <code>CLAUDE.local.md</code>.</li>
+<li>Commits: <code>&lt;type&gt;: &lt;desc&gt;</code> (zh-TW ok), <strong>no</strong> attribution footer (disabled globally).</li>
+<li>Coding style: immutability, many small focused files, comprehensive error handling, no hardcoded values.</li>
+<li>The flag governs <strong>CLAUDE.md + AGENTS.md + .claude/rules ONLY</strong> — not skills (already auto-load), not <code>settings.local.json</code>.</li>
+<li><strong>Hard gate:</strong> <code>config.json</code> may default <code>loadProjectMemory: true</code> only once the interactive launch carries <code>--setting-sources user,project</code> (Task 4 lands before Task 5).</li>
+<li>Default ON semantics: only an explicit <code>"loadProjectMemory": false</code> disables; a missing key (jq <code>null</code>) means ON.</li>
+</ul>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/project-memory.sh</code> (new)</td>
+<td>The <code>apply_project_memory_env()</code> switch — the only env-mutating lib</td>
+</tr>
+<tr>
+<td><code>bin/mra.sh</code></td>
+<td>Source the lib; call the switch once at the top of <code>main()</code></td>
+</tr>
+<tr>
+<td><code>lib/config.sh</code></td>
+<td><code>config_handle</code> gains the <code>project-memory on/off</code> arm</td>
+</tr>
+<tr>
+<td><code>config.json</code></td>
+<td>Ships <code>loadProjectMemory: true</code></td>
+</tr>
+<tr>
+<td><code>lib/launch.sh</code></td>
+<td>Interactive launch adds <code>--setting-sources user,project</code></td>
+</tr>
+<tr>
+<td><code>lib/pkb.sh</code></td>
+<td><code>pkb_build_context</code> + <code>_pkb_generate_conventions</code> drop duplicate rule content when native loading is on</td>
+</tr>
+<tr>
+<td><code>tests/test_project_memory.sh</code> (new)</td>
+<td>Unit: flag→export/unset; config_handle; ordering guard</td>
+</tr>
+<tr>
+<td><code>tests/test_launch.sh</code></td>
+<td>Extend stub to capture env + assert <code>--setting-sources user,project</code></td>
+</tr>
+<tr>
+<td><code>tests/test_pkb_context.sh</code> (new)</td>
+<td><code>pkb_build_context</code> omits verbatim conventions when flag on</td>
+</tr>
+<tr>
+<td><code>README.md</code> / <code>CHANGELOG.md</code> / <code>usage()</code></td>
+<td>Document the flag and its exact scope</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="phase-1-loading-hard-gate-tests-docs">Phase 1 — Loading + hard gate + tests + docs</h2>
+<h3 id="task-1-apply_project_memory_env-helper-unit-test">Task 1: <code>apply_project_memory_env</code> helper + unit test</h3>
+<p><strong>Files:</strong>
+- Create: <code>lib/project-memory.sh</code>
+- Test: <code>tests/test_project_memory.sh</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>config_get</code> (from <code>lib/config.sh</code>), <code>MRA_CONFIG</code>.
+- Produces: <code>apply_project_memory_env()</code> — reads <code>loadProjectMemory</code>, exports <code>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1</code> when not <code>false</code>, <code>unset</code>s it when <code>false</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — create <code>tests/test_project_memory.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="nb">set</span><span class="w"> </span>-uo<span class="w"> </span>pipefail
+<span class="nv">SCRIPT_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/colors.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/config.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/project-memory.sh&quot;</span>
+
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span>
+fail<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="nv">MRA_CONFIG</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+write_config<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_CONFIG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<span class="nv">VAR</span><span class="o">=</span>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD
+
+<span class="c1"># Case 1: flag ON -&gt; exported = 1</span>
+<span class="nb">unset</span><span class="w"> </span><span class="nv">$VAR</span><span class="p">;</span><span class="w"> </span>write_config<span class="w"> </span><span class="s1">&#39;{&quot;loadProjectMemory&quot;: true}&#39;</span><span class="p">;</span><span class="w"> </span>apply_project_memory_env
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="p">!VAR</span><span class="k">:-</span><span class="nv">unset</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;ON: expected =1, got </span><span class="si">${</span><span class="p">!VAR</span><span class="k">:-</span><span class="nv">unset</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="c1"># Case 2: flag OFF -&gt; unset (even if previously set)</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">$VAR</span><span class="o">=</span><span class="m">1</span><span class="p">;</span><span class="w"> </span>write_config<span class="w"> </span><span class="s1">&#39;{&quot;loadProjectMemory&quot;: false}&#39;</span><span class="p">;</span><span class="w"> </span>apply_project_memory_env
+<span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="p">!VAR+x</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;OFF: expected unset, got </span><span class="si">${</span><span class="p">!VAR</span><span class="k">:-</span><span class="nv">unset</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="c1"># Case 3: key missing -&gt; default ON</span>
+<span class="nb">unset</span><span class="w"> </span><span class="nv">$VAR</span><span class="p">;</span><span class="w"> </span>write_config<span class="w"> </span><span class="s1">&#39;{&quot;autoScan&quot;: true}&#39;</span><span class="p">;</span><span class="w"> </span>apply_project_memory_env
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="p">!VAR</span><span class="k">:-</span><span class="nv">unset</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;missing: expected default-ON =1, got </span><span class="si">${</span><span class="p">!VAR</span><span class="k">:-</span><span class="nv">unset</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="c1"># Case 4: OFF must override a globally-exported var (mra authoritative)</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">$VAR</span><span class="o">=</span><span class="m">1</span><span class="p">;</span><span class="w"> </span>write_config<span class="w"> </span><span class="s1">&#39;{&quot;loadProjectMemory&quot;: false}&#39;</span><span class="p">;</span><span class="w"> </span>apply_project_memory_env
+<span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="p">!VAR+x</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;OFF-global: mra must unset a globally-exported var&quot;</span>
+
+rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_CONFIG</span><span class="s2">&quot;</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$errors</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: all project-memory tests passed&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$errors</span><span class="s2"> tests failed&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_project_memory.sh</code>
+Expected: FAIL — <code>lib/project-memory.sh</code> does not exist (source error).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write minimal implementation</strong> — create <code>lib/project-memory.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="c1"># Project-memory loading switch.</span>
+<span class="c1">#</span>
+<span class="c1"># Controls whether each --add-dir project&#39;s NATIVE instruction files</span>
+<span class="c1"># (CLAUDE.md, AGENTS.md, .claude/rules/) load into the claude CLI mra</span>
+<span class="c1"># launches. Governed ONLY by those files — NOT skills (already auto-load</span>
+<span class="c1"># via --add-dir) and NOT settings.local.json.</span>
+<span class="c1">#</span>
+<span class="c1"># Implemented with claude&#39;s CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD</span>
+<span class="c1"># env var, exported once at the top of main() so every child claude</span>
+<span class="c1"># process (interactive launch, headless `claude -p`, pkb generators)</span>
+<span class="c1"># inherits it. Depends on config_get (lib/config.sh).</span>
+apply_project_memory_env<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>enabled
+<span class="w">  </span><span class="nv">enabled</span><span class="o">=</span><span class="k">$(</span>config_get<span class="w"> </span><span class="s2">&quot;loadProjectMemory&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span>
+<span class="w">  </span><span class="c1"># Default ON: only an explicit &quot;false&quot; disables. A missing key (jq null),</span>
+<span class="w">  </span><span class="c1"># &quot;true&quot;, or empty all enable. unset (not skip) on OFF so an OFF config is</span>
+<span class="w">  </span><span class="c1"># authoritative even over a var the user exported globally in their shell.</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$enabled</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;false&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">unset</span><span class="w"> </span>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span><span class="nb">export</span><span class="w"> </span><span class="nv">CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD</span><span class="o">=</span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_project_memory.sh</code>
+Expected: <code>PASS: all project-memory tests passed</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/project-memory.sh<span class="w"> </span>tests/test_project_memory.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(launch): apply_project_memory_env 開關(CLAUDE.md/rules 原生載入)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="task-2-wire-into-main-ordering-guard">Task 2: Wire into <code>main()</code> + ordering guard</h3>
+<p><strong>Files:</strong>
+- Modify: <code>bin/mra.sh</code> (source line near 13; call at top of <code>main()</code> line 150)
+- Test: <code>tests/test_project_memory.sh</code> (append ordering case)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>apply_project_memory_env</code> (Task 1).
+- Produces: the env var is set/unset before any <code>case "$command"</code> dispatch, so every subcommand's child claude inherits it.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — append before the final summary block of <code>tests/test_project_memory.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># Case 5: ordering guard — the call must precede `case &quot;$command&quot;` dispatch</span>
+<span class="nv">mra_main</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/bin/mra.sh&quot;</span>
+<span class="nv">call_line</span><span class="o">=</span><span class="k">$(</span>grep<span class="w"> </span>-n<span class="w"> </span><span class="s1">&#39;^[[:space:]]*apply_project_memory_env&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mra_main</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-1<span class="w"> </span><span class="p">|</span><span class="w"> </span>cut<span class="w"> </span>-d:<span class="w"> </span>-f1<span class="k">)</span>
+<span class="nv">case_line</span><span class="o">=</span><span class="k">$(</span>grep<span class="w"> </span>-n<span class="w"> </span><span class="s1">&#39;case &quot;\$command&quot; in&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mra_main</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-1<span class="w"> </span><span class="p">|</span><span class="w"> </span>cut<span class="w"> </span>-d:<span class="w"> </span>-f1<span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$call_line</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$case_line</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$call_line</span><span class="s2">&quot;</span><span class="w"> </span>-lt<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$case_line</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;ordering: call (line </span><span class="si">${</span><span class="nv">call_line</span><span class="k">:-</span><span class="nv">none</span><span class="si">}</span><span class="s2">) must precede case (line </span><span class="si">${</span><span class="nv">case_line</span><span class="k">:-</span><span class="nv">none</span><span class="si">}</span><span class="s2">)&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_project_memory.sh</code>
+Expected: FAIL — <code>ordering: call (line none) must precede case ...</code> (not wired yet).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Implement</strong> — two edits in <code>bin/mra.sh</code>:</li>
+</ul>
+<p>After <code>source "$MRA_DIR/lib/config.sh"</code> (line 13) add:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/project-memory.sh&quot;</span>
+</code></pre></div>
+
+<p>In <code>main()</code>, between <code>local command="${1:-}"</code> and the help check, add:</p>
+<div class="highlight"><pre><span></span><code>main<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">command</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">1</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="w">  </span>apply_project_memory_env
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$command</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$command</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;--help&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$command</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;-h&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_project_memory.sh</code>
+Expected: <code>PASS: all project-memory tests passed</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests/test_project_memory.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(launch): main() 入口套用 project-memory 開關 + ordering guard&quot;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="task-3-config_handle-cli-arm-mra-config-project-memory-onoff">Task 3: <code>config_handle</code> CLI arm (<code>mra config project-memory on/off</code>)</h3>
+<p><strong>Files:</strong>
+- Modify: <code>lib/config.sh</code> (<code>config_handle</code>, insert before the <code>*)</code> arm at line 63)
+- Test: <code>tests/test_project_memory.sh</code> (append config_handle case)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>config_set</code> (lib/config.sh).
+- Produces: <code>config_handle project-memory on|off</code> writes <code>loadProjectMemory: true|false</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — append before the final summary block of <code>tests/test_project_memory.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># Case 6: config_handle project-memory on/off flips loadProjectMemory</span>
+write_config<span class="w"> </span><span class="s1">&#39;{}&#39;</span>
+config_handle<span class="w"> </span>project-memory<span class="w"> </span>off<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>config_get<span class="w"> </span>loadProjectMemory<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;false&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;config_handle off -&gt; false&quot;</span>
+config_handle<span class="w"> </span>project-memory<span class="w"> </span>on<span class="w">  </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>config_get<span class="w"> </span>loadProjectMemory<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w">  </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;config_handle on -&gt; true&quot;</span>
+config_handle<span class="w"> </span>project-memory<span class="w"> </span>bogus<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;config_handle bogus should return non-zero&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_project_memory.sh</code>
+Expected: FAIL — <code>unknown config key: project-memory</code> (arm not added).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Implement</strong> — in <code>lib/config.sh</code>, insert this arm immediately before the <code>*) log_error "unknown config key: $key" ...</code> line:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>project-memory<span class="o">)</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$value</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;on&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$value</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;off&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">        </span>config_set<span class="w"> </span><span class="s2">&quot;loadProjectMemory&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$value</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;on&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="w">        </span>log_success<span class="w"> </span><span class="s2">&quot;loadProjectMemory </span><span class="nv">$value</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;config&quot;</span>
+<span class="w">      </span><span class="k">else</span><span class="w"> </span>log_error<span class="w"> </span><span class="s2">&quot;invalid value: </span><span class="nv">$value</span><span class="s2"> (use on/off)&quot;</span><span class="w"> </span><span class="s2">&quot;config&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span><span class="w"> </span><span class="p">;;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_project_memory.sh</code>
+Expected: <code>PASS: all project-memory tests passed</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/config.sh<span class="w"> </span>tests/test_project_memory.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(config): mra config project-memory on/off&quot;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="task-4-interactive-launch-guard-setting-sources-userproject">Task 4: Interactive launch guard (<code>--setting-sources user,project</code>)</h3>
+<p><strong>Files:</strong>
+- Modify: <code>lib/launch.sh</code> (in <code>launch_claude</code>, right after the <code>--add-dir</code> args are collected, ~line 29)
+- Test: <code>tests/test_launch.sh</code> (add a positive assertion)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: none new.
+- Produces: every interactive launch passes <code>--setting-sources user,project</code> — keeps the operator's user-scope settings.json/permissions while excluding <code>local</code> scope, so each repo's gitignored <code>CLAUDE.local.md</code> is never pulled into the shared orchestrator context.</p>
+<blockquote>
+<p><strong>Why <code>user,project</code> and not bare <code>project</code>:</strong> both exclude <code>local</code> (the leak vector), but bare <code>project</code> also drops the operator's <code>~/.claude/settings.json</code> (their global allowedTools/hooks) from the interactive session — a permissions regression. <code>user,project</code> excludes only <code>local</code>. Headless calls keep their existing bare <code>project</code> (they are ephemeral and already audited). This refines spec D4.</p>
+</blockquote>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — in <code>tests/test_launch.sh</code>, add after the Case 1 assertions:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- Case 1b: interactive launch must restrict setting-sources to user,project ---</span>
+grep<span class="w"> </span>-qx<span class="w"> </span>--<span class="w"> </span><span class="s1">&#39;--setting-sources&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CAPTURE</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;case1b: --setting-sources missing&quot;</span>
+grep<span class="w"> </span>-qx<span class="w"> </span>--<span class="w"> </span><span class="s1">&#39;user,project&#39;</span><span class="w">      </span><span class="s2">&quot;</span><span class="nv">$CAPTURE</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;case1b: expected setting-sources value user,project&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_launch.sh</code>
+Expected: FAIL — <code>case1b: --setting-sources missing</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Implement</strong> — in <code>lib/launch.sh</code>, immediately after the <code>while IFS= read -r -d '' arg; do claude_args+=("$arg"); done &lt; &lt;(build_add_dir_args ...)</code> block, add:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1"># Restrict settings to user+project scope so the orchestrator keeps the</span>
+<span class="w">  </span><span class="c1"># operator&#39;s global settings.json but never loads each --add-dir repo&#39;s</span>
+<span class="w">  </span><span class="c1"># gitignored CLAUDE.local.md (local scope) when project-memory is on.</span>
+<span class="w">  </span><span class="nv">claude_args</span><span class="o">+=(</span>--setting-sources<span class="w"> </span>user,project<span class="o">)</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_launch.sh</code>
+Expected: <code>PASS: all launch tests passed</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/launch.sh<span class="w"> </span>tests/test_launch.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;fix(launch): 互動 launch 加 --setting-sources user,project(排除跨專案 CLAUDE.local.md)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="task-5-default-the-flag-on-env-inheritance-integration-test">Task 5: Default the flag ON + env-inheritance integration test</h3>
+<p><strong>Files:</strong>
+- Modify: <code>config.json</code> (add <code>"loadProjectMemory": true</code>)
+- Test: <code>tests/test_launch.sh</code> (capture env in the stub; ON→ENV:1, OFF→ENV:unset)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>apply_project_memory_env</code> (Task 1), <code>launch_claude</code> (existing).
+- Produces: proof that a launched child claude inherits the exported env var end-to-end.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — two edits in <code>tests/test_launch.sh</code>.</li>
+</ul>
+<p>(a) Extend the <code>claude()</code> stub to also record the env var (append one line; keep existing argv capture intact):</p>
+<div class="highlight"><pre><span></span><code>claude<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span>:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CAPTURE</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$@</span><span class="s2">&quot;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CAPTURE</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;ENV:%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD</span><span class="k">:-</span><span class="nv">unset</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CAPTURE</span><span class="s2">&quot;</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<p>(b) Add an integration block at the end (before the summary). It sources the switch, drives it with a temp config, then launches:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- Case 3: child claude inherits the project-memory env var ---</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/project-memory.sh&quot;</span>
+<span class="nv">PM_CONFIG</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+config_get<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s2">&quot;.</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PM_CONFIG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span><span class="w">   </span><span class="c1"># real read against the temp config</span>
+
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;{&quot;loadProjectMemory&quot;: true}\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PM_CONFIG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span>apply_project_memory_env
+launch_claude<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TEST_DIR</span><span class="s2">/workspace&quot;</span><span class="w"> </span><span class="s2">&quot;/no/such/graph&quot;</span><span class="w"> </span><span class="s2">&quot;proj-a&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+grep<span class="w"> </span>-qx<span class="w"> </span>--<span class="w"> </span><span class="s1">&#39;ENV:1&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CAPTURE</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;case3: child must see ENV:1 when flag ON&quot;</span>
+
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;{&quot;loadProjectMemory&quot;: false}\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PM_CONFIG</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span>apply_project_memory_env
+launch_claude<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TEST_DIR</span><span class="s2">/workspace&quot;</span><span class="w"> </span><span class="s2">&quot;/no/such/graph&quot;</span><span class="w"> </span><span class="s2">&quot;proj-a&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+grep<span class="w"> </span>-qx<span class="w"> </span>--<span class="w"> </span><span class="s1">&#39;ENV:unset&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CAPTURE</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;case3: child must see ENV:unset when flag OFF&quot;</span>
+rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PM_CONFIG</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_launch.sh</code>
+Expected: FAIL — <code>case3: child must see ENV:1 when flag ON</code> (stub not yet capturing env / no integration).
+Note: if Step 1(a) is applied first, the failure is the <code>ENV:1</code> assertion, not a syntax error.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Implement</strong> — add the default to <code>config.json</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;autoScan&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;depthDefault&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;outputLanguage&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;繁體中文台灣用語&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;loadProjectMemory&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;aliases&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span>
+<span class="w">  </span><span class="nt">&quot;subAgentWorkflow&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;reviewLoopMax&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;autoCommit&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;autoPR&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run full suite to verify nothing regressed</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_launch.sh &amp;&amp; bash tests/test_project_memory.sh &amp;&amp; bash tests/test_config.sh</code>
+Expected: all three print <code>PASS</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>config.json<span class="w"> </span>tests/test_launch.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(launch): 預設啟用 loadProjectMemory + env 繼承回歸測試&quot;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="task-6-documentation-scope-statement-everywhere">Task 6: Documentation (scope statement everywhere)</h3>
+<p><strong>Files:</strong>
+- Modify: <code>bin/mra.sh</code> (<code>usage()</code> — config section near line 72)
+- Modify: <code>README.md</code> (config section)
+- Modify: <code>CHANGELOG.md</code> (top entry)</p>
+<p><strong>Interfaces:</strong> none (docs only).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Update <code>usage()</code></strong> — in <code>bin/mra.sh</code>, under the config help, add a line after <code>config &lt;key&gt; &lt;value&gt;</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>  config project-memory on|off  Load each project&#39;s CLAUDE.md/AGENTS.md/.claude/rules (default on)
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Update <code>README.md</code></strong> — add to the configuration section:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="gu">### Project memory</span>
+
+<span class="sb">`mra config project-memory on|off`</span> (default <span class="gs">**on**</span>) controls whether each loaded
+project&#39;s native <span class="gs">**CLAUDE.md**</span>, <span class="gs">**AGENTS.md**</span>, and <span class="gs">**.claude/rules/**</span> load into
+the <span class="sb">`claude`</span> session mra launches. It does <span class="gs">**not**</span> affect Agent Skills
+(<span class="sb">`.claude/skills/`</span>, already auto-loaded via <span class="sb">`--add-dir`</span>) or <span class="sb">`settings.local.json`</span>.
+The interactive orchestrator uses <span class="sb">`--setting-sources user,project`</span>, so a repo&#39;s
+gitignored <span class="sb">`CLAUDE.local.md`</span> is never pulled into the shared cross-repo context.
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Update <code>CHANGELOG.md</code></strong> — add the top entry:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="k">-</span><span class="w"> </span>feat(launch): load each project&#39;s CLAUDE.md/AGENTS.md/.claude/rules natively
+  (<span class="sb">`mra config project-memory on|off`</span>, default on); interactive launch now scopes
+  settings to <span class="sb">`user,project`</span> to avoid cross-project CLAUDE.local.md leakage.
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Verify the full suite still passes</strong></li>
+</ul>
+<p>Run: <code>bash test.sh</code>
+Expected: green summary, no failures.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>bin/mra.sh<span class="w"> </span>README.md<span class="w"> </span>CHANGELOG.md
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;docs: 說明 mra config project-memory 與精確載入範圍&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="phase-2-pkb-de-duplication-splittable-into-a-follow-up-pr">Phase 2 — PKB de-duplication (splittable into a follow-up PR)</h2>
+<blockquote>
+<p>Mitigates the token redundancy this feature introduces. Phase 1 ships working on its own; if Phase 2 is deferred, note the overlap in the PR.</p>
+</blockquote>
+<h3 id="task-7-pkb_build_context-drops-verbatim-conventions-when-native-loading-is-on">Task 7: <code>pkb_build_context</code> drops verbatim conventions when native loading is on</h3>
+<p><strong>Files:</strong>
+- Modify: <code>lib/pkb.sh</code> (<code>pkb_build_context</code>, near line 320 + guards at 354-359 and 417-424)
+- Test: <code>tests/test_pkb_context.sh</code> (new)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>config_get loadProjectMemory</code>, <code>pkb_dir</code>, <code>pkb_exists</code>.
+- Produces: <code>pkb_build_context</code> omits the verbatim "Full Conventions" block and the verbatim fallback when <code>loadProjectMemory != false</code>; tagged essentials + sitemap/architecture/api/modules/tunnels still load.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — create <code>tests/test_pkb_context.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="nb">set</span><span class="w"> </span>-uo<span class="w"> </span>pipefail
+<span class="nv">SCRIPT_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/colors.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/config.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/pkb.sh&quot;</span>
+
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span>
+fail<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+<span class="nv">PROJ</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+<span class="nv">PKB</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">/.mra/pkb&quot;</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PKB</span><span class="s2">/modules&quot;</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;version&quot;:2,&quot;lastUpdated&quot;:&quot;2026-01-01T00:00:00Z&quot;}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PKB</span><span class="s2">/meta.json&quot;</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;**proj** | app | Node.js\nDemo\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PKB</span><span class="s2">/identity.md&quot;</span>
+<span class="c1"># conventions.md has NO tagged lines -&gt; exercises the verbatim fallback path</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;VERBATIM_CONVENTIONS_MARKER full text here\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PKB</span><span class="s2">/conventions.md&quot;</span>
+
+<span class="nv">MRA_CONFIG</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="k">)</span>
+
+<span class="c1"># flag ON -&gt; verbatim conventions must be suppressed</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;{&quot;loadProjectMemory&quot;: true}\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_CONFIG</span><span class="s2">&quot;</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>pkb_build_context<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;full&quot;</span><span class="k">)</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;VERBATIM_CONVENTIONS_MARKER&#39;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;ON: verbatim conventions must be suppressed&quot;</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;proj&#39;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;ON: identity (non-conventions context) must still load&quot;</span>
+
+<span class="c1"># flag OFF -&gt; verbatim conventions present (legacy behaviour)</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;{&quot;loadProjectMemory&quot;: false}\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_CONFIG</span><span class="s2">&quot;</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>pkb_build_context<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;full&quot;</span><span class="k">)</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;VERBATIM_CONVENTIONS_MARKER&#39;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;OFF: verbatim conventions must load&quot;</span>
+
+rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROJ</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_CONFIG</span><span class="s2">&quot;</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="nv">$errors</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: all pkb_context tests passed&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$errors</span><span class="s2"> tests failed&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pkb_context.sh</code>
+Expected: FAIL — <code>ON: verbatim conventions must be suppressed</code> (no flag awareness yet).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Implement</strong> — in <code>lib/pkb.sh</code>, near the top of <code>pkb_build_context</code> (after the <code>pkb_exists</code> guard returns), add:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">native_memory</span><span class="o">=</span><span class="nb">false</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>config_get<span class="w"> </span>loadProjectMemory<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;false&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">native_memory</span><span class="o">=</span><span class="nb">true</span>
+</code></pre></div>
+
+<p>Then wrap the L1 verbatim fallback (the <code>else</code> branch, ~lines 354-359 — the <code>## Conventions\n$(cat "$conventions_file")</code> block) so it only runs when not native:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$native_memory</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="c1"># Fallback: load full conventions if no tags found (pre-v2 PKB)</span>
+<span class="w">      </span><span class="nv">context</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">context</span><span class="si">}</span>
+<span class="s2">## Conventions</span>
+<span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$conventions_file</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="s2">&quot;</span>
+<span class="w">    </span><span class="k">fi</span>
+</code></pre></div>
+
+<p>And guard the L3 "Full Conventions" block (~lines 417-424) likewise:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="c1"># Full conventions (not just tagged lines) — skip when claude loads</span>
+<span class="w">    </span><span class="c1"># CLAUDE.md/rules natively to avoid a verbatim second copy.</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$conventions_file</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$native_memory</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nv">context</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">context</span><span class="si">}</span>
+<span class="s2">## Full Conventions</span>
+<span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$conventions_file</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="s2">&quot;</span>
+<span class="w">    </span><span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pkb_context.sh</code>
+Expected: <code>PASS: all pkb_context tests passed</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/pkb.sh<span class="w"> </span>tests/test_pkb_context.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;perf(pkb): native 載入啟用時略過 PKB 逐字 conventions(去三重冗餘)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="task-8-optional-deferrable-stop-pkb-generators-re-reading-auto-loaded-files">Task 8 (optional, deferrable): stop PKB generators re-reading auto-loaded files</h3>
+<p><strong>Files:</strong>
+- Modify: <code>lib/pkb.sh</code> (<code>_pkb_generate_conventions</code>, the prompt's "Read config files" line ~609)
+- Test: <code>tests/test_pkb_context.sh</code> (append a unit on the sources-suffix helper)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>config_get loadProjectMemory</code>.
+- Produces: <code>_pkb_conventions_sources_suffix()</code> → returns <code>", CLAUDE.md, AGENTS.md, .claude/rules/"</code> when native loading is OFF, else <code>""</code>. Used to build the generator prompt so generators don't re-read files already in context.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — append before the summary block of <code>tests/test_pkb_context.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># Sources-suffix helper: omit CLAUDE.md/rules from the read list when native loading is on</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;{&quot;loadProjectMemory&quot;: true}\n&#39;</span><span class="w">  </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_CONFIG</span><span class="s2">&quot;</span>
+<span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>_pkb_conventions_sources_suffix<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;suffix: ON must be empty&quot;</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;{&quot;loadProjectMemory&quot;: false}\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_CONFIG</span><span class="s2">&quot;</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>_pkb_conventions_sources_suffix<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*<span class="s2">&quot;CLAUDE.md&quot;</span>*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;suffix: OFF must list CLAUDE.md&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pkb_context.sh</code>
+Expected: FAIL — <code>_pkb_conventions_sources_suffix: command not found</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Implement</strong> — in <code>lib/pkb.sh</code>, add the helper above <code>_pkb_generate_conventions</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># When project-memory native loading is on, claude already has CLAUDE.md /</span>
+<span class="c1"># AGENTS.md / .claude/rules in context, so the conventions generator should</span>
+<span class="c1"># not be told to re-read them (avoids double-feeding + echoing auto-loaded text).</span>
+_pkb_conventions_sources_suffix<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>config_get<span class="w"> </span>loadProjectMemory<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;false&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;, CLAUDE.md, AGENTS.md, .claude/rules/&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<p>Then in <code>_pkb_generate_conventions</code>, change the prompt's read line from the hardcoded list to use the suffix. Replace:</p>
+<div class="highlight"><pre><span></span><code>1. Read config files: .eslintrc*, tsconfig*, prettier*, .editorconfig, CLAUDE.md, AGENTS.md, .claude/rules/.
+</code></pre></div>
+
+<p>with a computed value built before the heredoc:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span>sources_suffix<span class="p">;</span><span class="w"> </span><span class="nv">sources_suffix</span><span class="o">=</span><span class="k">$(</span>_pkb_conventions_sources_suffix<span class="k">)</span>
+</code></pre></div>
+
+<p>and in the prompt body:</p>
+<div class="highlight"><pre><span></span><code>1. Read config files: .eslintrc*, tsconfig*, prettier*, .editorconfig${sources_suffix}.
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_pkb_context.sh</code>
+Expected: <code>PASS: all pkb_context tests passed</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/pkb.sh<span class="w"> </span>tests/test_pkb_context.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;perf(pkb): native 載入啟用時 conventions 產生器不重讀 CLAUDE.md/rules&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="self-review">Self-Review</h2>
+<ul>
+<li><strong>Spec coverage:</strong> D1→Tasks 3/6; D2→Tasks 7/8; D3→Tasks 1/2; D4→Tasks 4/5 (hard gate ordered: 4 before 5); D5→Tasks 1/2/5. Risks 1-6 all mapped. ✅</li>
+<li><strong>Deviation from spec:</strong> Task 4 uses <code>--setting-sources user,project</code> (not bare <code>project</code>) to avoid dropping the operator's user-scope settings from the interactive session while still excluding <code>local</code>/<code>CLAUDE.local.md</code>. Spec D4 + risk 1 updated to match.</li>
+<li><strong>Placeholder scan:</strong> none — every code/test step is concrete.</li>
+<li><strong>Type/name consistency:</strong> <code>apply_project_memory_env</code>, <code>loadProjectMemory</code>, <code>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD</code>, <code>_pkb_conventions_sources_suffix</code> used consistently across tasks.</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>
