@@ -17,6 +17,10 @@ You will receive:
 - **Dep-Graph Context**: Which projects consume this project's API and which APIs this project consumes
 - **Test Results**: Summary of test run output (pass/fail)
 
+## Project Conventions (loaded)
+
+The target project's `CLAUDE.md` / `AGENTS.md` / `.claude/rules/` are loaded in your context. Treat them as **authoritative review criteria** — flag changes that violate the project's own stated style, patterns, or constraints, not only generic best practices. When a project rule conflicts with a generic default, the project rule governs.
+
 ## Review Focus Areas
 
 ### 1. Correctness
