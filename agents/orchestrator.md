@@ -412,7 +412,7 @@ After modifying erp's order serializer, run `mra test erp` which will:
 2. Start the `erp` container via `docker compose up -d`
 3. Run `partner-api-gateway`'s test suite against the live erp container (integration test)
 4. Tear down the erp service container
-5. Run erp's own `bundle exec rspec` in Docker with `DB_NAME=gspadmin_test_mra_erp`
+5. Run erp's own `bundle exec rspec` in Docker with `DB_NAME=shared_db_test_mra_erp`
 
 ## PM Agent Integration
 

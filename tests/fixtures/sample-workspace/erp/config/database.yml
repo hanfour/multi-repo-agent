@@ -6,8 +6,8 @@ default: &default
 
 development:
   <<: *default
-  database: gspadmin
+  database: shared_db
 
 production:
   <<: *default
-  database: gspadmin
+  database: shared_db

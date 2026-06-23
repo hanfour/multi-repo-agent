@@ -6,11 +6,11 @@ without depending on any real local repo.
 
 | Project | Purpose |
 |---------|---------|
-| `erp` | Backend with docker-compose deps (mysql, redis), shared `gspadmin` db, env.example with cross-service URLs |
-| `masa` | Backend that also uses `gspadmin` to test shared-db scanner |
-| `moai` | Bare project so api-calls/gateway-routes can resolve `moai` as a known target |
+| `erp` | Backend with docker-compose deps (mysql, redis), shared `shared_db` db, env.example with cross-service URLs |
+| `billing` | Backend that also uses `shared_db` to test shared-db scanner |
+| `catalog` | Bare project so api-calls/gateway-routes can resolve `catalog` as a known target |
 | `partner-api-gateway` | Gateway project (`*gateway*` pattern) with `ERP_BASE_URL` to validate gateway-routes scanner |
-| `odm-ui` | Bare frontend project to confirm scanners do not crash on minimal projects |
+| `web-ui` | Bare frontend project to confirm scanners do not crash on minimal projects |
 
 No `.git/` directories are required for scanner tests because the
 scanners read files directly. Add stub `.git/` only if a future test

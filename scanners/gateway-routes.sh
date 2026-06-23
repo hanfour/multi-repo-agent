@@ -17,11 +17,11 @@ GATEWAY_PATTERNS=("*gateway*" "*proxy*" "*router*")
 # These come from docker-compose or env patterns
 declare -A PORT_TO_SERVICE
 PORT_TO_SERVICE["4000"]="erp"
-PORT_TO_SERVICE["4001"]="masa"
+PORT_TO_SERVICE["4001"]="billing"
 PORT_TO_SERVICE["4500"]="api-gateway"
-PORT_TO_SERVICE["5000"]="moai"
+PORT_TO_SERVICE["5000"]="catalog"
 PORT_TO_SERVICE["3100"]="finance-system"
-PORT_TO_SERVICE["5173"]="odm-ui"
+PORT_TO_SERVICE["5173"]="web-ui"
 PORT_TO_SERVICE["3030"]="oss-ui-v2"
 PORT_TO_SERVICE["9443"]="partner-api-gateway"
 
@@ -77,7 +77,7 @@ for project_dir in "$WORKSPACE"/*/; do
         fi
 
         # Try to match variable prefix to known project names
-        # e.g. ERP_BASE_URL -> erp, MASA_URL -> masa
+        # e.g. ERP_BASE_URL -> erp, BILLING_URL -> billing
         for known in "${known_projects[@]}"; do
           known_upper="${known^^}"
           known_upper="${known_upper//-/_}"

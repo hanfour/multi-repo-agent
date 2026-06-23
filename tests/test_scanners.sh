@@ -69,14 +69,14 @@ assert_has_output "docker-compose" "$dc_output"
 assert_contains_source_target "docker-compose" "$dc_output" "erp" "mysql"
 assert_contains_source_target "docker-compose" "$dc_output" "erp" "redis"
 
-# Should find masa -> mysql (or masa -> redis)
-if echo "$dc_output" | jq -e 'select(.source == "masa")' &>/dev/null; then
-  pass_test "docker-compose: found masa dependencies"
+# Should find billing -> mysql (or billing -> redis)
+if echo "$dc_output" | jq -e 'select(.source == "billing")' &>/dev/null; then
+  pass_test "docker-compose: found billing dependencies"
 else
-  fail_test "docker-compose: missing masa dependencies"
+  fail_test "docker-compose: missing billing dependencies"
 fi
 
-# Should find odm-ui service (even if no depends_on)
+# Should find web-ui service (even if no depends_on)
 echo "  docker-compose found services: $(echo "$dc_output" | jq -r '.source' | sort -u | tr '\n' ' ')"
 echo ""
 
@@ -86,14 +86,14 @@ db_output=$(bash "$MRA_DIR/scanners/shared-db.sh" "$WORKSPACE" 2>/dev/null)
 assert_jsonl "shared-db" "$db_output"
 assert_has_output "shared-db" "$db_output"
 
-# erp and masa both use gspadmin -> both should emit mysql dependency
+# erp and billing both use shared_db -> both should emit mysql dependency
 erp_mysql=$(echo "$db_output" | jq -e 'select(.source == "erp" and .target == "mysql")' 2>/dev/null || echo "")
-masa_mysql=$(echo "$db_output" | jq -e 'select(.source == "masa" and .target == "mysql")' 2>/dev/null || echo "")
+billing_mysql=$(echo "$db_output" | jq -e 'select(.source == "billing" and .target == "mysql")' 2>/dev/null || echo "")
 
-if [[ -n "$erp_mysql" && -n "$masa_mysql" ]]; then
-  pass_test "shared-db: erp and masa both reference gspadmin (shared DB)"
+if [[ -n "$erp_mysql" && -n "$billing_mysql" ]]; then
+  pass_test "shared-db: erp and billing both reference shared_db (shared DB)"
 else
-  fail_test "shared-db: expected erp and masa to share gspadmin database"
+  fail_test "shared-db: expected erp and billing to share shared_db database"
 fi
 echo "  shared-db found: $(echo "$db_output" | jq -r '.source' | sort -u | tr '\n' ' ')"
 echo ""
@@ -127,11 +127,11 @@ if [[ -z "$api_output" ]]; then
   pass_test "api-calls: produced no output"
 else
   assert_has_output "api-calls" "$api_output"
-  # erp env.example has MOAI_HOST, MASA_HOST, API_GATEWAY_HOST
+  # erp env.example has CATALOG_HOST, BILLING_HOST, API_GATEWAY_HOST
   if echo "$api_output" | jq -e 'select(.source == "erp")' &>/dev/null; then
     pass_test "api-calls: found erp dependencies"
   else
-    fail_test "api-calls: missing erp dependencies (expected MOAI_HOST/MASA_HOST)"
+    fail_test "api-calls: missing erp dependencies (expected CATALOG_HOST/BILLING_HOST)"
   fi
 fi
 echo "  api-calls all confidence: $(echo "$api_output" | jq -r '.confidence' | sort | uniq -c)"
