@@ -129,8 +129,12 @@ ask_project() {
   log_progress "querying: $project_list" "ask"
 
   if [[ "$interactive" == "true" ]]; then
-    # Interactive mode: full Claude session with follow-up capability
+    # Interactive mode: full Claude session with follow-up capability.
+    # --setting-sources user,project excludes local scope so each --add-dir
+    # repo's gitignored CLAUDE.local.md is never pulled into the shared
+    # cross-repo context when project-memory loading is on (mirrors launch.sh).
     claude "${claude_args[@]}" \
+      --setting-sources user,project \
       --append-system-prompt "$system_prompt" \
       "$question"
   else
