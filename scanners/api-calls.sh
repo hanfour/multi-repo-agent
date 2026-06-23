@@ -13,24 +13,24 @@ fi
 # Known port -> service mappings (from docker-compose conventions)
 declare -A PORT_TO_SERVICE
 PORT_TO_SERVICE["4000"]="erp"
-PORT_TO_SERVICE["4001"]="masa"
+PORT_TO_SERVICE["4001"]="billing"
 PORT_TO_SERVICE["4500"]="api-gateway"
-PORT_TO_SERVICE["5000"]="moai"
+PORT_TO_SERVICE["5000"]="catalog"
 PORT_TO_SERVICE["3100"]="nest-app-2"
-PORT_TO_SERVICE["5173"]="vue-app-2"
+PORT_TO_SERVICE["5173"]="web-ui"
 PORT_TO_SERVICE["3030"]="vue-app-1"
 PORT_TO_SERVICE["9443"]="partner-api-gateway"
 
 # Known hostname -> service mappings (service name patterns)
 declare -A HOST_TO_SERVICE
 HOST_TO_SERVICE["erp"]="erp"
-HOST_TO_SERVICE["masa"]="masa"
-HOST_TO_SERVICE["moai"]="moai"
+HOST_TO_SERVICE["billing"]="billing"
+HOST_TO_SERVICE["catalog"]="catalog"
 HOST_TO_SERVICE["api-gateway"]="api-gateway"
 HOST_TO_SERVICE["api_gateway"]="api-gateway"
 HOST_TO_SERVICE["nest-app-2"]="nest-app-2"
 HOST_TO_SERVICE["finance_system"]="nest-app-2"
-HOST_TO_SERVICE["vue-app-2"]="vue-app-2"
+HOST_TO_SERVICE["web-ui"]="web-ui"
 
 # Get known project names
 known_projects=()
@@ -78,7 +78,7 @@ for project_dir in "$WORKSPACE"/*/; do
           done
         fi
 
-        # Try to infer from variable name prefix (e.g. MOAI_HOST -> moai)
+        # Try to infer from variable name prefix (e.g. CATALOG_HOST -> catalog)
         if [[ -z "$target" ]]; then
           for known in "${known_projects[@]}"; do
             known_upper="${known^^}"

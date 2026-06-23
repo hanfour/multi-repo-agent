@@ -32,7 +32,7 @@ run_project_tests() {
   test_cmd=$(detect_test_command "$project_type")
 
   # Generate isolated DB name for test
-  local db_override="gspadmin_test_mra_${project}"
+  local db_override="shared_db_test_mra_${project}"
 
   log_progress "$project ($project_type): running tests" "test"
 

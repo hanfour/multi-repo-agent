@@ -1,7 +1,7 @@
 version: "3.8"
 services:
-  masa:
-    image: masa:local
+  billing:
+    image: billing:local
     ports:
       - "4001:4001"
     depends_on:
