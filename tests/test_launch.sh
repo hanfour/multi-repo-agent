@@ -23,6 +23,7 @@ mkdir -p "$TEST_DIR/workspace/proj-a"
 claude() {
   : > "$CAPTURE"
   printf '%s\n' "$@" >> "$CAPTURE"
+  printf 'ENV:%s\n' "${CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD:-unset}" >> "$CAPTURE"
 }
 
 # Stub launch_claude collaborators so the test stays hermetic.
@@ -63,6 +64,20 @@ grep -q 'Output Language:' "$CAPTURE"           && fail "case2: language directi
 run_launch "繁體中文台灣用語"
 grep -qx -- '--setting-sources' "$CAPTURE" || fail "case1b: --setting-sources missing"
 grep -qx -- 'user,project'      "$CAPTURE" || fail "case1b: expected setting-sources value user,project"
+
+# --- Case 3: child claude inherits the project-memory env var ---
+source "$SCRIPT_DIR/lib/project-memory.sh"
+PM_CONFIG=$(mktemp)
+config_get() { jq -r ".$1" "$PM_CONFIG"; }   # real read against the temp config
+
+printf '{"loadProjectMemory": true}\n' > "$PM_CONFIG"; apply_project_memory_env
+launch_claude "$TEST_DIR/workspace" "/no/such/graph" "proj-a" >/dev/null 2>&1
+grep -qx -- 'ENV:1' "$CAPTURE" || fail "case3: child must see ENV:1 when flag ON"
+
+printf '{"loadProjectMemory": false}\n' > "$PM_CONFIG"; apply_project_memory_env
+launch_claude "$TEST_DIR/workspace" "/no/such/graph" "proj-a" >/dev/null 2>&1
+grep -qx -- 'ENV:unset' "$CAPTURE" || fail "case3: child must see ENV:unset when flag OFF"
+rm -f "$PM_CONFIG"
 
 rm -rf "$TEST_DIR" "$CAPTURE"
 

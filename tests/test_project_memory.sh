@@ -42,5 +42,9 @@ config_handle project-memory on  >/dev/null 2>&1
 [[ "$(config_get loadProjectMemory)" == "true" ]]  || fail "config_handle on -> true"
 config_handle project-memory bogus >/dev/null 2>&1 && fail "config_handle bogus should return non-zero"
 
+# Case 7: shipped config.json defaults loadProjectMemory ON
+[[ "$(config_get loadProjectMemory "$SCRIPT_DIR/config.json")" == "true" ]] \
+  || fail "config.json must ship loadProjectMemory: true"
+
 rm -f "$MRA_CONFIG"
 if [[ $errors -eq 0 ]]; then echo "PASS: all project-memory tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
