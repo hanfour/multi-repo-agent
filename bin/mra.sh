@@ -11,6 +11,7 @@ source "$MRA_DIR/lib/project-path.sh"
 source "$MRA_DIR/lib/url-policy.sh"
 source "$MRA_DIR/lib/validate.sh"
 source "$MRA_DIR/lib/config.sh"
+source "$MRA_DIR/lib/project-memory.sh"
 source "$MRA_DIR/lib/preflight.sh"
 source "$MRA_DIR/lib/detect-type.sh"
 source "$MRA_DIR/lib/sync.sh"
@@ -148,6 +149,8 @@ resolve_workspace() {
 
 main() {
   local command="${1:-}"
+
+  apply_project_memory_env
 
   if [[ -z "$command" || "$command" == "--help" || "$command" == "-h" ]]; then
     usage

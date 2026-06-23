@@ -27,5 +27,12 @@ unset $VAR; write_config '{"autoScan": true}'; apply_project_memory_env
 export $VAR=1; write_config '{"loadProjectMemory": false}'; apply_project_memory_env
 [[ -z "${!VAR+x}" ]] || fail "OFF-global: mra must unset a globally-exported var"
 
+# Case 5: ordering guard — the call must precede `case "$command"` dispatch
+mra_main="$SCRIPT_DIR/bin/mra.sh"
+call_line=$(grep -n '^[[:space:]]*apply_project_memory_env' "$mra_main" | head -1 | cut -d: -f1)
+case_line=$(grep -n 'case "\$command" in' "$mra_main" | head -1 | cut -d: -f1)
+[[ -n "$call_line" && -n "$case_line" && "$call_line" -lt "$case_line" ]] \
+  || fail "ordering: call (line ${call_line:-none}) must precede case (line ${case_line:-none})"
+
 rm -f "$MRA_CONFIG"
 if [[ $errors -eq 0 ]]; then echo "PASS: all project-memory tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
