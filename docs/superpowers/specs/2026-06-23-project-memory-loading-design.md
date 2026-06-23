@@ -64,6 +64,8 @@ When `loadProjectMemory` is ON, `pkb_build_context` must **drop** the full-tier 
 Default `loadProjectMemory: true` **only if** the same change adds `--setting-sources user,project` to the interactive `launch_claude` invocation (`lib/launch.sh:97`), excluding `local` scope so each repo's gitignored `CLAUDE.local.md` is never pulled in. Without that guard, default-ON is a cross-project privacy regression and is **rejected**. If the launch guard is deferred out of this change, the flag defaults **OFF** until it lands.
 
 *Refinement during planning (deviates from the vote's bare `project`):* the guard uses `user,project`, not `project`. Both exclude `local` (the leak vector), but bare `project` would also drop the operator's `~/.claude/settings.json` (global allowedTools/hooks) from the **interactive** orchestrator session — a permissions regression. `user,project` excludes only `local`. Headless callers keep their existing bare `project` (ephemeral, already audited).
+
+*Found during the final whole-branch review:* there are **two** interactive bare-`claude` paths, not one. Besides `launch_claude` (`lib/launch.sh`), `ask_project`'s `--interactive` branch (`lib/ask.sh`) is also a multi-repo bare-`claude` call (reachable via `mra ask --all/--with-deps --interactive`) with no `--setting-sources`. Both received the `user,project` guard. The headless `ask` branch already carried `--setting-sources project` and was untouched.
 *Dissent preserved (adversarial reviewer): prefers default OFF even after the guard, on `--all` token-cost grounds. Escape hatch: if token blowup is observed, flip the default to OFF — the D2 tier-trim mitigates this.*
 
 ### D5 — Offline regression tests (three layers; real-API canary stays out of the suite)
@@ -91,7 +93,7 @@ Default `loadProjectMemory: true` **only if** the same change adds `--setting-so
 
 ## 6. Risks & mitigations (must-fix, from the vote)
 
-1. **`CLAUDE.local.md` cross-project leakage (interactive launch).** → Add `--setting-sources user,project` to `launch.sh:97` in the same change as default-ON (excludes `local` scope while preserving the operator's user-scope settings); test asserts it. *(D4, hard gate.)*
+1. **`CLAUDE.local.md` cross-project leakage (interactive paths).** → Add `--setting-sources user,project` to BOTH interactive bare-`claude` calls in the same change as default-ON: `launch_claude` (`lib/launch.sh`) and `ask_project`'s `--interactive` branch (`lib/ask.sh`); excludes `local` scope while preserving the operator's user-scope settings; tests assert both. *(D4, hard gate. The `ask.sh` path was found by the final whole-branch review after the per-task work — the per-task reviews were scoped to `launch.sh`.)*
 2. **No unset-when-off → `config off` is a silent no-op against a global shell var.** → Explicit `unset` on OFF/missing; unit-tested. *(D3.)*
 3. **Env inheritance untestable by argv-only harness; a refactor could silently disable it.** → Same-process function-stub env capture + static ordering grep. *(D5.)*
 4. **Triple redundancy of rule content (~1–2k tokens/project, ×N).** → Phase 2 tier-trim of `pkb_build_context`. *(D2.)*
