@@ -602,15 +602,24 @@ PROMPT
 )" --add-dir "$project_dir" --model "$model" --max-turns 5 --setting-sources "project"
 }
 
+# When project-memory native loading is on, claude already has CLAUDE.md /
+# AGENTS.md / .claude/rules in context, so the conventions generator should
+# not be told to re-read them (avoids double-feeding + echoing auto-loaded text).
+_pkb_conventions_sources_suffix() {
+  [[ "$(config_get loadProjectMemory 2>/dev/null)" == "false" ]] \
+    && echo ", CLAUDE.md, AGENTS.md, .claude/rules/" || echo ""
+}
+
 _pkb_generate_conventions() {
   local project="$1" project_dir="$2" project_type="$3"
   local lang_directive="$4" model="$5"
+  local sources_suffix; sources_suffix=$(_pkb_conventions_sources_suffix)
 
   claude -p "$(cat <<PROMPT
 You are a code quality analyst. Generate a CONVENTIONS document for "$project" (type: $project_type).
 
 ## Your Task
-1. Read config files: .eslintrc*, tsconfig*, prettier*, .editorconfig, CLAUDE.md, AGENTS.md, .claude/rules/.
+1. Read config files: .eslintrc*, tsconfig*, prettier*, .editorconfig${sources_suffix}.
 2. Read a sample of source files to identify actual coding patterns.
 3. Document: naming conventions, import style, error handling patterns, testing approach.
 4. Note any project-specific rules or deviations from standard.
