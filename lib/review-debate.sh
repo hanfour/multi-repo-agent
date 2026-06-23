@@ -4,12 +4,62 @@
 # Token optimization strategies applied:
 # 1. Fast convergence: skip debate rounds when findings are few
 # 2. Merged critique+refine: 2 agents per round instead of 4
-# 3. Reduced max-turns: Agent A/B=8, critique-refine=5, synthesize=3
+# 3. Tunable max-turns: Agent A/B=MRA_REVIEW_AGENT_MAX_TURNS (default 20),
+#    critique-refine=5, synthesize=3
 # 4. Model tiering: critique-refine uses haiku for cost savings
 # 5. Focused context: non-search agents use --add-file instead of --add-dir
 # 6. Leaner prompts: removed duplicated review criteria
 #
 # Usage: called from review.sh when strategy=debate
+
+# The review agents end their output with a verdict line that BOTH confirms the
+# review finished AND states the verdict explicitly:
+#   ===MRA-REVIEW-COMPLETE: APPROVED===
+#   ===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===
+# Deciding from this explicit signal — never by regex-counting the agents'
+# free-text findings (bullet / bold "- **[MED]**" / "### [HIGH]" heading / prose
+# all occur live) — is what keeps a failed/garbled/cut-off review from
+# masquerading as a clean approval. Absence of the line = the agent did not finish.
+MRA_REVIEW_SENTINEL_TOKEN="MRA-REVIEW-COMPLETE"
+
+# Extract one agent's declared verdict: APPROVED | CHANGES_REQUESTED | NONE.
+_debate_verdict_of() {
+  if printf '%s\n' "$1" | grep -qE "${MRA_REVIEW_SENTINEL_TOKEN}:[[:space:]]*CHANGES_REQUESTED"; then
+    printf 'CHANGES_REQUESTED'
+  elif printf '%s\n' "$1" | grep -qE "${MRA_REVIEW_SENTINEL_TOKEN}:[[:space:]]*APPROVED"; then
+    printf 'APPROVED'
+  else
+    printf 'NONE'
+  fi
+}
+
+# Decide from the two agents' EXPLICIT verdicts. Prints one of:
+#   PROCEED — at least one agent reports CHANGES_REQUESTED; go to synthesis.
+#   APPROVE — BOTH agents completed and reported APPROVED.
+#   ERROR   — at least one agent did not complete (no verdict): failure / cutoff /
+#             garbled. Never report as approved.
+_debate_assess() {
+  local va vb
+  va=$(_debate_verdict_of "$1")
+  vb=$(_debate_verdict_of "$2")
+  if [[ "$va" == "CHANGES_REQUESTED" || "$vb" == "CHANGES_REQUESTED" ]]; then
+    printf 'PROCEED\n'
+  elif [[ "$va" == "APPROVED" && "$vb" == "APPROVED" ]]; then
+    printf 'APPROVE\n'
+  else
+    printf 'ERROR\n'
+  fi
+}
+
+# Count finding lines tolerantly — NON-CRITICAL: used only to choose synthesis
+# depth (direct vs voting) on the PROCEED path, never for the approve/error
+# decision. Matches a bullet (- or *), optional indent/bold, then "[<UPPER>".
+_debate_count_findings() {
+  local n
+  n=$(printf '%s\n' "$1" | grep -cE '^[[:space:]]*[-*][[:space:]]*\**\[[A-Z]' || true)
+  n=${n//[^0-9]/}; [[ -z "$n" ]] && n=0
+  printf '%s' "$n"
+}
 
 # Run the full debate review pipeline
 # NOTE: All log_* calls use >&2 because this function runs inside $()
@@ -90,24 +140,33 @@ run_debate_review() {
   findings_b=$(cat "$findings_b_file")
   rm -f "$findings_a_file" "$findings_b_file"
 
-  local count_a count_b
-  count_a=$(echo "$findings_a" | grep -c '^\- \[' || true)
-  count_b=$(echo "$findings_b" | grep -c '^\- \[' || true)
-  count_a=${count_a//[^0-9]/}; [[ -z "$count_a" ]] && count_a=0
-  count_b=${count_b//[^0-9]/}; [[ -z "$count_b" ]] && count_b=0
-  log_info >&2 "[round 1] Agent A: $count_a findings, Agent B: $count_b findings" "debate"
-
   # =====================================================================
-  # FAST CONVERGENCE: skip debate if findings are few or zero
+  # FAST CONVERGENCE: decide from the agents' EXPLICIT verdict sentinels.
+  # CRITICAL: distinguish "both agents completed and approved" (APPROVE) from
+  # "an agent did not finish — failure / max-turns cutoff / garbled" (ERROR).
+  # The decision NEVER depends on regex-counting free-text findings; that is the
+  # false-green bug (real findings as "### [HIGH]" headings were miscounted to 0).
   # =====================================================================
-  local total_findings=$((count_a + count_b))
+  local decision
+  decision=$(_debate_assess "$findings_a" "$findings_b")
+  log_info >&2 "[round 1] decision=$decision" "debate"
 
-  if [[ "$total_findings" -eq 0 ]]; then
-    log_success >&2 "[fast] no findings from either agent — APPROVED" "debate"
+  if [[ "$decision" == "ERROR" ]]; then
+    log_error >&2 "[fast] no completed verdict from both agents (failure or max-turns cutoff) — NOT approving" "debate"
+    echo '{"status":"COMMENT","summary":"⚠️ REVIEW_INCOMPLETE — at least one analysis agent did not finish (no completion verdict; likely an agent failure or a max-turns cutoff — try MRA_REVIEW_AGENT_MAX_TURNS or a PKB). This is NOT an approval; re-run or review manually.","comments":[]}'
+    return
+  fi
+
+  if [[ "$decision" == "APPROVE" ]]; then
+    log_success >&2 "[fast] both agents completed and approved — APPROVED" "debate"
     echo '{"status":"APPROVED","summary":"No issues found by either agent","comments":[]}'
     return
   fi
 
+  # decision == PROCEED — at least one CHANGES_REQUESTED. Count findings only to
+  # choose synthesis depth (direct vs voting); not used for the verdict.
+  local total_findings
+  total_findings=$(( $(_debate_count_findings "$findings_a") + $(_debate_count_findings "$findings_b") ))
   if [[ "$total_findings" -le 5 ]]; then
     log_info >&2 "[fast] few findings ($total_findings total), skipping debate — direct synthesis" "debate"
     run_synthesize "$project" "$project_dir" "$diff" "$changed_files" \
@@ -200,7 +259,8 @@ run_debate_review() {
 # Agent A: Impact Analyst
 # Searches codebase for broken references, deleted API consumers, etc.
 # Uses FULL --add-dir (needs codebase search)
-# max-turns: 8 (down from 15)
+# max-turns: MRA_REVIEW_AGENT_MAX_TURNS (default 20). Too low cuts the agent off
+# mid-exploration before it emits findings — the original false-green trigger.
 # -----------------------------------------------------------------------
 run_agent_a() {
   local project="$1" project_dir="$2" diff="$3" changed_files="$4"
@@ -252,6 +312,10 @@ If no references found for a deleted item: "Verified: <item> has no remaining re
 ${lang_directive}
 
 IMPORTANT: You MUST search the codebase using file reading/grep. Every finding must include exact file and line.
+
+When your analysis is complete, end your output with EXACTLY ONE of these lines on its own — it confirms completion AND states your verdict (omitting it marks the review incomplete / a failure):
+===${MRA_REVIEW_SENTINEL_TOKEN}: APPROVED===           (no issues worth changing)
+===${MRA_REVIEW_SENTINEL_TOKEN}: CHANGES_REQUESTED===   (you reported any [CRITICAL]/[HIGH]/[MEDIUM] issue above)
 PROMPT
 )
 
@@ -260,7 +324,7 @@ PROMPT
   claude -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
-    --max-turns 8 \
+    --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
     --disallowedTools "Write,Edit,NotebookEdit" \
     --setting-sources "project" 2>/dev/null
 }
@@ -269,7 +333,8 @@ PROMPT
 # Agent B: Quality Auditor
 # Checks patterns, security, edge cases, best practices
 # Uses FULL --add-dir (needs to read surrounding code & conventions)
-# max-turns: 8 (down from 15)
+# max-turns: MRA_REVIEW_AGENT_MAX_TURNS (default 20). Too low cuts the agent off
+# mid-exploration before it emits findings — the original false-green trigger.
 # -----------------------------------------------------------------------
 run_agent_b() {
   local project="$1" project_dir="$2" diff="$3" changed_files="$4"
@@ -321,6 +386,10 @@ ${changed_files}
 ${lang_directive}
 
 IMPORTANT: Read actual source files. Base findings on code, not assumptions.
+
+When your analysis is complete, end your output with EXACTLY ONE of these lines on its own — it confirms completion AND states your verdict (omitting it marks the review incomplete / a failure):
+===${MRA_REVIEW_SENTINEL_TOKEN}: APPROVED===           (no issues worth changing)
+===${MRA_REVIEW_SENTINEL_TOKEN}: CHANGES_REQUESTED===   (you reported any [CRITICAL]/[HIGH]/[MEDIUM] issue above)
 PROMPT
 )
 
@@ -329,7 +398,7 @@ PROMPT
   claude -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
-    --max-turns 8 \
+    --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
     --disallowedTools "Write,Edit,NotebookEdit" \
     --setting-sources "project" 2>/dev/null
 }
