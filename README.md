@@ -655,18 +655,18 @@ All workspace config lives in `<workspace>/.collab/`:
 | `db.json` | Database configuration | Yes |
 | `dep-graph.json` | Auto-generated dependency graph | No |
 | `manual-deps.json` | Manual dependency overrides | Yes |
-| `lint-profile.json` | Selects a lint rule set (`{"profile":"legacy"}` or inline `rules`) | Yes |
+| `lint-profile.json` | Selects a lint rule set (`{"profile":"ts-strict"}` or inline `rules`) | Yes |
 | `notify.json` | Webhook config | Yes |
 | `eval/` | Review evaluation reports | No |
 
 JSON Schemas for `repos.json`, `db.json`, `dep-graph.json`, `manual-deps.json`, and scanner JSONL records live under [`schemas/`](./schemas/). Add `"$schema"` to the top of each `.collab/*.json` to get inline IDE validation. `mra doctor` runs structural checks automatically.
 
 > **⚠ Migration note (lint default changed)**: Earlier versions hardcoded the
-> Acme BLOCKER rules in `lib/lint.sh`. Lint is now profile-driven and the
+> built-in BLOCKER rules in `lib/lint.sh`. Lint is now profile-driven and the
 > default profile is empty. To keep the previous behavior, drop a one-line
 > file in your workspace:
 > ```bash
-> echo '{"profile":"legacy"}' > <workspace>/.collab/lint-profile.json
+> echo '{"profile":"ts-strict"}' > <workspace>/.collab/lint-profile.json
 > ```
 
 **Lint profiles** ship under [`templates/lint-profiles/`](./templates/lint-profiles/):
@@ -674,12 +674,12 @@ JSON Schemas for `repos.json`, `db.json`, `dep-graph.json`, `manual-deps.json`, 
 | Profile | Use |
 |---------|-----|
 | `default` | No rules — lint passes silently |
-| `legacy` | Acme frontend BLOCKER rules (no-interface / no-enum / no-any / no-non-null / no-var) |
+| `ts-strict` | Strict TypeScript BLOCKER rules (no-interface / no-enum / no-any / no-non-null / no-var) |
 
 Opt in by writing `<workspace>/.collab/lint-profile.json`:
 
 ```json
-{ "profile": "legacy" }
+{ "profile": "ts-strict" }
 ```
 
 Or inline custom rules (each with `id`, `severity`, `pattern`, `message`, `line_excludes`, `file_excludes`):
