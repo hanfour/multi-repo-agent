@@ -640,15 +640,15 @@ mra notify test     # テスト通知を送信
 | `db.json` | データベース設定 | はい |
 | `dep-graph.json` | 自動生成された依存関係グラフ | いいえ |
 | `manual-deps.json` | 手動の依存関係オーバーライド | はい |
-| `lint-profile.json` | lint ルールセット選択（`{"profile":"oneAD"}` またはインライン `rules`） | はい |
+| `lint-profile.json` | lint ルールセット選択（`{"profile":"ts-strict"}` またはインライン `rules`） | はい |
 | `notify.json` | Webhook設定 | はい |
 | `eval/` | レビュー評価レポート | いいえ |
 
 `repos.json`、`db.json`、`dep-graph.json`、`manual-deps.json` および scanner JSONL レコードの JSON Schema は [`schemas/`](../schemas/) に同梱されています。`.collab/*.json` の先頭に `"$schema"` を追加すると IDE 内でリアルタイム検証が効きます。`mra doctor` は構造チェックを自動実行します。
 
-> **⚠ 移行のお知らせ（lint デフォルトが変更されました）**: 以前のバージョンは `lib/lint.sh` に OneAD BLOCKER ルールがハードコードされていました。lint は profile 駆動になり、デフォルト profile は空です。以前の挙動を維持するには、ワークスペースに 1 行のファイルを置いてください:
+> **⚠ 移行のお知らせ（lint デフォルトが変更されました）**: 以前のバージョンは `lib/lint.sh` に組み込みの BLOCKER ルールがハードコードされていました。lint は profile 駆動になり、デフォルト profile は空です。以前の挙動を維持するには、ワークスペースに 1 行のファイルを置いてください:
 > ```bash
-> echo '{"profile":"oneAD"}' > <workspace>/.collab/lint-profile.json
+> echo '{"profile":"ts-strict"}' > <workspace>/.collab/lint-profile.json
 > ```
 
 **Lint Profiles** は [`templates/lint-profiles/`](../templates/lint-profiles/) に同梱:
@@ -656,12 +656,12 @@ mra notify test     # テスト通知を送信
 | Profile | 用途 |
 |---------|------|
 | `default` | ルールなし — lint は黙って合格 |
-| `oneAD` | OneAD フロントエンド BLOCKER ルール（no-interface / no-enum / no-any / no-non-null / no-var） |
+| `ts-strict` | 厳格な TypeScript BLOCKER ルール（no-interface / no-enum / no-any / no-non-null / no-var） |
 
 `<workspace>/.collab/lint-profile.json` で有効化:
 
 ```json
-{ "profile": "oneAD" }
+{ "profile": "ts-strict" }
 ```
 
 または独自ルールをインラインで記述（各ルールは `id`、`severity`、`pattern`、`message`、`line_excludes`、`file_excludes` を持つ）:

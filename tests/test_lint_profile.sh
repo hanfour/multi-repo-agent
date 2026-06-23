@@ -22,20 +22,20 @@ else
   fail_test "expected empty rules, got: $rules"
 fi
 
-# 2. {"profile":"oneAD"} -> 5 rules from bundled template.
-echo '{"profile":"oneAD"}' > "$WS/.collab/lint-profile.json"
+# 2. {"profile":"ts-strict"} -> 5 rules from bundled template.
+echo '{"profile":"ts-strict"}' > "$WS/.collab/lint-profile.json"
 rules=$(lint_load_profile "$WS")
 count=$(echo "$rules" | jq 'length')
 if [[ "$count" == "5" ]]; then
-  pass_test "oneAD bundle resolves to 5 rules"
+  pass_test "ts-strict bundle resolves to 5 rules"
 else
-  fail_test "expected 5 oneAD rules, got: $count"
+  fail_test "expected 5 ts-strict rules, got: $count"
 fi
 
 # 3. Inline rules win over profile name.
 cat > "$WS/.collab/lint-profile.json" <<'JSON'
 {
-  "profile": "oneAD",
+  "profile": "ts-strict",
   "rules": [
     { "id": "no-todo", "severity": "warn", "pattern": "TODO", "message": "TODO left in code", "line_excludes": [], "file_excludes": [] }
   ]

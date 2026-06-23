@@ -15,8 +15,8 @@ cat > "$TEST_DIR/.collab/dep-graph.json" <<'EOF'
 {"version":1,"workspace":"test","projects":{"myapp":{"type":"node-frontend","deps":{},"consumedBy":[]}}}
 EOF
 
-# Opt into the OneAD lint profile (rules now live in templates/lint-profiles/oneAD.json).
-echo '{"profile":"oneAD"}' > "$TEST_DIR/.collab/lint-profile.json"
+# Opt into the ts-strict lint profile (rules now live in templates/lint-profiles/ts-strict.json).
+echo '{"profile":"ts-strict"}' > "$TEST_DIR/.collab/lint-profile.json"
 
 # Create file WITH violations
 cat > "$TEST_DIR/myapp/src/bad.ts" <<'TSEOF'

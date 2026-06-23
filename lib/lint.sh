@@ -3,7 +3,7 @@
 #
 # Rules live in templates/lint-profiles/<name>.json. Workspaces opt in via
 # <workspace>/.collab/lint-profile.json:
-#   {"profile": "oneAD"}             -> templates/lint-profiles/oneAD.json
+#   {"profile": "ts-strict"}          -> templates/lint-profiles/ts-strict.json
 #   {"rules": [...]}                 -> use rules inline (custom profile)
 # When neither is provided, the default profile (no rules) is loaded and lint
 # passes silently.

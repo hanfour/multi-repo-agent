@@ -24,7 +24,7 @@ if [[ "$result" != "1" ]]; then echo "FAIL: depthDefault should be 1, got $resul
 config_set "autoScan" "false" "$TEST_CONFIG"
 result=$(config_get "autoScan" "$TEST_CONFIG")
 if [[ "$result" != "false" ]]; then echo "FAIL: autoScan should be false after set, got $result"; errors=$((errors+1)); fi
-result=$(config_get_alias "onead" "$TEST_CONFIG")
+result=$(config_get_alias "nonexistent" "$TEST_CONFIG")
 if [[ "$result" != "null" ]]; then echo "FAIL: nonexistent alias should return null, got $result"; errors=$((errors+1)); fi
 
 # config_set_string stores arbitrary strings safely (quotes included) —

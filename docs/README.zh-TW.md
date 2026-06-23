@@ -647,15 +647,15 @@ mra notify test     # 傳送測試通知
 | `db.json` | 資料庫設定 | 是 |
 | `dep-graph.json` | 自動產生的相依性圖表 | 否 |
 | `manual-deps.json` | 手動相依性覆寫 | 是 |
-| `lint-profile.json` | 選擇 lint 規則集（`{"profile":"oneAD"}` 或內嵌 `rules`） | 是 |
+| `lint-profile.json` | 選擇 lint 規則集（`{"profile":"ts-strict"}` 或內嵌 `rules`） | 是 |
 | `notify.json` | Webhook 設定 | 是 |
 | `eval/` | 審查評估報告 | 否 |
 
 `repos.json`、`db.json`、`dep-graph.json`、`manual-deps.json` 與 scanner JSONL 紀錄的 JSON Schema 放在 [`schemas/`](../schemas/)。在 `.collab/*.json` 頂層加 `"$schema"` 即可在 IDE 內取得即時驗證；`mra doctor` 會自動跑結構檢查。
 
-> **⚠ 遷移提示（lint 預設已變更）**：早期版本在 `lib/lint.sh` 寫死 OneAD BLOCKER 規則。lint 現在改為 profile 驅動，預設 profile 為空。要恢復原行為，在工作區建立一行檔案：
+> **⚠ 遷移提示（lint 預設已變更）**：早期版本在 `lib/lint.sh` 寫死內建的 BLOCKER 規則。lint 現在改為 profile 驅動，預設 profile 為空。要恢復原行為，在工作區建立一行檔案：
 > ```bash
-> echo '{"profile":"oneAD"}' > <workspace>/.collab/lint-profile.json
+> echo '{"profile":"ts-strict"}' > <workspace>/.collab/lint-profile.json
 > ```
 
 **Lint Profiles** 收錄於 [`templates/lint-profiles/`](../templates/lint-profiles/)：
@@ -663,12 +663,12 @@ mra notify test     # 傳送測試通知
 | Profile | 用途 |
 |---------|-----|
 | `default` | 不含任何規則 — lint 不報任何違規 |
-| `oneAD` | OneAD 前端 BLOCKER 規則（no-interface / no-enum / no-any / no-non-null / no-var） |
+| `ts-strict` | 嚴格 TypeScript BLOCKER 規則（no-interface / no-enum / no-any / no-non-null / no-var） |
 
 啟用方式：在 `<workspace>/.collab/lint-profile.json` 寫：
 
 ```json
-{ "profile": "oneAD" }
+{ "profile": "ts-strict" }
 ```
 
 或內嵌自訂規則（每條須含 `id`、`severity`、`pattern`、`message`、`line_excludes`、`file_excludes`）：

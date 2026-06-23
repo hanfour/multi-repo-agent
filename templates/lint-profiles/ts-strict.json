@@ -1,6 +1,6 @@
 {
-  "name": "oneAD",
-  "description": "OneAD frontend JS/TS BLOCKER rules historically baked into lib/lint.sh. Opt in by setting workspace .collab/lint-profile.json to {\"profile\": \"oneAD\"}.",
+  "name": "ts-strict",
+  "description": "Strict TypeScript/JS BLOCKER rules (no interface/enum/any/non-null/var). Opt in by setting workspace .collab/lint-profile.json to {\"profile\": \"ts-strict\"}.",
   "rules": [
     {
       "id": "no-interface",

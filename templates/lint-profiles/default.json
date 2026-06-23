@@ -1,5 +1,5 @@
 {
   "name": "default",
-  "description": "Empty profile. Lint passes silently — opt into a profile by setting workspace .collab/lint-profile.json to {\"profile\": \"oneAD\"} or by listing rules inline.",
+  "description": "Empty profile. Lint passes silently — opt into a profile by setting workspace .collab/lint-profile.json to {\"profile\": \"ts-strict\"} or by listing rules inline.",
   "rules": []
 }

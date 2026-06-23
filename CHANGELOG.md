@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Breaking
+- **BREAKING** lint profile `oneAD` renamed to `ts-strict`; update any `.collab/lint-profile.json` using `{"profile":"oneAD"}` to `{"profile":"ts-strict"}`.
+
 ### Added
 - feat(launch): load each project's CLAUDE.md/AGENTS.md/.claude/rules natively
   (`mra config project-memory on|off`, default on); interactive launch now scopes
