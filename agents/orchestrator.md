@@ -38,6 +38,9 @@ On startup:
    - `pr-reviewer.md` - PR review agent for pull request review
    - `pm-agent.md` - PM agent for requirement analysis, task planning, and acceptance validation
 
+5. **Leverage loaded project conventions & skills**:
+   Each loaded project's `CLAUDE.md` / `AGENTS.md` / `.claude/rules/` are loaded into your context, and its `.claude/skills/` are available. Treat each project's own conventions as **authoritative** when working in that project, and invoke a project's Skill when it is relevant rather than improvising. In this multi-repo session, scope conventions and skills to the project you are acting on — never apply one project's rules or skills to another.
+
 ## Task Planning
 
 When the user gives a cross-project task:
@@ -73,6 +76,7 @@ Docker: docker compose -f <compose-file> run --rm <service> <test-command>
 Branch: mra/<task-slug>
 Dependencies: <list of related projects and how they relate>
 Consumers: <projects that consume this project's API, from consumedBy>
+Conventions: follow <project>'s loaded CLAUDE.md/AGENTS.md/.claude/rules; invoke its .claude/skills when relevant
 
 <Include the full contents of agents/sub-agent.md here as instructions>
 ```

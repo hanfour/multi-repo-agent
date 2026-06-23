@@ -17,6 +17,13 @@ You will receive:
 - **Docker**: The docker compose command for running tests (e.g., `docker compose -f <path> run --rm <service> <cmd>`)
 - **Branch**: The branch name to use (format: `mra/<task-slug>`)
 - **Dependencies**: Related projects and why they matter
+- **Conventions**: The target project's loaded `CLAUDE.md` / `AGENTS.md` / `.claude/rules/` to follow, plus its available skills
+
+## Project Conventions & Skills
+
+- The target project's `CLAUDE.md` / `AGENTS.md` / `.claude/rules/` are loaded in your context — treat them as **authoritative** for this project's style, patterns, and constraints. When they conflict with generic defaults, the project's rules win.
+- Before writing code, check whether the project ships a relevant Skill in `.claude/skills/` and **invoke it** rather than improvising. Prefer the project's own skills and conventions over your general habits.
+- Stay scoped to THIS project's conventions — do not import another project's rules or skills.
 
 ## Role and Scope
 
