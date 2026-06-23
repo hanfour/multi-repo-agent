@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project-Memory Loading (per-project CLAUDE.md / AGENTS.md / .claude/rules) — Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">OneAD Account Management</div>
+    <div class="toc-title">Project-Memory Loading (per-project CLAUDE.md / AGENTS.md / .claude/rules) — Design</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#1-problem">1. Problem</a></li>
+<li><a href="#2-goals-non-goals">2. Goals / Non-goals</a></li>
+<li><a href="#3-verified-facts-the-design-relies-on">3. Verified facts the design relies on</a></li>
+<li><a href="#4-design-decisions-ratified-by-vote">4. Design decisions (ratified by vote)</a><ul>
+<li><a href="#d1-naming-loadprojectmemory-project-memory">D1 — Naming: loadProjectMemory / project-memory</a></li>
+<li><a href="#d2-pkb-stays-complementary-by-tier-no-blind-duplication">D2 — PKB stays complementary by tier (no blind duplication)</a></li>
+<li><a href="#d3-new-lib-central-call-unset-on-off">D3 — New lib, central call, unset-on-off</a></li>
+<li><a href="#d4-default-on-behind-a-hard-gate">D4 — Default ON, behind a hard gate</a></li>
+<li><a href="#d5-offline-regression-tests-three-layers-real-api-canary-stays-out-of-the-suite">D5 — Offline regression tests (three layers; real-API canary stays out of the suite)</a></li>
+</ul>
+</li>
+<li><a href="#5-component-changes">5. Component changes</a></li>
+<li><a href="#6-risks-mitigations-must-fix-from-the-vote">6. Risks &amp; mitigations (must-fix, from the vote)</a></li>
+<li><a href="#7-out-of-scope">7. Out of scope</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">技術詳規格</div>
+      <h1>Project-Memory Loading (per-project CLAUDE.md / AGENTS.md / .claude/rules) — Design</h1>
+      <div class="meta"></div>
+    </div>
+    <p><strong>Date:</strong> 2026-06-23
+<strong>Status:</strong> Designed, pending implementation. Decisions ratified by a 4-reviewer + 1-synthesizer multi-agent vote (lenses: bash-cli-conventions, context-engineering-cost, test-maintainability, adversarial-safety).
+<strong>Scope:</strong> Make each loaded project's native <code>CLAUDE.md</code> / <code>AGENTS.md</code> / <code>.claude/rules/</code> load into the <code>claude</code> CLI that <code>mra</code> launches, instead of relying solely on PKB distillation — gated by a config flag, guarded against cross-project leakage, and locked with offline regression tests.</p>
+<hr />
+<h2 id="1-problem">1. Problem</h2>
+<p><code>mra</code> launches <code>claude</code> with <code>--add-dir &lt;project&gt;</code> for every loaded project (interactive <code>launch_claude</code> and every headless <code>claude -p</code> call).</p>
+<p><strong>Verified empirically (claude 2.1.186, canary fixtures):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Artifact in an <code>--add-dir</code> project</th>
+<th>Loads by default?</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.claude/skills/</code> (Agent Skills)</td>
+<td>✅ <strong>Yes</strong> — auto-loaded; skills are the documented exception to <code>--add-dir</code> being file-access-only. Unaffected by <code>--setting-sources</code>.</td>
+<td>Canary skill's description (magic token) appeared in context with <code>--add-dir</code>, absent without it.</td>
+</tr>
+<tr>
+<td><code>CLAUDE.md</code> / <code>AGENTS.md</code> / <code>.claude/rules/</code></td>
+<td>❌ <strong>No</strong> — not loaded from <code>--add-dir</code> dirs by default.</td>
+<td>Memory tokens appeared <strong>only</strong> with <code>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1</code>; absent without it.</td>
+</tr>
+</tbody>
+</table>
+<p>So <strong>skills already work</strong> and need no change. The real gap is <strong>per-project memory/rules</strong>: today <code>mra</code> only sees them via PKB distillation (<code>lib/pkb.sh</code> → <code>.mra/pkb/conventions.md</code>), which (a) requires a prior <code>mra analyze</code>, (b) is a lossy summary rather than the author's verbatim instructions, and (c) means a project <strong>without</strong> a PKB is invisible to the interactive orchestrator's rules.</p>
+<p>Setting <code>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1</code> makes claude load <code>.claude/CLAUDE.md</code>, <code>.claude/rules/*.md</code> (and, when <code>local</code> setting-source is not excluded, <code>CLAUDE.local.md</code>) from each <code>--add-dir</code> directory natively.</p>
+<h2 id="2-goals-non-goals">2. Goals / Non-goals</h2>
+<p><strong>Goals</strong>
+- Each loaded project's committed <code>CLAUDE.md</code> / <code>AGENTS.md</code> / <code>.claude/rules/</code> reaches the <code>claude</code> process natively, across <strong>all</strong> mra paths (interactive launch, <code>--all</code>, every headless <code>claude -p</code>, pkb generators) from a <strong>single</strong> central switch.
+- A config flag (<code>mra config project-memory on/off</code>) that is authoritative over mra's process tree.
+- No cross-project leakage of gitignored personal memory (<code>CLAUDE.local.md</code>).
+- Offline regression tests that actually lock the env-inheritance behaviour (not just argv).
+- PKB and native loading stay <strong>complementary</strong>, not triply redundant.</p>
+<p><strong>Non-goals</strong>
+- Editing <code>agents/orchestrator.md</code> or any agent prompt to make the model <em>actively use</em> skills/rules (a separate, deferred concern — the user chose the loading mechanism, not prompt-tuning).
+- Changing skill discovery (already works).
+- Loading <code>settings.local.json</code> (the env var does <strong>not</strong> govern it; mra's own is 12 KB of internal patterns).</p>
+<h2 id="3-verified-facts-the-design-relies-on">3. Verified facts the design relies on</h2>
+<ol>
+<li><code>--add-dir</code> auto-loads <code>.claude/skills/</code>; does <strong>not</strong> auto-load CLAUDE.md/rules. (canary test)</li>
+<li><code>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1</code> makes CLAUDE.md + <code>.claude/rules/</code> load from <code>--add-dir</code> dirs. (canary test)</li>
+<li><code>--setting-sources</code> only filters <code>settings.json</code> scope; it does <strong>not</strong> filter skills/memory — <strong>except</strong> that excluding <code>local</code> drops <code>CLAUDE.local.md</code>. (claude-code-guide, docs)</li>
+<li>Every headless caller already passes <code>--setting-sources project</code> (<code>pkb.sh</code>, <code>review.sh:370</code>, <code>ask.sh:143/154</code>, <code>eval.sh:235/304</code>, <code>review-debate.sh</code>, <code>model-provider.sh:23</code>, <code>test-audit.sh:113</code>, <code>review-personas.sh:81</code>) → <code>CLAUDE.local.md</code> excluded there → ON is clean.</li>
+<li>Interactive <code>launch_claude</code> (<code>lib/launch.sh:97</code>) calls <strong>bare</strong> <code>claude</code> with <strong>no</strong> <code>--setting-sources</code> → default scope <strong>includes</strong> <code>local</code> → with the env var ON it would pull every sibling repo's <code>CLAUDE.local.md</code> into one shared context. <strong>This is the design's hard gate.</strong></li>
+<li><code>tests/test_launch.sh</code> stubs <code>claude()</code> as a <strong>shell function</strong> in the same process → it can observe exported env vars, even though env vars are not in argv.</li>
+<li><code>bin/mra.sh</code> sources ~56 single-purpose libs, then <code>main()</code> (~line 149) does <code>case "$command"</code> dispatch. config keys are camelCase; <code>config_handle</code> CLI args are kebab (<code>auto-scan</code>, <code>parallel-test</code>).</li>
+</ol>
+<h2 id="4-design-decisions-ratified-by-vote">4. Design decisions (ratified by vote)</h2>
+<h3 id="d1-naming-loadprojectmemory-project-memory">D1 — Naming: <code>loadProjectMemory</code> / <code>project-memory</code></h3>
+<p>Config key <code>loadProjectMemory</code> (camelCase) + CLI subcommand <code>project-memory</code> (kebab) — the only pair consistent with both existing conventions. <strong>Requirement:</strong> docs (help, <code>usage()</code>, README, code comment) must state precisely that the flag governs <strong>CLAUDE.md + AGENTS.md + .claude/rules only</strong> — not skills (already auto-load), not <code>settings.local.json</code>.
+<em>Recorded fallback if "memory" later reads as misleading: <code>loadProjectInstructions</code> / <code>project-instructions</code>. Not adopted now.</em></p>
+<h3 id="d2-pkb-stays-complementary-by-tier-no-blind-duplication">D2 — PKB stays complementary by tier (no blind duplication)</h3>
+<p>When <code>loadProjectMemory</code> is ON, <code>pkb_build_context</code> must <strong>drop</strong> the full-tier verbatim "Full Conventions" block (<code>lib/pkb.sh:417-424</code>) and the verbatim conventions fallback (<code>pkb.sh:354-359</code>), and <strong>keep</strong> the tagged <code>[CONVENTION]</code>/<code>[PATTERN]</code>/<code>[DECISION]</code> L1 essentials plus the cross-codebase sitemap/architecture/api-surface/modules/tunnels and accumulated <code>[DECISION]</code>s that exist in no CLAUDE.md. <code>pkb_build_context</code> learns the flag state by calling <code>config_get loadProjectMemory</code> directly — it runs in the mra parent process (assembling the system prompt for launch/review/ask), where <code>config_get</code> is already sourced — rather than threading a new parameter through every caller. Rationale: <code>conventions.md</code> is distilled <em>from</em> the same files the env var now auto-loads (<code>pkb.sh:609</code>), so the verbatim block is a second/third copy (~1–2k tokens/project, ×N on <code>--all</code>).</p>
+<h3 id="d3-new-lib-central-call-unset-on-off">D3 — New lib, central call, unset-on-off</h3>
+<ul>
+<li>New file <strong><code>lib/project-memory.sh</code></strong> exporting <code>apply_project_memory_env()</code> (~15 lines). Sourced in <code>bin/mra.sh</code> alongside other libs. Do <strong>not</strong> bolt onto <code>config.sh</code> (which is pure JSON get/set with zero env side-effects).</li>
+<li>Called <strong>once at the very top of <code>main()</code></strong> (right after <code>local command="${1:-}"</code>, before the help check and <code>case</code> dispatch) so the export precedes <code>resolve_workspace</code> and every subcommand.</li>
+<li><code>config_handle</code> still gains the <code>project-memory</code> arm (that <em>is</em> config plumbing).</li>
+<li>The helper: idempotent; reads the flag via <code>config_get</code> (honours <code>MRA_CONFIG</code> for tests); exports <code>CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1</code> when ON; <strong>explicitly <code>unset</code>s it when OFF/missing</strong> so mra is authoritative even over a globally-exported shell var (otherwise <code>config off</code> is a silent no-op).</li>
+</ul>
+<h3 id="d4-default-on-behind-a-hard-gate">D4 — Default ON, behind a hard gate</h3>
+<p>Default <code>loadProjectMemory: true</code> <strong>only if</strong> the same change adds <code>--setting-sources project</code> to the interactive <code>launch_claude</code> invocation (<code>lib/launch.sh:97</code>), making interactive semantics match headless (committed memory only, <code>CLAUDE.local.md</code> excluded). Without that guard, default-ON is a cross-project privacy regression and is <strong>rejected</strong>. If the launch guard is deferred out of this change, the flag defaults <strong>OFF</strong> until it lands.
+<em>Dissent preserved (adversarial reviewer): prefers default OFF even after the guard, on <code>--all</code> token-cost grounds. Escape hatch: if token blowup is observed, flip the default to OFF — the D2 tier-trim mitigates this.</em></p>
+<h3 id="d5-offline-regression-tests-three-layers-real-api-canary-stays-out-of-the-suite">D5 — Offline regression tests (three layers; real-API canary stays out of the suite)</h3>
+<ol>
+<li><strong><code>tests/test_project_memory.sh</code> (unit):</strong> call <code>apply_project_memory_env</code> against a temp <code>MRA_CONFIG</code> with the flag on / off / missing; assert the env var is exported when ON and <strong>unset</strong> when OFF or missing.</li>
+<li><strong><code>tests/test_launch.sh</code> (extend):</strong> make the same-process <code>claude()</code> stub also append <code>printf 'ENV:%s\n' "${CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD:-unset}" &gt;&gt; "$CAPTURE"</code>; drive launch with flag ON → assert <code>ENV:1</code>, OFF → assert <code>ENV:unset</code>. Keep existing <code>grep -cx</code> argv assertions intact (append the ENV line separately). Also assert launch now passes <code>--setting-sources project</code>.</li>
+<li><strong>Ordering guard (static):</strong> assert <code>apply_project_memory_env</code> precedes <code>case "$command"</code> in <code>bin/mra.sh</code> (cheap grep) so a future refactor can't silently move it below dispatch. Optionally back with an <code>MRA_CLAUDE_BIN</code>-mock headless inheritance check.</li>
+</ol>
+<h2 id="5-component-changes">5. Component changes</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+<th>Phase</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/project-memory.sh</code> (new)</td>
+<td><code>apply_project_memory_env()</code>: export when ON, unset when OFF/missing; scope comment</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>bin/mra.sh</code></td>
+<td>source the new lib; call <code>apply_project_memory_env</code> at top of <code>main()</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>config.json</code></td>
+<td>add <code>"loadProjectMemory": true</code> (only with the launch guard — see D4)</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>lib/config.sh</code></td>
+<td><code>config_handle</code>: add <code>project-memory on/off</code> arm mirroring <code>parallel-test</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>lib/launch.sh</code></td>
+<td>add <code>--setting-sources project</code> to the <code>claude</code> invocation (line 97) — <strong>hard gate for default-ON</strong></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>tests/test_project_memory.sh</code> (new)</td>
+<td>unit: flag on/off/missing → export/unset</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>tests/test_launch.sh</code></td>
+<td>extend stub to capture env; assert ENV + <code>--setting-sources project</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>README.md</code> / <code>usage()</code> / <code>CHANGELOG.md</code></td>
+<td>document <code>mra config project-memory</code>, exact scope, hard-gate note</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>lib/pkb.sh</code></td>
+<td><code>pkb_build_context</code>: when flag ON, drop full-tier verbatim conventions (<code>417-424</code>) + fallback (<code>354-359</code>)</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>lib/pkb.sh</code></td>
+<td><code>_pkb_generate_conventions</code> (<code>:609</code>): when flag ON, drop/condition the "read CLAUDE.md/AGENTS.md/.claude/rules" instruction so nested generators don't double-feed</td>
+<td>2</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Phase 1</strong> = the cohesive, shippable feature (loading + hard gate + tests + docs).
+<strong>Phase 2</strong> = PKB token de-duplication (mitigates the redundancy this feature introduces). Splittable into a follow-up PR if Phase 1 review is large; the adversarial dissent accepts overlap as an interim with a tracking note.</p>
+<h2 id="6-risks-mitigations-must-fix-from-the-vote">6. Risks &amp; mitigations (must-fix, from the vote)</h2>
+<ol>
+<li><strong><code>CLAUDE.local.md</code> cross-project leakage (interactive launch).</strong> → Add <code>--setting-sources project</code> to <code>launch.sh:97</code> in the same change as default-ON; test asserts it. <em>(D4, hard gate.)</em></li>
+<li><strong>No unset-when-off → <code>config off</code> is a silent no-op against a global shell var.</strong> → Explicit <code>unset</code> on OFF/missing; unit-tested. <em>(D3.)</em></li>
+<li><strong>Env inheritance untestable by argv-only harness; a refactor could silently disable it.</strong> → Same-process function-stub env capture + static ordering grep. <em>(D5.)</em></li>
+<li><strong>Triple redundancy of rule content (~1–2k tokens/project, ×N).</strong> → Phase 2 tier-trim of <code>pkb_build_context</code>. <em>(D2.)</em></li>
+<li><strong>PKB generator subprocesses double-feed</strong> (inherit env var <em>and</em> are prompted to read the same files). → Phase 2: condition the <code>pkb.sh:609</code> prompt when native loading is active. <em>(D2.)</em></li>
+<li><strong>Naming/scope confusion</strong> ("memory" undersells AGENTS.md + rules; collides with Claude's MEMORY.md). → Precise docs everywhere; recorded fallback name. <em>(D1.)</em></li>
+</ol>
+<h2 id="7-out-of-scope">7. Out of scope</h2>
+<ul>
+<li>Prompt-tuning agents to actively invoke skills/rules.</li>
+<li>Skill discovery changes.</li>
+<li>Loading <code>settings.local.json</code>.</li>
+<li>Auto merge/rebase or any new command surface.</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>
