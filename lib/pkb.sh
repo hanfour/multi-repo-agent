@@ -330,6 +330,9 @@ pkb_build_context() {
     return
   fi
 
+  local native_memory=false
+  [[ "$(config_get loadProjectMemory 2>/dev/null)" != "false" ]] && native_memory=true
+
   local context=""
 
   # --- L0: Identity (always loaded, ~50 tokens) ---
@@ -351,7 +354,7 @@ $(cat "$identity_file")
 ## Essential Conventions
 ${essential}
 "
-    else
+    elif [[ "$native_memory" == false ]]; then
       # Fallback: load full conventions if no tags found (pre-v2 PKB)
       context="${context}
 ## Conventions
@@ -414,8 +417,9 @@ $(cat "$api_file")
 "
     fi
 
-    # Full conventions (not just tagged lines)
-    if [[ -f "$conventions_file" ]]; then
+    # Full conventions (not just tagged lines) — skip when claude loads
+    # CLAUDE.md/rules natively to avoid a verbatim second copy.
+    if [[ -f "$conventions_file" && "$native_memory" == false ]]; then
       context="${context}
 ## Full Conventions
 $(cat "$conventions_file")
