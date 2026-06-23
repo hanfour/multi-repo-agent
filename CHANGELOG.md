@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- feat(launch): load each project's CLAUDE.md/AGENTS.md/.claude/rules natively
+  (`mra config project-memory on|off`, default on); interactive launch now scopes
+  settings to `user,project` to avoid cross-project CLAUDE.local.md leakage.
+
 ### Fixed
 - `log_error` now writes to stderr; error messages from functions that return
   values via stdout (e.g. `resolve_project_dir`) were silently swallowed by

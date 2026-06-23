@@ -71,6 +71,7 @@ Commands:
   scan [path]                   Re-scan dependency graph
   deps [project]                Show dependency graph
   config <key> <value>          Set configuration
+  config project-memory on|off  Load each project's CLAUDE.md/AGENTS.md/.claude/rules (default on)
   alias <name> <path>           Create workspace alias
   clean [--logs-older-than Nd]  Clean orphan containers and old logs
   db [setup|status|import]      Manage databases
