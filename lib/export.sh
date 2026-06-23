@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Export project context files for external tools (reqbot-slack, etc.)
+# Export project context files for external tools (chat bots, CI, etc.)
 
 export_project() {
   local workspace="$1" project="$2"
