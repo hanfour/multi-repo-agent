@@ -61,7 +61,9 @@ When `loadProjectMemory` is ON, `pkb_build_context` must **drop** the full-tier 
 - The helper: idempotent; reads the flag via `config_get` (honours `MRA_CONFIG` for tests); exports `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` when ON; **explicitly `unset`s it when OFF/missing** so mra is authoritative even over a globally-exported shell var (otherwise `config off` is a silent no-op).
 
 ### D4 — Default ON, behind a hard gate
-Default `loadProjectMemory: true` **only if** the same change adds `--setting-sources project` to the interactive `launch_claude` invocation (`lib/launch.sh:97`), making interactive semantics match headless (committed memory only, `CLAUDE.local.md` excluded). Without that guard, default-ON is a cross-project privacy regression and is **rejected**. If the launch guard is deferred out of this change, the flag defaults **OFF** until it lands.
+Default `loadProjectMemory: true` **only if** the same change adds `--setting-sources user,project` to the interactive `launch_claude` invocation (`lib/launch.sh:97`), excluding `local` scope so each repo's gitignored `CLAUDE.local.md` is never pulled in. Without that guard, default-ON is a cross-project privacy regression and is **rejected**. If the launch guard is deferred out of this change, the flag defaults **OFF** until it lands.
+
+*Refinement during planning (deviates from the vote's bare `project`):* the guard uses `user,project`, not `project`. Both exclude `local` (the leak vector), but bare `project` would also drop the operator's `~/.claude/settings.json` (global allowedTools/hooks) from the **interactive** orchestrator session — a permissions regression. `user,project` excludes only `local`. Headless callers keep their existing bare `project` (ephemeral, already audited).
 *Dissent preserved (adversarial reviewer): prefers default OFF even after the guard, on `--all` token-cost grounds. Escape hatch: if token blowup is observed, flip the default to OFF — the D2 tier-trim mitigates this.*
 
 ### D5 — Offline regression tests (three layers; real-API canary stays out of the suite)
@@ -89,7 +91,7 @@ Default `loadProjectMemory: true` **only if** the same change adds `--setting-so
 
 ## 6. Risks & mitigations (must-fix, from the vote)
 
-1. **`CLAUDE.local.md` cross-project leakage (interactive launch).** → Add `--setting-sources project` to `launch.sh:97` in the same change as default-ON; test asserts it. *(D4, hard gate.)*
+1. **`CLAUDE.local.md` cross-project leakage (interactive launch).** → Add `--setting-sources user,project` to `launch.sh:97` in the same change as default-ON (excludes `local` scope while preserving the operator's user-scope settings); test asserts it. *(D4, hard gate.)*
 2. **No unset-when-off → `config off` is a silent no-op against a global shell var.** → Explicit `unset` on OFF/missing; unit-tested. *(D3.)*
 3. **Env inheritance untestable by argv-only harness; a refactor could silently disable it.** → Same-process function-stub env capture + static ordering grep. *(D5.)*
 4. **Triple redundancy of rule content (~1–2k tokens/project, ×N).** → Phase 2 tier-trim of `pkb_build_context`. *(D2.)*
