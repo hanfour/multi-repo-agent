@@ -17,7 +17,7 @@ export const TOOLS = [
       properties: {
         workspace: {
           type: "string",
-          description: "Workspace root path (e.g., /Users/you/Acme)",
+          description: "Workspace root path (e.g., /Users/you/workspace)",
         },
       },
       required: ["workspace"],
