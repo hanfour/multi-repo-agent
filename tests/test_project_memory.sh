@@ -34,5 +34,13 @@ case_line=$(grep -n 'case "\$command" in' "$mra_main" | head -1 | cut -d: -f1)
 [[ -n "$call_line" && -n "$case_line" && "$call_line" -lt "$case_line" ]] \
   || fail "ordering: call (line ${call_line:-none}) must precede case (line ${case_line:-none})"
 
+# Case 6: config_handle project-memory on/off flips loadProjectMemory
+write_config '{}'
+config_handle project-memory off >/dev/null 2>&1
+[[ "$(config_get loadProjectMemory)" == "false" ]] || fail "config_handle off -> false"
+config_handle project-memory on  >/dev/null 2>&1
+[[ "$(config_get loadProjectMemory)" == "true" ]]  || fail "config_handle on -> true"
+config_handle project-memory bogus >/dev/null 2>&1 && fail "config_handle bogus should return non-zero"
+
 rm -f "$MRA_CONFIG"
 if [[ $errors -eq 0 ]]; then echo "PASS: all project-memory tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi

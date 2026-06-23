@@ -60,6 +60,11 @@ config_handle() {
     output-language)
       config_set_string "outputLanguage" "$value"
       log_success "outputLanguage set to: $value" "config" ;;
+    project-memory)
+      if [[ "$value" == "on" || "$value" == "off" ]]; then
+        config_set "loadProjectMemory" "$( [[ "$value" == "on" ]] && echo true || echo false )"
+        log_success "loadProjectMemory $value" "config"
+      else log_error "invalid value: $value (use on/off)" "config"; return 1; fi ;;
     *) log_error "unknown config key: $key" "config"; return 1 ;;
   esac
 }
