@@ -699,6 +699,15 @@ Global config: `~/multi-repo-agent/config.json`
 }
 ```
 
+### Project memory
+
+`mra config project-memory on|off` (default **on**) controls whether each loaded
+project's native **CLAUDE.md**, **AGENTS.md**, and **.claude/rules/** load into
+the `claude` session mra launches. It does **not** affect Agent Skills
+(`.claude/skills/`, already auto-loaded via `--add-dir`) or `settings.local.json`.
+The interactive orchestrator uses `--setting-sources user,project`, so a repo's
+gitignored `CLAUDE.local.md` is never pulled into the shared cross-repo context.
+
 </details>
 
 <details>
