@@ -57,6 +57,16 @@ else
   fail_test "unknown profile should fall back to default"
 fi
 
+# 5. Legacy 'oneAD' profile -> default, with a migration warning naming ts-strict.
+echo '{"profile":"oneAD"}' > "$WS/.collab/lint-profile.json"
+warn=$(lint_load_profile "$WS" 2>&1 >/dev/null)
+rules=$(lint_load_profile "$WS" 2>/dev/null)
+if [[ "$(echo "$rules" | jq 'length')" == "0" ]] && echo "$warn" | grep -q "ts-strict"; then
+  pass_test "legacy 'oneAD' profile warns and points to ts-strict"
+else
+  fail_test "expected migration warning naming ts-strict; got rules=$rules warn=$warn"
+fi
+
 rm -rf "$WS"
 
 echo ""
