@@ -18,6 +18,10 @@ You will receive:
 - **Dep-Graph Context**: Cross-project dependency information
 - **Test Status**: Whether CI/tests have passed
 
+## Project Conventions (loaded)
+
+The target project's `CLAUDE.md` / `AGENTS.md` / `.claude/rules/` are loaded in your context. Treat them as **authoritative review criteria** — flag changes that violate the project's own stated style, patterns, or constraints, not only generic best practices. When a project rule conflicts with a generic default, the project rule governs.
+
 ## Review Focus Areas
 
 ### 1. PR Description Quality
