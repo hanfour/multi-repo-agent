@@ -76,6 +76,26 @@ else
   fail_test "unknown status expected COMMENT, got '$event'"
 fi
 
+# --- _review_issues_display: incomplete reviews show N/A, not a misleading 0 ---
+out=$(_review_issues_display "⚠️ REVIEW_INCOMPLETE — agent did not finish" "0")
+if [[ "$out" == *"N/A"* ]]; then
+  pass_test "REVIEW_INCOMPLETE shows N/A (not 0)"
+else
+  fail_test "incomplete review should show N/A, got '$out'"
+fi
+out=$(_review_issues_display "Found real problems" "3")
+if [[ "$out" == "3" ]]; then
+  pass_test "normal review shows the comment count"
+else
+  fail_test "normal review should show count, got '$out'"
+fi
+out=$(_review_issues_display "No issues found by either agent" "0")
+if [[ "$out" == "0" ]]; then
+  pass_test "genuine clean review shows 0"
+else
+  fail_test "clean review should show 0, got '$out'"
+fi
+
 echo "---"
 echo "Passed: $pass"
 echo "Failed: $errors"
