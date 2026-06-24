@@ -51,6 +51,20 @@ _debate_assess() {
   fi
 }
 
+# Map the adversarial verifier's EXPLICIT verdict to the final action on the
+# APPROVE path. Prints:
+#   APPROVE      — verifier also approved; the clean green is confirmed (3 agents).
+#   DOWNGRADE    — verifier substantiated an issue the two agents missed; synthesise.
+#   INCONCLUSIVE — verifier produced no verdict (failure/cutoff); fall back to the
+#                  2-agent approval rather than block a clean PR on verifier flakiness.
+_debate_verify_gate() {
+  case "$(_debate_verdict_of "$1")" in
+    APPROVED)          printf 'APPROVE\n' ;;
+    CHANGES_REQUESTED) printf 'DOWNGRADE\n' ;;
+    *)                 printf 'INCONCLUSIVE\n' ;;
+  esac
+}
+
 # Count finding lines tolerantly — NON-CRITICAL: used only to choose synthesis
 # depth (direct vs voting) on the PROCEED path, never for the approve/error
 # decision. Matches a bullet (- or *), optional indent/bold, then "[<UPPER>".
@@ -158,7 +172,29 @@ run_debate_review() {
   fi
 
   if [[ "$decision" == "APPROVE" ]]; then
-    log_success >&2 "[fast] both agents completed and approved — APPROVED" "debate"
+    # Second check before approving: a skeptical 3rd reviewer tries to REFUTE the
+    # clean verdict (gated by MRA_REVIEW_VERIFY_APPROVE, default on). Lowers the
+    # chance of a false "no issues" green — approval then needs THREE independent
+    # agents, the last one adversarial.
+    if [[ "${MRA_REVIEW_VERIFY_APPROVE:-1}" != "0" ]]; then
+      log_progress >&2 "[verify] both approved — adversarial verifier re-checking before approving..." "debate"
+      local verify_out gate
+      verify_out=$(run_agent_verify "$project" "$project_dir" "$diff" "$changed_files" \
+        "$lang_directive" "$model" "$claude_add_dirs" "$mra_dir" "$pkb_context" 2>/dev/null)
+      gate=$(_debate_verify_gate "$verify_out")
+      log_info >&2 "[verify] verifier gate=$gate" "debate"
+      if [[ "$gate" == "DOWNGRADE" ]]; then
+        log_warn >&2 "[verify] verifier substantiated an issue the two agents missed — synthesising a review" "debate"
+        # Route the verifier's findings into synthesis as the third reviewer's input.
+        run_synthesize "$project" "$project_dir" "$diff" "$changed_files" \
+          "$verify_out" "(both primary reviewers approved; the finding above is from the adversarial verifier)" \
+          "$consumers" "$has_api_change" "$lang_directive" "$model" "$focused_ctx" "$mra_dir"
+        return
+      fi
+      [[ "$gate" == "INCONCLUSIVE" ]] && \
+        log_warn >&2 "[verify] verifier did not complete — falling back to the 2-agent approval" "debate"
+    fi
+    log_success >&2 "[fast] approved (verifier confirmed)" "debate"
     echo '{"status":"APPROVED","summary":"No issues found by either agent","comments":[]}'
     return
   fi
@@ -316,6 +352,74 @@ IMPORTANT: You MUST search the codebase using file reading/grep. Every finding m
 When your analysis is complete, end your output with EXACTLY ONE of these lines on its own — it confirms completion AND states your verdict (omitting it marks the review incomplete / a failure):
 ===${MRA_REVIEW_SENTINEL_TOKEN}: APPROVED===           (no issues worth changing)
 ===${MRA_REVIEW_SENTINEL_TOKEN}: CHANGES_REQUESTED===   (you reported any [CRITICAL]/[HIGH]/[MEDIUM] issue above)
+PROMPT
+)
+
+  local _ad_arr=()
+  expand_add_dir_string _ad_arr "$claude_add_dirs"
+  claude -p "$prompt" \
+    "${_ad_arr[@]}" \
+    --model "$model" \
+    --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
+    --disallowedTools "Write,Edit,NotebookEdit" \
+    --setting-sources "project" 2>/dev/null
+}
+
+# -----------------------------------------------------------------------
+# Adversarial verifier: a skeptical THIRD reviewer that runs ONLY when both
+# round-1 agents approved. Its job is to REFUTE the approval — find any real
+# issue the two missed — not to rubber-stamp it. Declares the same explicit
+# verdict sentinel. This is the "second check before approve" that lowers the
+# chance of a false clean green; approval then needs THREE independent agents,
+# the last one adversarial. Gated by MRA_REVIEW_VERIFY_APPROVE (default on).
+# -----------------------------------------------------------------------
+run_agent_verify() {
+  local project="$1" project_dir="$2" diff="$3" changed_files="$4"
+  local lang_directive="$5" model="$6"
+  local claude_add_dirs="$7" mra_dir="$8" pkb_context="${9:-}"
+
+  local pkb_section=""
+  if [[ -n "$pkb_context" ]]; then
+    pkb_section="$pkb_context
+
+Use the knowledge base above to understand the project structure and API surface.
+Only read source files when you need exact file:line evidence for a finding.
+"
+  fi
+
+  local prompt
+  prompt=$(cat <<PROMPT
+You are a skeptical THIRD reviewer. Two independent reviewers BOTH approved this
+PR with no issues — your job is to REFUTE that, not confirm it. Assume they may
+have missed something and look harder.
+${pkb_section}
+## Method (challenge the approval)
+1. Read the diff carefully.
+2. Hunt for what a quick approval misses: broken/renamed callers, null/empty/boundary
+   cases, untested error paths, missing or assertion-free tests, security (injection,
+   authz, leaked secrets), type-safety gaps, state/concurrency, silent breaking changes.
+3. Verify each suspicion against the actual code with file:line evidence BEFORE
+   reporting it. Do NOT invent issues — only report what you can substantiate.
+
+## Diff
+\`\`\`diff
+${diff}
+\`\`\`
+
+## Changed Files
+${changed_files}
+
+## Output
+- [CRITICAL] \`file:line\` — <verified issue the two reviewers missed>
+- [HIGH] \`file:line\` — <verified issue>
+- [MEDIUM] \`file:line\` — <verified issue>
+
+${lang_directive}
+
+End your output with EXACTLY ONE of these lines on its own — it confirms completion
+AND states your verdict (omitting it marks the verification incomplete):
+===${MRA_REVIEW_SENTINEL_TOKEN}: CHANGES_REQUESTED===   (you substantiated a real [CRITICAL]/[HIGH]/[MEDIUM] issue above)
+===${MRA_REVIEW_SENTINEL_TOKEN}: APPROVED===           (after genuinely trying to refute, you found nothing)
 PROMPT
 )
 
