@@ -67,6 +67,10 @@ _pkb_keep_doc() {
   else
     log_warn "PKB: $(basename "$dst") generation failed/cut off — skipping (re-run 'mra analyze' or raise MRA_PKB_AGENT_MAX_TURNS)" "pkb" >&2
     rm -f "$src"
+    # On a rebuild, also drop a STALE INVALID dst (e.g. a prior error string) so
+    # the PKB never serves garbage. A valid prior doc is preserved (better than
+    # nothing when a regen flakes).
+    [[ -f "$dst" ]] && ! _pkb_valid_doc "$(cat "$dst")" && rm -f "$dst"
   fi
 }
 
@@ -583,7 +587,7 @@ ${lang_directive}
 
 Be concise. Each description should be under 20 words.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
 }
 
 _pkb_generate_architecture() {
@@ -623,7 +627,7 @@ ${lang_directive}
 
 Focus on patterns that a new reviewer would need to understand to give accurate feedback.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
 }
 
 _pkb_generate_conventions() {
@@ -674,7 +678,7 @@ ${lang_directive}
 Only document patterns actually used in the codebase. Don't assume or prescribe.
 Every line must start with [CONVENTION], [PATTERN], or [DECISION] tag.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
 }
 
 _pkb_generate_api_surface() {
@@ -717,7 +721,7 @@ ${lang_directive}
 
 If a category has no entries, omit it entirely. Be precise with paths and signatures.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
 }
 
 _pkb_generate_modules() {
@@ -834,7 +838,7 @@ ${lang_directive}
 
 Keep it concise — this will be used as context for code review and development agents.
 PROMPT
-)" --add-dir "$mod_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
+)" --add-dir "$mod_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
 }
 
 # ---------------------------------------------------------------------------
@@ -869,7 +873,7 @@ ${lang_directive}
 
 Output the COMPLETE updated summary (not a diff).
 PROMPT
-)" --add-dir "$module_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
+)" --add-dir "$module_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
 }
 
 # ---------------------------------------------------------------------------
@@ -1121,7 +1125,7 @@ ${lang_directive}
 
 Output the COMPLETE updated sitemap (not a diff).
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project" 2>/dev/null)
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project" 2>/dev/null)
 
   if [[ -n "$updated" ]]; then
     echo "$updated" > "$sitemap_file"
