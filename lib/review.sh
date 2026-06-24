@@ -539,6 +539,18 @@ resolve_pr_base() {
   echo "main"
 }
 
+# Count shown in the summary body's "Issues found" line. An incomplete review
+# has no meaningful count, so show N/A — otherwise "Issues found: 0" next to a
+# REVIEW_INCOMPLETE warning misreads as a clean "0 issues" green.
+_review_issues_display() {
+  local summary="$1" comment_count="$2"
+  if [[ "$summary" == *"REVIEW_INCOMPLETE"* ]]; then
+    printf 'N/A (review did not complete)'
+  else
+    printf '%s' "$comment_count"
+  fi
+}
+
 # Post inline review to GitHub PR
 post_inline_review() {
   local project_dir="$1" pr_number="$2" review_json="$3"
@@ -592,10 +604,12 @@ post_inline_review() {
     api_note=$'\n\n> **Cross-project impact detected.** Consumer repos were analyzed for API compatibility.'
   fi
 
+  local issues_display
+  issues_display=$(_review_issues_display "$summary" "$comment_count")
   local body="## MRA Code Review Summary
 
 **Status:** \`${status}\`
-**Issues found:** ${comment_count}${api_note}
+**Issues found:** ${issues_display}${api_note}
 
 ${summary}"
 
