@@ -42,6 +42,34 @@ pkb_exists() {
   [[ -f "$(pkb_dir "$project_dir")/meta.json" ]]
 }
 
+# A generated PKB doc is valid only if it is substantive — not an agent error
+# string (a cut-off generator emits "Error: Reached max turns ...") and not
+# trivially short. Without this guard a failed/cut-off generator silently
+# pollutes the PKB, and the review agents then consume the garbage as context.
+_pkb_valid_doc() {
+  local content="$1"
+  [[ -z "${content//[[:space:]]/}" ]] && return 1            # empty / whitespace-only
+  case "$content" in
+    "Error:"*|"API Error"*|"Execution error"*) return 1 ;;   # agent error output
+  esac
+  [[ "${#content}" -lt 80 ]] && return 1                     # too short to be a real doc
+  return 0
+}
+
+# Move a freshly generated doc into place only if it passes _pkb_valid_doc;
+# otherwise discard it (with a warning) so a cut-off/failed generator never
+# pollutes the PKB. A skipped core doc just means that knowledge layer is
+# absent — far better than feeding the review agents an error string.
+_pkb_keep_doc() {
+  local src="$1" dst="$2"
+  if [[ -s "$src" ]] && _pkb_valid_doc "$(cat "$src")"; then
+    mv "$src" "$dst"
+  else
+    log_warn "PKB: $(basename "$dst") generation failed/cut off — skipping (re-run 'mra analyze' or raise MRA_PKB_AGENT_MAX_TURNS)" "pkb" >&2
+    rm -f "$src"
+  fi
+}
+
 pkb_age_hours() {
   local project_dir="$1"
   local meta_file="$(pkb_dir "$project_dir")/meta.json"
@@ -171,10 +199,10 @@ pkb_generate() {
   wait $pid4 || true
 
   # Write results
-  [[ -s "$sitemap_file" ]] && mv "$sitemap_file" "$pkb/sitemap.md" || rm -f "$sitemap_file"
-  [[ -s "$architecture_file" ]] && mv "$architecture_file" "$pkb/architecture.md" || rm -f "$architecture_file"
-  [[ -s "$conventions_file" ]] && mv "$conventions_file" "$pkb/conventions.md" || rm -f "$conventions_file"
-  [[ -s "$api_file" ]] && mv "$api_file" "$pkb/api-surface.md" || rm -f "$api_file"
+  _pkb_keep_doc "$sitemap_file" "$pkb/sitemap.md"
+  _pkb_keep_doc "$architecture_file" "$pkb/architecture.md"
+  _pkb_keep_doc "$conventions_file" "$pkb/conventions.md"
+  _pkb_keep_doc "$api_file" "$pkb/api-surface.md"
 
   log_info "[phase 1] core documents generated" "pkb"
 
@@ -274,11 +302,7 @@ pkb_incremental_update() {
       "$existing_summary" "$changed_files" "$lang_directive" "$model" \
       > "$module_file.tmp" 2>/dev/null
 
-    if [[ -s "$module_file.tmp" ]]; then
-      mv "$module_file.tmp" "$module_file"
-    else
-      rm -f "$module_file.tmp"
-    fi
+    _pkb_keep_doc "$module_file.tmp" "$module_file"
   done
 
   # Also update sitemap if new files were added
@@ -559,7 +583,7 @@ ${lang_directive}
 
 Be concise. Each description should be under 20 words.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns 5 --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
 }
 
 _pkb_generate_architecture() {
@@ -599,27 +623,18 @@ ${lang_directive}
 
 Focus on patterns that a new reviewer would need to understand to give accurate feedback.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns 5 --setting-sources "project"
-}
-
-# When project-memory native loading is on, claude already has CLAUDE.md /
-# AGENTS.md / .claude/rules in context, so the conventions generator should
-# not be told to re-read them (avoids double-feeding + echoing auto-loaded text).
-_pkb_conventions_sources_suffix() {
-  [[ "$(config_get loadProjectMemory 2>/dev/null)" == "false" ]] \
-    && echo ", CLAUDE.md, AGENTS.md, .claude/rules/" || echo ""
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
 }
 
 _pkb_generate_conventions() {
   local project="$1" project_dir="$2" project_type="$3"
   local lang_directive="$4" model="$5"
-  local sources_suffix; sources_suffix=$(_pkb_conventions_sources_suffix)
 
   claude -p "$(cat <<PROMPT
 You are a code quality analyst. Generate a CONVENTIONS document for "$project" (type: $project_type).
 
 ## Your Task
-1. Read config files: .eslintrc*, tsconfig*, prettier*, .editorconfig${sources_suffix}.
+1. Read config files: .eslintrc*, tsconfig*, prettier*, .editorconfig, CLAUDE.md, AGENTS.md, .claude/rules/. Distilling these project-convention docs into the output is the PRIMARY purpose — always read and summarise them.
 2. Read a sample of source files to identify actual coding patterns.
 3. Document: naming conventions, import style, error handling patterns, testing approach.
 4. Note any project-specific rules or deviations from standard.
@@ -659,7 +674,7 @@ ${lang_directive}
 Only document patterns actually used in the codebase. Don't assume or prescribe.
 Every line must start with [CONVENTION], [PATTERN], or [DECISION] tag.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns 5 --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
 }
 
 _pkb_generate_api_surface() {
@@ -702,7 +717,7 @@ ${lang_directive}
 
 If a category has no entries, omit it entirely. Be precise with paths and signatures.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns 5 --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
 }
 
 _pkb_generate_modules() {
@@ -774,8 +789,14 @@ _pkb_generate_modules() {
     i=$((i + batch_size))
   done
 
-  # Clean empty files
+  # Drop empty AND invalid (cut-off / error-string) module docs so a failed
+  # generator never pollutes the PKB. Module gen writes directly in the
+  # background above, so it can't go through _pkb_keep_doc — validate here.
   find "$pkb/modules" -name '*.md' -empty -delete 2>/dev/null
+  for _m in "$pkb/modules"/*.md; do
+    [[ -f "$_m" ]] || continue
+    _pkb_valid_doc "$(cat "$_m")" || { log_warn "PKB: module $(basename "$_m") generation failed/cut off — dropping" "pkb" >&2; rm -f "$_m"; }
+  done
 }
 
 _pkb_generate_one_module() {
@@ -813,7 +834,7 @@ ${lang_directive}
 
 Keep it concise — this will be used as context for code review and development agents.
 PROMPT
-)" --add-dir "$mod_dir" --model "$model" --max-turns 3 --setting-sources "project"
+)" --add-dir "$mod_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
 }
 
 # ---------------------------------------------------------------------------
@@ -848,7 +869,7 @@ ${lang_directive}
 
 Output the COMPLETE updated summary (not a diff).
 PROMPT
-)" --add-dir "$module_dir" --model "$model" --max-turns 3 --setting-sources "project"
+)" --add-dir "$module_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project"
 }
 
 # ---------------------------------------------------------------------------
@@ -1100,7 +1121,7 @@ ${lang_directive}
 
 Output the COMPLETE updated sitemap (not a diff).
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns 3 --setting-sources "project" 2>/dev/null)
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-15}" --setting-sources "project" 2>/dev/null)
 
   if [[ -n "$updated" ]]; then
     echo "$updated" > "$sitemap_file"

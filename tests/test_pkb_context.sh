@@ -30,12 +30,19 @@ echo "$out" | grep -q 'VERBATIM_CONVENTIONS_MARKER' || fail "OFF: verbatim conve
 
 rm -rf "$PROJ"; rm -f "$MRA_CONFIG"
 
-# Sources-suffix helper: omit CLAUDE.md/rules from the read list when native loading is on
-MRA_CONFIG=$(mktemp)
-printf '{"loadProjectMemory": true}\n'  > "$MRA_CONFIG"
-[[ -z "$(_pkb_conventions_sources_suffix)" ]] || fail "suffix: ON must be empty"
-printf '{"loadProjectMemory": false}\n' > "$MRA_CONFIG"
-[[ "$(_pkb_conventions_sources_suffix)" == *"CLAUDE.md"* ]] || fail "suffix: OFF must list CLAUDE.md"
-rm -f "$MRA_CONFIG"
+# _pkb_valid_doc: a generated PKB doc must be substantive — never an agent error
+# string (a cut-off generator emits "Error: Reached max turns") nor trivially
+# short. This guards the PKB from being polluted with garbage that the review
+# agents would then consume as context.
+_pkb_valid_doc "Error: Reached max turns (5)" && fail "valid_doc: must reject the max-turns error string"
+_pkb_valid_doc "" && fail "valid_doc: must reject empty"
+_pkb_valid_doc "   " && fail "valid_doc: must reject whitespace-only"
+_pkb_valid_doc "short" && fail "valid_doc: must reject too-short output"
+_pkb_valid_doc "# Conventions: proj
+
+## Coding Style
+[CONVENTION] prefer const; use type over interface; no any.
+## Naming
+[CONVENTION] kebab-case files, PascalCase components." || fail "valid_doc: must accept a real doc"
 
 if [[ $errors -eq 0 ]]; then echo "PASS: all pkb_context tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
