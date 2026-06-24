@@ -50,6 +50,22 @@ assert_eq "CR + failed other -> PROCEED" "PROCEED" "$(_debate_assess "$CR" "")"
 # 7. Garbled non-empty output, no sentinel -> ERROR, never approve.
 assert_eq "garbled no sentinel -> ERROR" "ERROR" "$(_debate_assess "I was analyzing the diff but" "")"
 
+# --- Adversarial verify-before-approve (single skeptical 3rd reviewer) ---
+# When both agents APPROVE, a verifier re-checks the diff. _debate_verify_gate
+# maps its EXPLICIT verdict to the final action: confirm the approval, downgrade
+# (it found something the two missed), or — if it did not complete — fall back to
+# the 2-agent approval rather than block a clean PR on verifier flakiness.
+assert_eq "verifier APPROVED -> APPROVE"            "APPROVE"      "$(_debate_verify_gate "re-checked, genuinely clean $OK")"
+assert_eq "verifier CHANGES_REQUESTED -> DOWNGRADE" "DOWNGRADE"    "$(_debate_verify_gate "- [HIGH] missed null deref at x.ts:5 $CR")"
+assert_eq "verifier no verdict -> INCONCLUSIVE"     "INCONCLUSIVE" "$(_debate_verify_gate "")"
+assert_eq "verifier cutoff/garbled -> INCONCLUSIVE" "INCONCLUSIVE" "$(_debate_verify_gate "I was checking the diff but ran")"
+
+# Guard: the APPROVE path actually runs the verifier, gated by config.
+grep -q 'run_agent_verify' "$SCRIPT_DIR/lib/review-debate.sh" \
+  && ok "APPROVE path invokes the adversarial verifier" || fail "APPROVE path must invoke run_agent_verify"
+grep -q 'MRA_REVIEW_VERIFY_APPROVE' "$SCRIPT_DIR/lib/review-debate.sh" \
+  && ok "verify-before-approve is config-gated" || fail "must gate on MRA_REVIEW_VERIFY_APPROVE"
+
 # 8. Routing helper (non-critical: only chooses synthesis-vs-voting depth) still
 #    counts a finding bullet tolerantly.
 [[ "$(_debate_count_findings "  - **[HIGH]** x")" == "1" ]] \
