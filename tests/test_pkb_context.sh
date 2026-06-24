@@ -45,4 +45,19 @@ _pkb_valid_doc "# Conventions: proj
 ## Naming
 [CONVENTION] kebab-case files, PascalCase components." || fail "valid_doc: must accept a real doc"
 
+# _pkb_keep_doc: invalid new output cleans a STALE-invalid dst, preserves a valid one
+KD=$(mktemp -d)
+printf 'Error: Reached max turns (5)\n' > "$KD/old_bad.md"
+printf 'Error: Reached max turns (25)\n' > "$KD/new_bad.src"
+_pkb_keep_doc "$KD/new_bad.src" "$KD/old_bad.md" 2>/dev/null
+[[ -f "$KD/old_bad.md" ]] && fail "keep_doc: stale invalid dst must be removed"
+printf '# Real Doc\n[CONVENTION] long enough real content to pass the length gate comfortably here.\n' > "$KD/old_good.md"
+printf 'Error: Reached max turns\n' > "$KD/new_bad2.src"
+_pkb_keep_doc "$KD/new_bad2.src" "$KD/old_good.md" 2>/dev/null
+[[ -f "$KD/old_good.md" ]] || fail "keep_doc: valid prior dst must be preserved when regen flakes"
+printf '# New Real\n[CONVENTION] enough real content here to be accepted as a valid document.\n' > "$KD/new_good.src"
+_pkb_keep_doc "$KD/new_good.src" "$KD/target.md"
+[[ -f "$KD/target.md" ]] || fail "keep_doc: valid new doc must be written to dst"
+rm -rf "$KD"
+
 if [[ $errors -eq 0 ]]; then echo "PASS: all pkb_context tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
