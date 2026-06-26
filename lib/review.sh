@@ -403,6 +403,7 @@ review_project() {
       "$output_language" "$model" "$claude_add_dirs_str" "$claude_focused_dirs_str" \
       "$pkb_context" "$mode" "$range_expr")
 
+    _review_emit_verdict "$review_json" "$project_dir"
     _render_review_json "$review_json" "$output_mode" "$project_dir" "$pr_number" "debate" || return 1
 
     # Auto-update PKB after debate review (background, non-blocking)
@@ -516,6 +517,25 @@ _render_review_json() {
       fi
     fi
     post_inline_review "$project_dir" "$pr_number" "$review_json"
+  fi
+}
+
+# Verdict transport for `mra dev`: write the canonical review JSON to
+# $MRA_REVIEW_RESULT_FILE (if set), via extract -> repair -> validate. Anything
+# unparseable-after-repair becomes a synthetic REVIEW_INCOMPLETE — NEVER coerced
+# to APPROVED. Human/log output on stdout is left untouched (separate channel).
+_review_emit_verdict() {
+  local review_json="$1" project_dir="$2"
+  [[ -z "${MRA_REVIEW_RESULT_FILE:-}" ]] && return 0
+  local j
+  j=$(extract_json "$review_json")
+  if ! printf '%s' "$j" | jq . >/dev/null 2>&1; then
+    j=$(extract_json "$(_repair_review_json "$j" "$project_dir")")
+  fi
+  if printf '%s' "$j" | jq -e 'has("status")' >/dev/null 2>&1; then
+    printf '%s' "$j" > "$MRA_REVIEW_RESULT_FILE"
+  else
+    printf '{"status":"REVIEW_INCOMPLETE","comments":[]}' > "$MRA_REVIEW_RESULT_FILE"
   fi
 }
 
