@@ -480,6 +480,7 @@ Generate templates: `mra template`
 | `mra <project...> [--with-deps]` | Launch Claude orchestrator |
 | `mra ask <project> "<question>"` | Codebase query |
 | `mra export [project]` | Export project context |
+| `mra dev <project> "<task>" [--no-pr] [--auto-approve] [--resume] [--dry-run]` | Autonomous headless implement→review→fix→PR loop (single repo; debate+verifier gate) |
 
 ### Code Review & Analysis
 
