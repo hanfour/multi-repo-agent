@@ -7,6 +7,59 @@
 #   mra review <project> --base <ref> Compare against specific branch
 #   mra review <project> --no-debate  Skip debate, single-pass review
 
+# --- PR discussion context -----------------------------------------
+#
+# So a `--pr` review respects what's already been said: the agents read the PR's
+# existing comments/reviews (via MRA_REVIEW_PR_DISCUSSION) and do NOT re-report
+# already-raised issues, and respect the author's clarifications.
+#
+# _review_format_pr_discussion: JSON array of {author,loc,kind,body} → a compact
+# markdown block. Empty / invalid input → empty output (best-effort: an absent or
+# failed fetch must never change review behaviour). One bullet per entry (body
+# flattened + truncated to 240 chars); capped at 40 with an omission note.
+_review_format_pr_discussion() {
+  local json="$1" count
+  count=$(printf '%s' "$json" | jq 'length' 2>/dev/null) || return 0
+  [[ -n "$count" && "$count" -gt 0 ]] || return 0
+  echo "## Existing PR discussion (do NOT re-report issues already raised here; respect the author's clarifications)"
+  printf '%s' "$json" | jq -r '
+    .[0:40][]
+    | "- @\(.author // "?")"
+      + (if (.loc // "") != "" then " (\(.loc))" else "" end)
+      + (if (.kind // "") == "review" then " [review]" else "" end)
+      + ": "
+      + ((.body // "") | gsub("[\r\n]+"; " ") | if length > 240 then .[0:240] + "…" else . end)
+  ' 2>/dev/null
+  [[ "$count" -gt 40 ]] && echo "- (+$((count - 40)) earlier item(s) omitted)"
+  return 0
+}
+
+# _review_fetch_pr_discussion: gather the PR's existing inline comments, conversation
+# comments, and review summaries into the array _review_format expects, then format
+# it. Best-effort: any gh failure / no slug → empty (review proceeds unchanged).
+# Skipped by the caller when MRA_REVIEW_PR_CONTEXT=0.
+_review_fetch_pr_discussion() {
+  local project_dir="$1" pr_number="$2"
+  local remote_url repo_slug
+  remote_url=$(git -C "$project_dir" remote get-url origin 2>/dev/null) || return 0
+  repo_slug=$(printf '%s' "$remote_url" | sed 's|\.git$||' | sed 's|.*[:/]\([^/]*/[^/]*\)$|\1|')
+  [[ -n "$repo_slug" ]] || return 0
+
+  local inline conv reviews merged
+  inline=$(gh api "repos/$repo_slug/pulls/$pr_number/comments" --paginate 2>/dev/null \
+    | jq -c '[.[] | {author: .user.login, loc: ((.path // "") + (if .line then ":\(.line)" else "" end)), kind: "inline", body: .body}]' 2>/dev/null)
+  conv=$(gh api "repos/$repo_slug/issues/$pr_number/comments" --paginate 2>/dev/null \
+    | jq -c '[.[] | {author: .user.login, loc: "", kind: "comment", body: .body}]' 2>/dev/null)
+  reviews=$(gh api "repos/$repo_slug/pulls/$pr_number/reviews" --paginate 2>/dev/null \
+    | jq -c '[.[] | select((.body // "") != "") | {author: .user.login, loc: "", kind: "review", body: "[\(.state)] \(.body)"}]' 2>/dev/null)
+  [[ -n "$inline"  ]] || inline="[]"
+  [[ -n "$conv"    ]] || conv="[]"
+  [[ -n "$reviews" ]] || reviews="[]"
+
+  merged=$(jq -cn --argjson a "$inline" --argjson b "$conv" --argjson c "$reviews" '$a + $b + $c' 2>/dev/null) || return 0
+  _review_format_pr_discussion "$merged"
+}
+
 # --- TM-007 helpers -------------------------------------------------
 #
 # _validate_review_json: the Claude review output is downstream of
@@ -260,6 +313,16 @@ review_project() {
     pkb_context=$(pkb_build_context "$project_dir" "$relevant_modules" "standard")
     use_pkb=true
     log_info "PKB available — using knowledge base (modules: ${relevant_modules:-all})" "review"
+  fi
+
+  # --- PR discussion context: let the review see the PR's existing comments /
+  # reviews so it doesn't re-report already-raised issues or fight the author's
+  # clarifications. Only on the --pr path; best-effort + gated (MRA_REVIEW_PR_CONTEXT=0
+  # disables). Exported so the dispatched agents (run_agent_*/synthesis) read it. ---
+  export MRA_REVIEW_PR_DISCUSSION=""
+  if [[ -n "$pr_number" && "${MRA_REVIEW_PR_CONTEXT:-1}" != "0" ]]; then
+    MRA_REVIEW_PR_DISCUSSION=$(_review_fetch_pr_discussion "$project_dir" "$pr_number")
+    [[ -n "$MRA_REVIEW_PR_DISCUSSION" ]] && log_info "loaded existing PR discussion into review context" "review"
   fi
 
   # --- Build --add-dir args as string (for debate) and array (for single-pass) ---

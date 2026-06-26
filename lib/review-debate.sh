@@ -65,6 +65,17 @@ _debate_verify_gate() {
   esac
 }
 
+# Prompt section injected when a --pr review loaded the PR's existing discussion
+# (MRA_REVIEW_PR_DISCUSSION, set by review.sh). Empty when there is none — so a
+# non-PR review or a failed fetch leaves the agents' prompts unchanged. Tells the
+# finding-generating agents to drop already-raised issues and respect the author's
+# clarifications (synthesis then inherits the filtered findings).
+_review_pr_discussion_prompt() {
+  [[ -n "${MRA_REVIEW_PR_DISCUSSION:-}" ]] || return 0
+  printf '%s\n\n%s\n' "${MRA_REVIEW_PR_DISCUSSION}" \
+"The block above is the EXISTING discussion on this PR. Do NOT re-report any issue already raised there; if the author has explained or justified something, respect that and don't flag it. Still review independently — focus on NEW issues."
+}
+
 # Count finding lines tolerantly — NON-CRITICAL: used only to choose synthesis
 # depth (direct vs voting) on the PROCEED path, never for the approve/error
 # decision. Matches a bullet (- or *), optional indent/bold, then "[<UPPER>".
@@ -322,6 +333,7 @@ Only read source files when you need exact file:line evidence for a finding.
   prompt=$(cat <<PROMPT
 You are Agent A (Impact Analyst). Find REAL, VERIFIED impact of this PR.
 ${pkb_section}
+$(_review_pr_discussion_prompt)
 ## Method
 1. Read diff → identify added, modified, DELETED items.
 2. For each deleted/renamed export: grep the project for remaining references. Report with file:line.
@@ -393,6 +405,7 @@ You are a skeptical THIRD reviewer. Two independent reviewers BOTH approved this
 PR with no issues — your job is to REFUTE that, not confirm it. Assume they may
 have missed something and look harder.
 ${pkb_section}
+$(_review_pr_discussion_prompt)
 ## Method (challenge the approval)
 1. Read the diff carefully.
 2. Hunt for what a quick approval misses: broken/renamed callers, null/empty/boundary
@@ -458,6 +471,7 @@ Only read source files when you need to verify specific code around changed line
   prompt=$(cat <<PROMPT
 You are Agent B (Quality Auditor). Find code quality, security, and pattern issues.
 ${pkb_section}
+$(_review_pr_discussion_prompt)
 ## Method
 1. Read diff + surrounding source files for context.
 2. Read AGENTS.md / CLAUDE.md / .claude/rules/ for project conventions (skip if PKB conventions are provided above).
