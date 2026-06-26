@@ -57,5 +57,6 @@ PROMPT
       --append-system-prompt-file "$mra_dir/agents/sub-agent.md" \
       --allowedTools "$tools" \
       --setting-sources project \
+      --model "${DEV_MODEL:-sonnet}" \
       --max-turns "$turns" < /dev/null 2>&1 ) || true
 }

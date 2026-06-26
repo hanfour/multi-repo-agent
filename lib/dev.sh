@@ -38,6 +38,7 @@ _dev_escalate() { # workspace project stage reason  -> echoes DEV_RESULT, return
   log_error "[escalate] $project ($stage): $reason" "dev"
   printf 'DEV_RESULT status=ESCALATED stage=%s reason=%s\n' "$stage" "$reason"
   _dev_teardown
+  trap - EXIT
   return 2
 }
 
@@ -45,6 +46,7 @@ _dev_report() { # stage code_rounds  -> echoes DEV_RESULT, returns 0
   log_success "$2 review round(s); branch ready" "dev"
   printf 'DEV_RESULT status=APPROVED stage=%s rounds=%s\n' "$1" "$2"
   _dev_teardown
+  trap - EXIT
   return 0
 }
 
@@ -56,6 +58,15 @@ dev_project() {
   _dev_validate "$dir" "$base" || return 1
   slug=$(_dev_slugify "$task")
   [[ "${DEV_DRY_RUN:-false}" == true ]] && { log_info "[dry-run] would work on mra/$slug from $base" "dev"; return 0; }
+
+  # Verdict channel: created here so _dev_review_one / _dev_read_status are
+  # never racing against an unbound variable under set -u (CRITICAL-1).
+  MRA_REVIEW_RESULT_FILE=$(mktemp) || { log_error "mktemp failed" "dev"; return 1; }
+  export MRA_REVIEW_RESULT_FILE
+  # Backstop: reap background jobs + temp files even on a set-e/set-u abort.
+  # Normal terminal paths (_dev_report, _dev_escalate) clear this explicitly
+  # after their own teardown call so it never double-fires (IMPORTANT-3).
+  trap '_dev_teardown' EXIT
 
   # 1 BRANCH (dev owns it; fork from base, not current HEAD)
   _dev_branch "$dir" "$slug" "$base" || return 1
@@ -219,7 +230,7 @@ _dev_ensure_pkb() {
 _dev_review_one() {
   local workspace="$1" project="$2" mode="$3" base="$4" pr_n="$5"
   : > "$MRA_REVIEW_RESULT_FILE"
-  local -a rargs=(--strategy debate --base "$base")
+  local -a rargs=(--strategy debate --base "$base" --model "${DEV_MODEL:-sonnet}")
   local pr_ctx="" allow=""
   if [[ "$mode" == pr ]]; then
     rargs+=(--pr "$pr_n"); pr_ctx=0
@@ -229,5 +240,5 @@ _dev_review_one() {
   # (malformed-JSON path) can never abort the loop before we read the file.
   MRA_REVIEW_VERIFY_APPROVE=1 MRA_REVIEW_PR_CONTEXT="$pr_ctx" MRA_REVIEW_ALLOW_APPROVE="$allow" \
     review_project "$workspace" "$project" "${rargs[@]}" 1>&2 || true
-  printf '%s|%s' "$(_dev_read_status "$MRA_REVIEW_RESULT_FILE")" "$(_dev_fingerprint "$MRA_REVIEW_RESULT_FILE")"
+  printf '%s|%s\n' "$(_dev_read_status "$MRA_REVIEW_RESULT_FILE")" "$(_dev_fingerprint "$MRA_REVIEW_RESULT_FILE")"
 }
