@@ -436,9 +436,21 @@ _render_review_json() {
     fi
   else
     if ! echo "$review_json" | jq . &>/dev/null; then
-      log_error "${source_label} did not produce valid JSON. Raw output:" "review"
-      echo "$review_json"
-      return 1
+      # One cheap self-repair pass: the synthesis model occasionally emits a
+      # body string with an unescaped inner double-quote (or stray markdown),
+      # producing JSON jq can't parse — non-deterministic, so a substantive
+      # review is lost. Ask a fast model to re-emit corrected JSON before
+      # giving up.
+      local repaired
+      repaired=$(extract_json "$(_repair_review_json "$review_json" "$project_dir")")
+      if [[ -n "$repaired" ]] && echo "$repaired" | jq . &>/dev/null; then
+        log_info "review JSON was malformed; self-repair succeeded" "review"
+        review_json="$repaired"
+      else
+        log_error "${source_label} did not produce valid JSON. Raw output:" "review"
+        echo "$review_json"
+        return 1
+      fi
     fi
     post_inline_review "$project_dir" "$pr_number" "$review_json"
   fi
@@ -518,6 +530,27 @@ extract_json() {
 
   # Give up, return raw
   echo "$raw"
+}
+
+# A: one cheap self-repair pass for malformed review JSON. The synthesis model
+# occasionally emits a body string with an unescaped inner double-quote (or
+# stray markdown), so jq can't parse it — non-deterministic, which would
+# otherwise discard a substantive review. Ask a fast, tool-less model to
+# re-emit corrected JSON. Echoes the model output (the caller re-extracts +
+# re-validates); empty/unchanged on failure. Best-effort — never aborts the
+# caller. Mockable in tests via MRA_CLAUDE_BIN; model via MRA_REVIEW_REPAIR_MODEL.
+_repair_review_json() {
+  local broken="${1:-}" project_dir="${2:-}"
+  [[ -z "$broken" ]] && return 0
+  local prompt
+  prompt="The text below is meant to be ONE JSON object for a code review but is malformed (most likely an unescaped double-quote inside a string value, or stray markdown). Output ONLY the corrected JSON object: no markdown fences, no commentary, nothing before or after. Backslash-escape every double-quote that appears inside a string value. Preserve ALL original content (paths, line numbers, severities, comment bodies) exactly.
+
+${broken}"
+  "${MRA_CLAUDE_BIN:-claude}" -p "$prompt" \
+    --model "${MRA_REVIEW_REPAIR_MODEL:-haiku}" \
+    --max-turns 1 \
+    --disallowedTools "Write,Edit,NotebookEdit" \
+    --setting-sources "project" 2>/dev/null || true
 }
 
 # Resolve PR base branch

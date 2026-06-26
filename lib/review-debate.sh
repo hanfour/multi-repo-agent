@@ -739,6 +739,12 @@ ${lang_directive}
 
 You MUST output ONLY valid JSON with no text before or after. No markdown fences.
 
+CRITICAL — string escaping: every comment body is a JSON string value. Any
+double-quote character that appears INSIDE a string MUST be backslash-escaped,
+otherwise the JSON is invalid and the ENTIRE review is discarded. When quoting
+code, identifiers, or terms inside Chinese prose, prefer 「」, 『』, or backticks
+instead of double-quotes. Also escape literal backslashes and newlines.
+
 {
   \"status\": \"APPROVED\" | \"CHANGES_REQUESTED\",
   \"summary\": \"<one-line summary of the review>\",
