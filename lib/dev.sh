@@ -81,9 +81,67 @@ dev_project() {
   done
   rm -f "$_rv_tmp"
 
-  # PR + pr-review loop inserted in Task 5. For now, stop at local APPROVED.
+  # 4 PR
   if [[ "${DEV_NO_PR:-false}" == true ]]; then _dev_report code "$round"; return 0; fi
-  _dev_report code "$round"; return 0
+  _dev_push "$dir" "$slug" || { _dev_escalate "$workspace" "$project" pr "push failed"; return 2; }
+  local pr_n; pr_n=$(_dev_pr_open "$dir" "$slug" "mra: ${task:0:60}" "$(_dev_pr_body "$task")")
+  [[ -z "$pr_n" ]] && { _dev_escalate "$workspace" "$project" pr "could not open PR"; return 2; }
+
+  # 5 PR-REVIEW LOOP
+  _dev_pr_loop "$workspace" "$project" "$dir" "$base" "$pr_n" "$slug" || return 2
+  _dev_report pr "$round"; return 0
+}
+
+_dev_push() { git -C "$1" push -u origin "mra/$2" >/dev/null 2>&1; }
+
+_dev_pr_body() { printf '## Summary\n\n%s\n\n## Test Plan\n- [ ] review findings addressed by mra dev loop\n' "$1"; }
+
+_dev_pr_open() { # dir slug title body -> echo PR number
+  local dir="$1" slug="$2" title="$3" body="$4" n
+  n=$( (cd "$dir" && gh pr view "mra/$slug" --json number -q .number) 2>/dev/null || true)
+  if [[ -z "$n" ]]; then
+    mra_pr_create "$dir" "$title" "$body" >/dev/null 2>&1 || true
+    n=$( (cd "$dir" && gh pr view "mra/$slug" --json number -q .number) 2>/dev/null || true)
+  fi
+  printf '%s' "$n"
+}
+
+# Single pinned review (§10-3): dismiss the bot's prior MRA reviews so the PR
+# carries exactly one evolving review instead of N stacked ones.
+_dev_pr_dismiss_prior() {
+  local dir="$1" pr_n="$2"
+  ( cd "$dir" && gh pr view "$pr_n" --json reviews \
+      -q '.reviews[] | select(.author.login=="'"${MRA_BOT_LOGIN:-github-actions[bot]}"'") | .id' 2>/dev/null \
+    | while read -r rid; do gh api -X PUT "repos/{owner}/{repo}/pulls/$pr_n/reviews/$rid/dismissals" -f message="superseded by mra dev" >/dev/null 2>&1 || true; done ) || true
+}
+
+_dev_pr_loop() {
+  local workspace="$1" project="$2" dir="$3" base="$4" pr_n="$5" slug="$6"
+  local round=0 retry=0 prev_fp="" v fp out st global=0
+  local _pr_rv_tmp; _pr_rv_tmp=$(mktemp) || { _dev_escalate "$workspace" "$project" pr "mktemp failed"; return 2; }
+  while :; do
+    global=$((global+1)); [[ "$global" -gt "${DEV_GLOBAL_CAP:-12}" ]] && { rm -f "$_pr_rv_tmp"; _dev_escalate "$workspace" "$project" pr "global review ceiling"; return 2; }
+    _dev_push "$dir" "$slug" || true
+    _dev_pr_dismiss_prior "$dir" "$pr_n"
+    _dev_review_one "$workspace" "$project" pr "$base" "$pr_n" > "$_pr_rv_tmp"
+    IFS='|' read -r v fp < "$_pr_rv_tmp"
+    case "$v" in
+      APPROVED) rm -f "$_pr_rv_tmp"; return 0 ;;
+      COMMENT|REVIEW_INCOMPLETE)
+        retry=$((retry+1)); [[ "$retry" -gt "${DEV_RETRY_CAP:-2}" ]] && { rm -f "$_pr_rv_tmp"; _dev_escalate "$workspace" "$project" pr "pr-review never completed"; return 2; }
+        continue ;;
+      CHANGES_REQUESTED)
+        [[ -n "$prev_fp" && "$fp" == "$prev_fp" ]] && { rm -f "$_pr_rv_tmp"; _dev_escalate "$workspace" "$project" pr "no progress"; return 2; }
+        out=$(_dev_run_agent "$dir" fix "$(jq -r '(.comments//[])[]|"- [\(.severity)] \(.path):\(.line) — \(.body)"' "$MRA_REVIEW_RESULT_FILE" 2>/dev/null || true)")
+        st=$(_dev_parse_sentinel "$out")
+        { [[ "$st" == BLOCKED:* ]] || ! _dev_progress "$dir" "$base"; } && { rm -f "$_pr_rv_tmp"; _dev_escalate "$workspace" "$project" pr "fix blocked or empty"; return 2; }
+        prev_fp="$fp"; round=$((round+1))
+        [[ "$round" -ge "${DEV_MAX_ROUNDS:-3}" ]] && { rm -f "$_pr_rv_tmp"; _dev_escalate "$workspace" "$project" pr "pr-review cap"; return 2; }
+        continue ;;  # next iteration's top-of-loop push + --pr review IS the re-confirm (§10-2)
+      *) rm -f "$_pr_rv_tmp"; _dev_escalate "$workspace" "$project" pr "unknown verdict: $v"; return 2 ;;
+    esac
+  done
+  rm -f "$_pr_rv_tmp"
 }
 
 _dev_validate() {

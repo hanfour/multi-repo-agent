@@ -84,5 +84,35 @@ REVIEWS=("APPROVED|"); out=$(run_dev); rc=$?
 assert_eq "empty diff escalates" "2" "$rc"
 _dev_progress(){ return 0; }
 
+# --- pr-review loop ---
+DEV_NO_PR=false
+_PUSH_LOG=$(mktemp)
+_dev_push() { echo push >> "$_PUSH_LOG"; return 0; }
+_dev_pr_open() { printf '42'; }
+_dev_pr_dismiss_prior() { :; }
+PREVIEWS=(); PRI=0
+# reuse _dev_review_one stub but dispatch on mode arg for pr vs code verdicts
+_dev_review_one() { local m="$3"; if [[ "$m" == pr ]]; then local v="${PREVIEWS[$PRI]}"; PRI=$((PRI+1)); printf '%s' "$v"; else printf 'APPROVED|'; fi; }
+run_pr() { RI=0; PRI=0; : > "$_PUSH_LOG"; dev_project ws proj "thing"; }
+
+# 8. PR review approved first time -> success; pushed at least once before review.
+PREVIEWS=("APPROVED|"); out=$(run_pr); rc=$?
+assert_eq "pr-review approved succeeds" "0" "$rc"
+PUSHES=$(wc -l < "$_PUSH_LOG" | tr -d ' ')
+[[ "$PUSHES" -ge 1 ]] && ok "pushed before pr review" || fail "no push before pr review"
+
+# 9. PR review CHANGES then APPROVED -> push happens at top of EACH iteration (>=2).
+PREVIEWS=("CHANGES_REQUESTED|a:1:HIGH," "APPROVED|"); out=$(run_pr); rc=$?
+assert_eq "pr changes->approved succeeds" "0" "$rc"
+PUSHES=$(wc -l < "$_PUSH_LOG" | tr -d ' ')
+[[ "$PUSHES" -ge 2 ]] && ok "push at top of each pr iteration" || fail "expected >=2 pushes got $PUSHES"
+
+# 10. PR review never clean within cap -> ESCALATED.
+DEV_MAX_ROUNDS=1
+PREVIEWS=("CHANGES_REQUESTED|a:1:HIGH," "CHANGES_REQUESTED|b:2:HIGH,"); out=$(run_pr); rc=$?
+assert_eq "pr cap escalates" "2" "$rc"
+DEV_MAX_ROUNDS=3
+rm -f "$_PUSH_LOG"
+
 echo ""
 if [[ $errors -eq 0 ]]; then echo "PASS: all dev-state-machine tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
