@@ -119,8 +119,15 @@ TEARDOWN_RAN=0
 _dev_teardown() { TEARDOWN_RAN=$((TEARDOWN_RAN+1)); }   # observe; real impl tested by smoke
 # success path
 DEV_NO_PR=true; REVIEWS=("APPROVED|"); RI=0; TEARDOWN_RAN=0; dev_project ws proj "x" >/dev/null; assert_eq "teardown on success" "1" "$TEARDOWN_RAN"
-# escalate path
-REVIEWS=("REVIEW_INCOMPLETE|" "REVIEW_INCOMPLETE|" "REVIEW_INCOMPLETE|"); DEV_RETRY_CAP=1; RI=0; TEARDOWN_RAN=0; dev_project ws proj "x" >/dev/null; assert_eq "teardown on escalate" "1" "$TEARDOWN_RAN"
+# escalate path — restore original code-mode stub (pr-loop block redefined it to always return APPROVED)
+_dev_review_one() { local v="${REVIEWS[$RI]}"; RI=$((RI+1)); printf '%s' "$v"; }
+REVIEWS=("REVIEW_INCOMPLETE|" "REVIEW_INCOMPLETE|" "REVIEW_INCOMPLETE|"); DEV_RETRY_CAP=1; RI=0; TEARDOWN_RAN=0
+# Use file redirect (not command substitution) so _dev_teardown stub increments TEARDOWN_RAN in current shell.
+_esc_tmp=$(mktemp); dev_project ws proj "x" > "$_esc_tmp" 2>&1; _esc_rc=$?; _esc_out=$(cat "$_esc_tmp"); rm -f "$_esc_tmp"
+assert_eq "teardown on escalate" "1" "$TEARDOWN_RAN"
+{ [[ "$_esc_rc" -eq 2 ]] || [[ "$_esc_out" == *"status=ESCALATED"* ]]; } \
+  && ok "escalate path taken (rc=$_esc_rc / ESCALATED in output)" \
+  || fail "escalate path NOT taken — rc=$_esc_rc out=$_esc_out"
 DEV_RETRY_CAP=2
 
 echo ""
