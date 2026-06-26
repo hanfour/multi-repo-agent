@@ -57,7 +57,7 @@ dev_project() {
 
   # 3 CODE-REVIEW LOOP (three-valued; bounded)
   local round=0 retry=0 prev_fp="" global=0 _rv_tmp
-  _rv_tmp=$(mktemp)
+  _rv_tmp=$(mktemp) || { log_error "mktemp failed" "dev"; return 1; }
   while :; do
     global=$((global+1)); [[ "$global" -gt "${DEV_GLOBAL_CAP:-12}" ]] && { rm -f "$_rv_tmp"; _dev_escalate "$workspace" "$project" code "global review ceiling"; return 2; }
     _dev_review_one "$workspace" "$project" code "$base" "" > "$_rv_tmp"
@@ -99,9 +99,16 @@ _dev_validate() {
 _dev_branch() {
   local dir="$1" slug="$2" base="$3"
   git -C "$dir" fetch --quiet origin 2>/dev/null || true
-  if git -C "$dir" show-ref --verify --quiet "refs/heads/mra/$slug" && [[ "${DEV_RESUME:-false}" != true ]]; then
-    log_error "branch mra/$slug exists; pass --resume" "dev"; return 1
+  if git -C "$dir" show-ref --verify --quiet "refs/heads/mra/$slug"; then
+    if [[ "${DEV_RESUME:-false}" == true ]]; then
+      # Reattach to existing branch — do NOT reset to base (would destroy prior commits).
+      git -C "$dir" checkout "mra/$slug" >/dev/null 2>&1 || { log_error "cannot checkout mra/$slug" "dev"; return 1; }
+      return 0
+    else
+      log_error "branch mra/$slug exists; pass --resume" "dev"; return 1
+    fi
   fi
+  # Branch does not exist — fresh fork from base.
   git -C "$dir" checkout -B "mra/$slug" "$base" >/dev/null 2>&1 || { log_error "cannot create mra/$slug from $base" "dev"; return 1; }
 }
 
