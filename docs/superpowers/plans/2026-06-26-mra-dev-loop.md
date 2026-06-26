@@ -52,14 +52,13 @@ SPIKE=$(mktemp -d); git -C "$SPIKE" init -q; git -C "$SPIKE" commit -q --allow-e
 - [ ] **Step 2: Run the headless write+rename+commit probe**
 
 ```bash
-claude -p 'Create a file hello.txt containing "hi". Then rename it to world.txt using git mv. Then stage and commit with message "spike: write+rename". Print ===MRA-DEV-DONE=== when finished.' \
+( cd "$SPIKE" && claude -p 'In the current directory create hello.txt containing "hi", then rename it to world.txt with git mv, then git add and commit with message "spike: write+rename". Print ===MRA-DEV-DONE=== when the commit succeeds.' \
   --allowedTools 'Edit,Write,Read,Grep,Glob,Bash(git:*)' \
   --setting-sources project \
-  --add-dir "$SPIKE" \
-  --max-turns 20 < /dev/null
+  --max-turns 20 < /dev/null )
 ```
 
-Expected: no permission prompt, no hang; `git -C "$SPIKE" log --oneline` shows the spike commit; `git -C "$SPIKE" ls-files` shows `world.txt` (rename worked).
+Expected: no permission prompt, no hang; `git -C "$SPIKE" log --oneline` shows the spike commit; `git -C "$SPIKE" ls-files` shows `world.txt` (rename worked). **CONFIRMED 2026-06-26:** works only with `cd "$SPIKE"` — running with `--add-dir "$SPIKE"` (no cd) made the agent write into the caller's cwd and emit a false DONE. The driver in Task 2 therefore `cd`s into the repo.
 
 - [ ] **Step 3: Record the outcome**
 
@@ -288,16 +287,19 @@ If you cannot proceed, print: ===MRA-DEV-BLOCKED: <one-line reason>===
 ${lang:+All prose output in ${lang}; keep the sentinel tokens in English.}
 PROMPT
 )
-  "$bin" -p "$prompt" \
-    --add-dir "$dir" \
-    --append-system-prompt-file "$mra_dir/agents/sub-agent.md" \
-    --allowedTools "$tools" \
-    --setting-sources project \
-    --max-turns "$turns" < /dev/null 2>&1 || true
+  # TASK 0 FINDING: `claude -p` writes relative to its CWD, NOT --add-dir
+  # (--add-dir only grants access). cd into the repo so the agent's Write/Edit/git
+  # ops land in the target. --setting-sources project bypasses user plugins that break -p.
+  ( cd "$dir" && "$bin" -p "$prompt" \
+      --append-system-prompt-file "$mra_dir/agents/sub-agent.md" \
+      --allowedTools "$tools" \
+      --setting-sources project \
+      --max-turns "$turns" < /dev/null 2>&1 ) || true
 }
 ```
 
 > Note (critic gap §10-6): the prompt explicitly neutralizes sub-agent.md's TDD-first, Docker-test, DONE-after-tests, and branch-creation mandates.
+> **Note (Task 0 finding, confirmed empirically):** the agent must run with **cwd = `$dir`**. A probe using only `--add-dir` had the agent write into the *caller's* cwd and print a false `===MRA-DEV-DONE===` while the target stayed empty — which is exactly why D10/`_dev_progress` verifies via git ground truth, never the sentinel.
 
 - [ ] **Step 4: Run it to verify it passes**
 
