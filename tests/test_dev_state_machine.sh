@@ -114,5 +114,14 @@ assert_eq "pr cap escalates" "2" "$rc"
 DEV_MAX_ROUNDS=3
 rm -f "$_PUSH_LOG"
 
+# --- teardown runs on every terminal path ---
+TEARDOWN_RAN=0
+_dev_teardown() { TEARDOWN_RAN=$((TEARDOWN_RAN+1)); }   # observe; real impl tested by smoke
+# success path
+DEV_NO_PR=true; REVIEWS=("APPROVED|"); RI=0; TEARDOWN_RAN=0; dev_project ws proj "x" >/dev/null; assert_eq "teardown on success" "1" "$TEARDOWN_RAN"
+# escalate path
+REVIEWS=("REVIEW_INCOMPLETE|" "REVIEW_INCOMPLETE|" "REVIEW_INCOMPLETE|"); DEV_RETRY_CAP=1; RI=0; TEARDOWN_RAN=0; dev_project ws proj "x" >/dev/null; assert_eq "teardown on escalate" "1" "$TEARDOWN_RAN"
+DEV_RETRY_CAP=2
+
 echo ""
 if [[ $errors -eq 0 ]]; then echo "PASS: all dev-state-machine tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi

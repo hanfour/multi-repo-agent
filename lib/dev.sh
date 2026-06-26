@@ -2,6 +2,17 @@
 # Deterministic implement -> review -> fix -> PR loop for `mra dev`.
 # Verdict comes ONLY from $MRA_REVIEW_RESULT_FILE; exit code is never the gate.
 
+# Reap background _review_pkb_auto_update jobs review.sh spawns, and drop the
+# verdict channel — called on EVERY terminal path so a mid-loop death (or normal
+# exit) never orphans them.
+_dev_teardown() {
+  local p
+  for p in $(jobs -p 2>/dev/null); do kill "$p" 2>/dev/null || true; done
+  wait 2>/dev/null || true
+  [[ -n "${MRA_REVIEW_RESULT_FILE:-}" && -e "$MRA_REVIEW_RESULT_FILE" ]] && rm -f "$MRA_REVIEW_RESULT_FILE"
+  unset MRA_REVIEW_RESULT_FILE
+}
+
 _dev_read_status() {
   local rf="$1" st
   st=$(jq -r '.status // empty' "$rf" 2>/dev/null || true)
@@ -26,12 +37,14 @@ _dev_escalate() { # workspace project stage reason  -> echoes DEV_RESULT, return
   notify_escalation "$workspace" "$project" "$reason" >/dev/null 2>&1 || true
   log_error "[escalate] $project ($stage): $reason" "dev"
   printf 'DEV_RESULT status=ESCALATED stage=%s reason=%s\n' "$stage" "$reason"
+  _dev_teardown
   return 2
 }
 
 _dev_report() { # stage code_rounds  -> echoes DEV_RESULT, returns 0
   log_success "$2 review round(s); branch ready" "dev"
   printf 'DEV_RESULT status=APPROVED stage=%s rounds=%s\n' "$1" "$2"
+  _dev_teardown
   return 0
 }
 
