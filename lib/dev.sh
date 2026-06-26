@@ -144,6 +144,28 @@ _dev_pr_loop() {
   rm -f "$_pr_rv_tmp"
 }
 
+_dev_parse_args() {
+  DEV_PROJECT=""; DEV_TASK=""; DEV_BASE="${DEV_BASE:-}"; DEV_MODEL="sonnet"; DEV_MAX_ROUNDS="3"
+  DEV_NO_PR=false; DEV_AUTO_APPROVE=false; DEV_RESUME=false; DEV_DRY_RUN=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --base)       [[ $# -lt 2 ]] && { log_error "--base requires a value" "dev"; return 1; }; DEV_BASE="$2"; shift 2 ;;
+      --model)      [[ $# -lt 2 ]] && { log_error "--model requires a value" "dev"; return 1; }; DEV_MODEL="$2"; shift 2 ;;
+      --max-rounds) [[ $# -lt 2 ]] && { log_error "--max-rounds requires a value" "dev"; return 1; }
+                    [[ "$2" =~ ^[1-9][0-9]*$ ]] || { log_error "--max-rounds must be a positive integer" "dev"; return 1; }
+                    DEV_MAX_ROUNDS="$2"; shift 2 ;;
+      --no-pr)        DEV_NO_PR=true; shift ;;
+      --auto-approve) DEV_AUTO_APPROVE=true; shift ;;
+      --resume)       DEV_RESUME=true; shift ;;
+      --dry-run)      DEV_DRY_RUN=true; shift ;;
+      -*) log_error "unknown option: $1" "dev"; return 1 ;;
+      *)  if [[ -z "$DEV_PROJECT" ]]; then DEV_PROJECT="$1"; else DEV_TASK+="${DEV_TASK:+ }$1"; fi; shift ;;
+    esac
+  done
+  [[ -z "$DEV_PROJECT" || -z "$DEV_TASK" ]] && { log_error "usage: mra dev <project> \"<task>\" [--base R] [--model M] [--max-rounds N] [--no-pr] [--auto-approve] [--resume] [--dry-run]" "dev"; return 1; }
+  return 0
+}
+
 _dev_validate() {
   local dir="$1" base="$2"
   [[ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]] && { log_error "working tree not clean: $dir" "dev"; return 1; }

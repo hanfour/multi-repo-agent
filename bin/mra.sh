@@ -61,6 +61,8 @@ source "$MRA_DIR/lib/model-provider.sh"
 source "$MRA_DIR/lib/test-audit.sh"
 source "$MRA_DIR/lib/pkb.sh"
 source "$MRA_DIR/lib/eval.sh"
+source "$MRA_DIR/lib/dev-agent.sh"
+source "$MRA_DIR/lib/dev.sh"
 
 usage() {
   cat <<'USAGE'
@@ -108,6 +110,8 @@ Commands:
   branch merge [--strategy S] [--dry-run] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [repos...]  Merge open PRs across repos (deps first; mergeable+CI gated; --wait-ci polls CI; repos... = subset)
   review <project> [--pr N] [--working] [--range A..B] [--head <ref>] [--no-debate]  Code review
   plan <project> "<task>" [--model M] [--dual]  Multi-expert plan; --dual = claude+codex council
+  dev <project> "<task>" [--base R] [--max-rounds N] [--no-pr] [--auto-approve] [--resume] [--dry-run]
+                                Autonomous implement->review->fix->PR loop (headless)
   test-audit <project> [--model M]     Audit tests vs Kent Beck 11 principles
   analyze <project> [--model M]        Generate/update project knowledge base (PKB)
   eval-review <project> --pr <N> [--baseline <file>] [--strategy S]  Score AI review against a human baseline
@@ -867,6 +871,15 @@ main() {
       add_dirs=$(build_add_dir_string "$project_dir")
       run_plan_council "$plan_project" "$project_dir" "$plan_task" \
         "$(default_plan_personas)" "$plan_model" "$add_dirs" "$pkb_context" "$lang_directive" "$plan_dual"
+      ;;
+
+    dev)
+      shift
+      _dev_parse_args "$@" || exit 1
+      local workspace; workspace=$(resolve_workspace)
+      validate_project_name "$DEV_PROJECT" || exit 1
+      [[ "$DEV_NO_PR" == true ]] || check_gh_auth || exit 1
+      dev_project "$workspace" "$DEV_PROJECT" "$DEV_TASK"
       ;;
 
     eval-review)
