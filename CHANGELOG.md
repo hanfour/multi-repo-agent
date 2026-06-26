@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **BREAKING** lint profile `oneAD` renamed to `ts-strict`; update any `.collab/lint-profile.json` using `{"profile":"oneAD"}` to `{"profile":"ts-strict"}`.
 
 ### Added
+- `mra dev <project> "<task>"` — deterministic, fully-headless implement→review→fix→PR loop. Forces the debate+verifier review as the gate; transports the verdict via `$MRA_REVIEW_RESULT_FILE` (exit code is never trusted); three-valued APPROVED/CHANGES_REQUESTED/REVIEW_INCOMPLETE switch bounded by round/retry/global caps + a no-progress fingerprint. Default posts a COMMENT review (binding GitHub APPROVE is opt-in via `--auto-approve`). Env knobs: `MRA_DEV_IMPLEMENT_MAX_TURNS`, `MRA_DEV_FIX_MAX_TURNS`, `MRA_DEV_MAX_REVIEWS`, `MRA_DEV_ALLOWED_TOOLS`, `MRA_DEV_CLAUDE_BIN`. Cost accounting deferred.
 - feat(launch): load each project's CLAUDE.md/AGENTS.md/.claude/rules natively
   (`mra config project-memory on|off`, default on); interactive launch now scopes
   settings to `user,project` to avoid cross-project CLAUDE.local.md leakage.
