@@ -30,5 +30,25 @@ RF2=$(mktemp); rm -f "$RF2"
 ( unset MRA_REVIEW_RESULT_FILE; _review_emit_verdict '{"status":"APPROVED"}' "/tmp" )
 [[ ! -e "$RF2" ]] && ok "unset channel -> no-op" || fail "unset channel wrote a file"
 
+# --- _dev_read_status / _dev_fingerprint (source dev.sh) ---
+source "$SCRIPT_DIR/lib/dev.sh"
+
+printf '{"status":"APPROVED","comments":[]}' > "$RF"
+assert_eq "read_status approved" "APPROVED" "$(_dev_read_status "$RF")"
+: > "$RF"
+assert_eq "read_status empty -> INCOMPLETE" "REVIEW_INCOMPLETE" "$(_dev_read_status "$RF")"
+printf 'garbage' > "$RF"
+assert_eq "read_status garbage -> INCOMPLETE" "REVIEW_INCOMPLETE" "$(_dev_read_status "$RF")"
+
+printf '%s' '{"status":"CHANGES_REQUESTED","comments":[{"path":"b.ts","line":9,"severity":"HIGH","body":"y"},{"path":"a.ts","line":2,"severity":"LOW","body":"x"}]}' > "$RF"
+assert_eq "fingerprint sorted" "a.ts:2:LOW,b.ts:9:HIGH," "$(_dev_fingerprint "$RF")"
+
+# --- _dev_review_one reads ONLY the file, never the exit code (false-green firewall) ---
+# Stub review_project: writes CHANGES_REQUESTED to RF but RETURNS 1 (the malformed-path
+# return) — the loop must still see CHANGES_REQUESTED, not abort, under set -e.
+review_project() { printf '%s' '{"status":"CHANGES_REQUESTED","comments":[]}' > "$MRA_REVIEW_RESULT_FILE"; return 1; }
+out=$(DEV_AUTO_APPROVE=false _dev_review_one ws proj code main "")
+assert_eq "review_one trusts file not exit code" "CHANGES_REQUESTED" "${out%%|*}"
+
 echo ""
 if [[ $errors -eq 0 ]]; then echo "PASS: all dev-verdict tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
