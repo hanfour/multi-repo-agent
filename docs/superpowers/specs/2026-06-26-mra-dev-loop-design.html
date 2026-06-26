@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>`mra dev` — Autonomous Implement → Review → Fix → PR Loop — Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
+    <div class="toc-title">`mra dev` — Autonomous Implement → Review → Fix → PR Loop — Design</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#1-problem">1. Problem</a></li>
+<li><a href="#2-goals-non-goals">2. Goals / Non-goals</a></li>
+<li><a href="#3-command-surface">3. Command surface</a></li>
+<li><a href="#4-architecture">4. Architecture</a><ul>
+<li><a href="#41-verdict-transport-the-load-bearing-choice-d1">4.1 Verdict transport — the load-bearing choice (D1)</a></li>
+</ul>
+</li>
+<li><a href="#5-state-machine-with-10-critic-fixes-applied">5. State machine (with §10 critic fixes applied)</a></li>
+<li><a href="#6-the-false-green-firewall-d1d7">6. The false-green firewall (D1–D7)</a></li>
+<li><a href="#7-headless-write-agent-d8d10">7. Headless write-agent (D8–D10)</a></li>
+<li><a href="#8-loop-control-robustness-d11d13">8. Loop control &amp; robustness (D11–D13)</a></li>
+<li><a href="#9-context-testing-cli-d14d16">9. Context, testing, CLI (D14–D16)</a></li>
+<li><a href="#10-critic-gaps-closed">10. Critic gaps closed</a></li>
+<li><a href="#11-safety-summary">11. Safety summary</a></li>
+<li><a href="#12-failure-handling">12. Failure handling</a></li>
+<li><a href="#13-testing-plan">13. Testing plan</a></li>
+<li><a href="#14-task-breakdown">14. Task breakdown</a></li>
+<li><a href="#15-residual-risks-deferrals">15. Residual risks &amp; deferrals</a></li>
+<li><a href="#16-provenance">16. Provenance</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">技術詳規格</div>
+      <h1>`mra dev` — Autonomous Implement → Review → Fix → PR Loop — Design</h1>
+      <div class="meta"></div>
+    </div>
+    <p><strong>Date:</strong> 2026-06-26
+<strong>Status:</strong> Approved design (v1 / Phase 0). Pending implementation.
+<strong>Scope:</strong> Add <code>mra dev &lt;project&gt; "&lt;task&gt;"</code> — a deterministic, fully-headless, single-repo state machine that implements a task, runs a debate+verifier code review, fixes findings, opens a PR, runs the post-PR review loop, and reports. The central property is a <strong>false-green firewall</strong>: an unattended loop must never coerce an incomplete/failed/ambiguous review into <code>APPROVED</code>.
+<strong>Provenance:</strong> Produced via a multi-agent council with a genuine three-way vote (P1 <em>YAGNI/minimal</em> won 8.7 avg / Borda 8, P3 <em>maximal-reuse</em> 8.6 / 7, P2 <em>safety-first</em> 7.8 / 3; three judges), synthesized onto the P1 backbone with P2/P3 grafts, then hardened by an adversarial completeness critic (6 gaps closed, see §10). Every decision below was verified against the real <code>mra</code> source.</p>
+<hr />
+<h2 id="1-problem">1. Problem</h2>
+<p><code>mra</code> already runs an implement → review → fix → PR loop <strong>interactively</strong>: launching <code>mra &lt;project&gt;</code> starts a Claude orchestrator (<code>agents/orchestrator.md</code>) that dispatches a sub-agent, runs an in-session <code>code-reviewer</code> agent, loops fixes, and opens a PR. Two gaps:</p>
+<ul>
+<li><strong>It is not runnable headlessly / deterministically.</strong> The loop lives entirely inside an interactive orchestrator session and depends on the model honoring <code>orchestrator.md</code>. There is no one-shot command, and nothing structurally enforces the re-review or the round caps.</li>
+<li><strong>Its in-loop review is the weak reviewer.</strong> The in-session <code>code-reviewer</code> is single-pass / single-perspective. The hardened path — debate multi-agent review <strong>plus the adversarial verifier</strong> that guards <code>APPROVED</code> (<code>lib/review-debate.sh</code>) — only runs from the standalone <code>mra review</code>, and is <strong>not wired into the dev loop</strong>.</li>
+</ul>
+<p>This spec makes the loop a deterministic shell state machine (<code>mra dev</code>) whose review step <strong>is</strong> the debate+verifier path, so the property an autonomous loop most needs — a review that cannot silently report clean — is inherited rather than re-implemented.</p>
+<h2 id="2-goals-non-goals">2. Goals / Non-goals</h2>
+<p><strong>Goals</strong>
+- A one-shot <code>mra dev &lt;project&gt; "&lt;task&gt;"</code> that runs implement → debate review → fix → (loop) → PR → pr-review → report, fully non-interactively.
+- A <strong>deterministic</strong> state machine (shell-enforced control flow, caps, escalation) — not prompt-driven self-discipline.
+- <strong>High-strength review every round</strong> via forced <code>--strategy debate</code> + the adversarial verifier as the real gate.
+- A <strong>false-green firewall</strong>: every ambiguity (useless exit code, <code>REVIEW_INCOMPLETE</code>, verifier <code>INCONCLUSIVE</code>, empty diff, stale GitHub hunks, missing verdict) resolves toward <em>re-review/escalate</em>, never toward <code>APPROVED</code>.
+- Unit-testable in the existing <code>tests/test_*.sh</code> plain-bash style.</p>
+<p><strong>Non-goals (v1)</strong>
+- <strong>Cross-repo</strong> orchestration (dependency ordering, consumer integration tests, multi-PR chaining) — single repo only. Cross-repo stays with the interactive orchestrator.
+- A <strong>test-suite gate</strong> — the gate is review <code>APPROVED</code> only (per the approved design).
+- <strong>Cost accounting</strong> — <code>record_usage</code> has zero callers and the debate path uses bare <code>claude -p</code> emitting no usage; a partial number would mislead. Deferred (backlog: <code>--output-format json</code>).
+- Auto-<strong>merge</strong>. The loop opens/iterates a PR; a binding GitHub <code>APPROVE</code> is opt-in (<code>--auto-approve</code>); merge stays human.</p>
+<h2 id="3-command-surface">3. Command surface</h2>
+<div class="highlight"><pre><span></span><code>mra dev &lt;project&gt; &quot;&lt;task&gt;&quot; [--base &lt;ref&gt;] [--model M] [--max-rounds N]
+                           [--no-pr] [--auto-approve] [--resume] [--dry-run]
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;project&gt;</code></td>
+<td>Positional; resolved via <code>resolve_project_dir</code> (project-path.sh).</td>
+</tr>
+<tr>
+<td><code>"&lt;task&gt;"</code></td>
+<td>Free-text task, accumulated like the <code>plan</code> parser (bin/mra.sh:830-851). Data only — never <code>eval</code>'d.</td>
+</tr>
+<tr>
+<td><code>--base &lt;ref&gt;</code></td>
+<td>Review/fork base (default <code>origin/&lt;default-branch&gt;</code>). Arity-checked; must agree across review and PR.</td>
+</tr>
+<tr>
+<td><code>--model M</code></td>
+<td>Single model for implement + passed through to review (default <code>sonnet</code>; the verifier is the real gate regardless of model).</td>
+</tr>
+<tr>
+<td><code>--max-rounds N</code></td>
+<td>Per-loop fix-round cap, positive int <code>^[1-9][0-9]*$</code> (default 3). Applies to the code-review loop and the pr-review loop separately.</td>
+</tr>
+<tr>
+<td><code>--no-pr</code></td>
+<td>Run steps 0–3 to <code>APPROVED</code> locally, then stop and report the branch. Skips <code>check_gh_auth</code>.</td>
+</tr>
+<tr>
+<td><code>--auto-approve</code></td>
+<td>The ONLY thing that sets <code>MRA_REVIEW_ALLOW_APPROVE=1</code> on the <code>--pr</code> post. Default off → post a <code>COMMENT</code> review and stop (clean-but-not-merged).</td>
+</tr>
+<tr>
+<td><code>--resume</code></td>
+<td>Reattach to an existing <code>mra/&lt;slug&gt;</code> branch / open PR (idempotent).</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td><code>validate()</code> + print preview, exit before any mutation.</td>
+</tr>
+</tbody>
+</table>
+<p><code>check_gh_auth</code> runs up front (unless <code>--no-pr</code>) so a 30-minute run never dies at the final push.</p>
+<h2 id="4-architecture">4. Architecture</h2>
+<p>Follows existing <code>mra</code> conventions: many small focused files, immutable helpers, verdict transported as a machine artifact (not parsed from prose), all human/log output on stderr.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Action</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/dev.sh</code></td>
+<td><strong>create</strong></td>
+<td><code>dev_project()</code> state machine + pure/injectable helpers: validate → branch → implement → code-review loop → PR → pr-review loop → report. Owns three-valued verdict handling, round/retry/global caps, no-progress fingerprint, escalation, resume, cwd/<code>GH_TOKEN</code> pinning, background-job teardown.</td>
+</tr>
+<tr>
+<td><code>lib/dev-agent.sh</code></td>
+<td><strong>create</strong></td>
+<td>Write-enabled headless implement/fix driver. Dispatches <code>claude -p</code> with <code>agents/sub-agent.md</code> + task/fix-comments; scoped <code>--allowedTools</code> incl <code>Bash(git:*)</code>; <code>--setting-sources project</code>; <code>--add-dir</code>; <code>&lt;/dev/null</code>; outputLanguage injection; comprehensive no-test/no-branch override; emits/parses <code>===MRA-DEV-DONE===</code> / <code>===MRA-DEV-BLOCKED: &lt;reason&gt;===</code> sentinel + git-state progress; honors <code>${MRA_DEV_CLAUDE_BIN:-${MRA_CLAUDE_BIN:-claude}}</code>.</td>
+</tr>
+<tr>
+<td><code>lib/review.sh</code></td>
+<td><strong>modify</strong></td>
+<td>Add a verdict-emission mode scoped to the debate <code>_render_review_json</code> path: <code>extract_json → _repair_review_json → _validate_review_json</code> then write the canonical <code>review_json</code> (or synthetic <code>REVIEW_INCOMPLETE</code>) to <code>$MRA_REVIEW_RESULT_FILE</code>; on the <code>--pr</code> path tee at the status branch point <strong>after</strong> repair, independent of <code>post_inline_review</code>; parse-time guards rejecting the mode with <code>--working/--no-debate/light/standard</code>. Existing terminal/inline output unchanged.</td>
+</tr>
+<tr>
+<td><code>bin/mra.sh</code></td>
+<td><strong>modify</strong></td>
+<td>Add the <code>dev)</code> dispatch case (copy the <code>plan</code> parser); flags per §3; <code>check_gh_auth</code> unless <code>--no-pr</code>; <code>resolve_project_dir</code>; call <code>dev_project</code>; add usage help line. (Existing file → <code>modify</code>.)</td>
+</tr>
+<tr>
+<td><code>tests/test_dev_state_machine.sh</code></td>
+<td><strong>create</strong></td>
+<td>Loop-transition tests (review + dev-agent stubbed as bash functions).</td>
+</tr>
+<tr>
+<td><code>tests/test_dev_verdict.sh</code></td>
+<td><strong>create</strong></td>
+<td>Result-file verdict channel + three-valued + false-green guards.</td>
+</tr>
+<tr>
+<td><code>tests/test_dev_cli.sh</code></td>
+<td><strong>create</strong></td>
+<td>Arg parsing, mutual-exclusion, <code>--dry-run</code>/<code>--no-pr</code> terminal semantics, positive-int validation.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="41-verdict-transport-the-load-bearing-choice-d1">4.1 Verdict transport — the load-bearing choice (D1)</h3>
+<p><code>review_project</code>'s <strong>exit code is structurally useless</strong>: every review path ends <code>_render_review_json …; _review_pkb_auto_update … &amp;; return</code>, so it returns the backgrounded job's <code>0</code> for <code>CHANGES_REQUESTED</code>, <code>COMMENT</code>, and malformed JSON alike (verified) — a confirmed false-green vector. Its <code>log_*</code> lines also print to stdout. The contest weighed three transports and chose <strong>(a) a result-file channel</strong>, parallel to the existing <code>SYNC_RESULT_FILE</code> pattern (sync.sh:285, mra.sh:592):</p>
+<ul>
+<li><code>dev_project</code> exports <code>MRA_REVIEW_RESULT_FILE=$(mktemp)</code>.</li>
+<li><code>review_project</code> writes <strong>only</strong> the validated canonical <code>review_json</code> there, at the point where <code>status</code> exists.</li>
+<li>The loop reads the verdict via <code>jq -r .status</code> of the file. <strong>Empty / missing / unparseable ⇒ synthetic <code>REVIEW_INCOMPLETE</code>, never <code>APPROVED</code>.</strong></li>
+<li>Rejected: (b) JSON-to-stdout needs every <code>log_progress/log_info</code> re-routed to <code>&gt;&amp;2</code> and risks non-deterministic <code>jq</code> failures on interleaved text; (c) parsing the printed <code>Status:</code> line couples to human-format and has no validation on the terminal branch.</li>
+</ul>
+<blockquote>
+<p>Note: this <strong>supersedes</strong> the earlier-approved "<code>--json</code> to stdout" idea. Same intent, lower blast radius, no stdout-auditing.</p>
+</blockquote>
+<h2 id="5-state-machine-with-10-critic-fixes-applied">5. State machine (with §10 critic fixes applied)</h2>
+<div class="highlight"><pre><span></span><code>dev_project(workspace, project, task, opts):           # workspace threaded (§10-4)
+  # logs -&gt; &amp;2 ; verdict ONLY via $MRA_REVIEW_RESULT_FILE ; never trust exit code
+
+  ## 0 VALIDATE
+  dir = resolve_project_dir(workspace, project)              else ABORT
+  assert `git -C dir status --porcelain` empty               else ABORT &quot;dirty tree&quot;
+  default = origin/&lt;default&gt;; base = opts.base || default
+  assert current branch NOT in protected set                 else ABORT
+  slug = slugify(task)
+  if branch mra/&lt;slug&gt; exists and !opts.resume:               ABORT &quot;exists; use --resume&quot;
+  if !opts.no_pr: check_gh_auth                               else ABORT
+  if opts.dry_run: print preview; return 0                    # pre-mutation exit
+  RF = mktemp; export MRA_REVIEW_RESULT_FILE=RF
+  LOG = $(mra_log &quot;$workspace&quot; &quot;$project&quot; start)              # capture path once; echo-&gt;&amp;2
+  global=0; GLOBAL_CAP=MRA_DEV_MAX_REVIEWS; wall_start=now
+
+  ## 1 BRANCH  (dev owns it; fork from base, NOT current HEAD)
+  git -C dir fetch; git -C dir checkout -B mra/&lt;slug&gt; base    # --resume -&gt; reuse
+
+  ## 2 IMPLEMENT
+  pre = HEAD
+  r = dev_agent(dir, IMPLEMENT, task, IMPLEMENT_MAX_TURNS)    # agent self-commits surgically
+  if r.sentinel==BLOCKED:                  escalate(r.reason)
+  if HEAD==pre OR empty(base...HEAD):       escalate(&quot;no diff produced&quot;)
+  ensure_pkb(dir)                           # build-if-missing before first review (D14)
+
+  ## helper review_one(mode):   mode = code | pr:N
+  :&gt; RF
+  env = MRA_REVIEW_VERIFY_APPROVE=1                            # force-export (D5)
+  if mode==pr:N: env += MRA_REVIEW_PR_CONTEXT=0 [+ MRA_REVIEW_ALLOW_APPROVE=1 iff opts.auto_approve]
+  env review_project(workspace, project, --strategy debate &lt;verdict-mode&gt; [--pr N]) 1&gt;&amp;2 || true   # §10-1: guard set -e
+  global++; if global&gt;GLOBAL_CAP or now-wall_start&gt;WALL:  escalate(&quot;ceiling&quot;)
+  v  = jq -r .status RF 2&gt;/dev/null || echo REVIEW_INCOMPLETE  # empty/invalid -&gt; INCOMPLETE, never APPROVED
+  fp = fingerprint(sorted path:line:severity from RF.comments[])
+  return (v, fp)
+
+  ## 3 CODE-REVIEW LOOP
+  round=0; retry=0; prev_fp=&quot;&quot;
+  loop:
+    (v, fp) = review_one(code)
+    case v:
+      APPROVED:                   break
+      COMMENT|REVIEW_INCOMPLETE:  retry++; if retry&gt;RETRY_CAP: escalate(&quot;review never completed&quot;); continue
+      CHANGES_REQUESTED:
+         if fp==prev_fp:          escalate(&quot;no progress: identical findings&quot;)
+         f = dev_agent(dir, FIX, RF.comments, FIX_MAX_TURNS)
+         if f.sentinel==BLOCKED:  escalate(f.reason)
+         if empty(new diff):      escalate(&quot;fix produced no diff&quot;)
+         prev_fp=fp; round++; if round&gt;=MAX_ROUNDS: escalate(&quot;code-review cap&quot;); continue
+  if opts.no_pr: report(branch, status=APPROVED-local); teardown; return 0
+
+  ## 4 PR  (idempotent; pin cwd + GH_TOKEN)
+  git -C dir push -u origin mra/&lt;slug&gt;
+  N = `gh pr view --json number` || mra_pr_create(dir, title, body)   # update-or-create
+
+  ## 5 PR-REVIEW LOOP  (mirror orchestrator.md:163-201)
+  round=0; retry=0; prev_fp=&quot;&quot;
+  loop:
+    git -C dir push origin mra/&lt;slug&gt;       # UNCONDITIONAL top-of-loop push (D11): local HEAD==GitHub head
+    (v, fp) = review_one(pr:N)              # verdict from result file; GitHub review UPDATED in place (single pinned, §10-3)
+    case v:
+      APPROVED:                   break
+      COMMENT|REVIEW_INCOMPLETE:  retry++; if retry&gt;RETRY_CAP: escalate(&quot;pr-review never completed&quot;); continue
+      CHANGES_REQUESTED:
+         if fp==prev_fp:          escalate(&quot;no progress&quot;)
+         f = dev_agent(dir, FIX, RF.comments, FIX_MAX_TURNS)
+         if f.sentinel==BLOCKED or empty diff: escalate
+         prev_fp=fp; round++; if round&gt;=MAX_ROUNDS: escalate(&quot;pr-review cap&quot;); continue
+         # next iteration&#39;s top-of-loop push + --pr review IS the re-confirm (§10-2: no separate v2)
+
+  ## 6 REPORT
+  wait/disable background _review_pkb_auto_update jobs
+  report(branch, PR url=N, code_rounds, pr_rounds, final=APPROVED|COMMENT)
+  unset MRA_REVIEW_RESULT_FILE; return 0
+
+escalate(reason):
+  mra_log &quot;$workspace&quot; &quot;$project&quot; reason; notify_escalation &quot;$workspace&quot; &quot;$project&quot; reason   # §10-4: 3-arg
+  print branch+PR state to &amp;2; teardown bg jobs; unset RF; return 2     # NEVER silently approve
+
+TERMINATION: both loops bounded by round cap + retry sub-cap + global ceiling
+             + wall-clock + no-progress fingerprint -&gt; always escalate, never infinite.
+</code></pre></div>
+
+<h2 id="6-the-false-green-firewall-d1d7">6. The false-green firewall (D1–D7)</h2>
+<ul>
+<li><strong>D1/D2/D3 — verdict source.</strong> Verdict comes only from the validated <code>status</code> in <code>$MRA_REVIEW_RESULT_FILE</code>; emission is scoped to the debate <code>_render_review_json</code> path through <code>extract_json → repair → validate</code>; on <code>--pr</code>, tee <strong>after</strong> repair so a malformed PR verdict is never misread as clean. Force <code>--strategy debate</code> (the single-pass block is dead surface here).</li>
+<li><strong>D4 — three-valued switch.</strong> <code>APPROVED → advance</code>; <code>CHANGES_REQUESTED → FIX</code>; <code>COMMENT == REVIEW_INCOMPLETE → re-review under a *separate* retry sub-cap (</code>MRA_DEV_REVIEW_RETRY_CAP<code>, default 2)</code> then escalate. <code>REVIEW_INCOMPLETE</code> (review-debate.sh:181 — agent failure / max-turns cutoff) means <em>the review failed</em>: re-review, never re-implement, never approve.</li>
+<li><strong>D5 — verifier is the gate.</strong> Force-export <code>MRA_REVIEW_VERIFY_APPROVE=1</code> every loop-internal review so an operator's global <code>=0</code> cannot silently weaken the unattended gate to 2-agent approval. <code>MRA_REVIEW_ALLOW_APPROVE=1</code> only around the <code>--pr</code> post and only under <code>--auto-approve</code>. Verifier <code>INCONCLUSIVE</code> → D4 retry, never approve.</li>
+<li><strong>D6 — GitHub APPROVE opt-in.</strong> Default posts a <code>COMMENT</code> review and stops (review.sh documents model-APPROVE as "unsafe by default" because the reviewer sees potentially prompt-injectable PR content). The loop-control verdict (result file) is decoupled from what is posted.</li>
+<li><strong>D7 — fresh-diff re-review.</strong> Export <code>MRA_REVIEW_PR_CONTEXT=0</code> on loop-internal re-reviews so the bot's own prior comments aren't fetched-and-suppressed into a cross-round false green. (PR-context denoising is correct for human <code>mra review --pr</code>, dangerous for the bot's own loop.)</li>
+</ul>
+<h2 id="7-headless-write-agent-d8d10">7. Headless write-agent (D8–D10)</h2>
+<ul>
+<li><strong>D8 — least-privilege write grant.</strong> <code>--allowedTools 'Edit,Write,Read,Grep,Glob,Bash(git:*)'</code> via <code>--setting-sources project</code> + <code>&lt;/dev/null</code>; env-overridable <code>MRA_DEV_ALLOWED_TOOLS</code>. <strong>Reject</strong> <code>--permission-mode acceptEdits</code> (auto-accepts Write/Edit but NOT Bash → stalls at <code>git commit</code> → perpetual empty-diff-escalate) and <code>--dangerously-skip-permissions</code> (security.md). The colon syntax <code>Bash(git:*)</code> is load-bearing (<code>Bash(git*)</code> silently fails to match) and must be empirically confirmed in Task 0. This is the only net-new capability in <code>mra</code> — every existing <code>claude -p</code> is read-only with <code>--disallowedTools 'Write,Edit,NotebookEdit'</code>.</li>
+<li><strong>D9 — surgical self-commit, comprehensive override.</strong> The agent self-commits surgically (reuse <code>sub-agent.md</code> staging discipline); <code>dev_project</code> owns branch creation; never use <code>mra_commit</code> (its <code>git add -A</code> would sweep <code>.mra/</code> + untracked files). The dispatch must <strong>comprehensively neutralize</strong> the parts of <code>sub-agent.md</code> that fight headless single-repo dev (§10-6): the mandatory mra-test DONE-gate, the Step-2 TDD-first mandate, the Step-4 Docker test runs, the "DONE only after <code>mra test</code> exit 0" rule, and self-branch-creation — replaced with "branch already exists; review-APPROVED is the only gate; commit surgically."</li>
+<li><strong>D10 — git ground truth + hardened sentinel.</strong> Progress = <code>git rev-list base..HEAD</code> count + non-empty <code>git diff base...HEAD</code>, plus an explicit <code>===MRA-DEV-DONE===</code> / <code>===MRA-DEV-BLOCKED: &lt;reason&gt;===</code> sentinel (the review subsystem abandoned regex-on-prose precisely because counting free-text caused false greens). Empty diff OR <code>BLOCKED</code> ⇒ escalate, never review (the default-range path has no empty-diff guard and <code>run_debate_review</code> fakes <code>diff='(diff unavailable)'</code> which agents trivially approve).</li>
+</ul>
+<h2 id="8-loop-control-robustness-d11d13">8. Loop control &amp; robustness (D11–D13)</h2>
+<ul>
+<li><strong>D11 — push invariant.</strong> Step 3 reviews local <code>base...HEAD</code>. Step 5 does an <strong>unconditional <code>git push</code> at the top of every pr-review iteration</strong> so local HEAD == GitHub PR head — otherwise <code>post_inline_review</code>'s GitHub-hunk filter drops all inline comments and the verdict reflects un-pushed state (a critical false-clean).</li>
+<li><strong>D12 — validate / resume / idempotent PR / account pinning.</strong> Clean tree, non-protected branch, fork from <code>origin/&lt;default&gt;</code> (not <code>mra_branch_create</code>'s current-HEAD stale-resume), refuse existing <code>mra/&lt;slug&gt;</code> unless <code>--resume</code>; idempotent PR via <code>gh pr view → update-or-create</code>; <strong>pin cwd + <code>GH_TOKEN</code></strong> (the dual-gh-account per-directory binding means a long loop could otherwise push under the wrong account); all logs on stderr.</li>
+<li><strong>D13 — caps &amp; no-progress.</strong> Per-loop round caps (default 3 each) + retry sub-cap (D4) + hard global ceiling <code>MRA_DEV_MAX_REVIEWS</code> (~12) + wall-clock timeout, all forcing escalation; a no-progress detector fingerprints the sorted finding set (<code>path:line:severity</code>) and escalates on unchanged fingerprint OR empty fix-diff. Turn knobs: <code>MRA_DEV_IMPLEMENT_MAX_TURNS</code> (~40–50), <code>MRA_DEV_FIX_MAX_TURNS</code> (~15–25). Background <code>_review_pkb_auto_update &amp;</code> jobs are tracked and waited/disabled at every teardown. (Fan-out is multiplicative: a pr-review round nests a full code-review debate → ~50+ <code>claude</code> calls at cap 3/3 without a ceiling.)</li>
+</ul>
+<h2 id="9-context-testing-cli-d14d16">9. Context, testing, CLI (D14–D16)</h2>
+<ul>
+<li><strong>D14 — PKB before first review.</strong> <code>ensure_pkb</code> (build-if-missing) before the first code-review — missing PKB is the key driver of <code>REVIEW_INCOMPLETE</code> (project memory: <code>mra_review_false_green_fix</code>), and a fresh <code>mra/</code> branch's new code is exactly what review must understand. Implement/fix agent uses <code>--setting-sources project --add-dir &lt;project&gt;</code> + PKB full tier with a graceful "no PKB → suggest <code>mra analyze</code>" fallback; inject the <code>outputLanguage</code> directive (protocol tokens stay English).</li>
+<li><strong>D15 — plain-bash tests + correct mock seam.</strong> Tests are <code>tests/test_dev_*.sh</code> in the existing plain-bash assertion style (<code>test.sh</code> globs only <code>tests/test_*.sh</code>; <strong>bats is not installed</strong> — a <code>.bats</code> file is silently skipped and shows CI-green with the safety-critical loop untested). Mock at the <strong><code>review_project</code> function boundary</strong> (debate agents call <strong>bare</strong> <code>claude</code>, so <code>MRA_CLAUDE_BIN</code> does not intercept them); the dev-agent driver honors <code>${MRA_DEV_CLAUDE_BIN:-…}</code>. Reserve a PATH-shim <code>claude</code> only for integration.</li>
+<li><strong>D16 — CLI.</strong> Copy the <code>plan</code> parser (project positional + accumulated task); <code>--max-rounds</code> positive-int guard; single <code>--model</code> default <code>sonnet</code>; <code>--dry-run</code> = validate+preview then exit before mutation; <code>--no-pr</code> = steps 0–3 then stop; <code>--auto-approve</code> / <code>--resume</code>; <code>check_gh_auth</code> up front unless <code>--no-pr</code>; capture the <code>mra_log</code> path once and route its stdout echo off the verdict channel. <code>bin/mra.sh</code> is <strong>modified</strong>, not created.</li>
+</ul>
+<h2 id="10-critic-gaps-closed">10. Critic gaps closed</h2>
+<p>The adversarial critic ran against the synthesized plan; all six findings are folded into §5/§7/§8 above:</p>
+<ol>
+<li><strong>(HIGH) <code>set -e</code> firewall bypass.</strong> <code>bin/mra.sh</code> is <code>set -euo pipefail</code>; <code>review_project</code> returns <code>1</code> non-exceptionally on the malformed-JSON path — the <em>same</em> <code>REVIEW_INCOMPLETE</code> case the firewall treats as normal — which would fire <code>ERR</code> and abort <code>dev_project</code> <em>before</em> the result-file fallback runs, leaving a half-built branch + orphaned background jobs. <strong>Fix:</strong> guard every <code>review_project</code> / <code>dev_agent</code> / <code>jq</code> / <code>grep -c</code> call with <code>|| true</code> and rely solely on the result-file status; add a test that a <code>review_project</code> returning 1 still yields <code>REVIEW_INCOMPLETE</code> under <code>set -e</code> (see §13).</li>
+<li><strong>(MED) PR-review re-confirm was a no-op.</strong> The synthesized step-5 computed <code>v2 = review_one(code)</code> but discarded it. <strong>Fix:</strong> drop the redundant local re-confirm entirely — the next iteration's top-of-loop push + <code>--pr</code> review <em>is</em> the re-confirm, so the verdict that gates the loop always reflects the pushed GitHub state.</li>
+<li><strong>(MED) PR comment-noise accumulation.</strong> <code>post_inline_review</code> POSTs a brand-new review each call → a multi-round loop stacks N redundant reviews (only the fallback-comment path dedups, review.sh:924-928). <strong>Fix:</strong> maintain a <strong>single pinned MRA review</strong> — before posting each round, dismiss/replace the bot's prior MRA review so the PR carries exactly one evolving review (mechanism is a Task-5 detail via <code>gh api</code>).</li>
+<li><strong>(MED) workspace threading + signature mismatches.</strong> <code>dev_project</code> must thread <code>workspace</code>: <code>resolve_project_dir(workspace,…)</code>, <code>review_project(workspace,…)</code>, <code>notify_escalation(workspace, project, summary)</code> (3-arg), <code>mra_log(workspace, project, msg)</code> (captures via <code>$()</code> since it echoes the log path). <strong>Fixed in §5 signatures.</strong></li>
+<li><strong>(MED) <code>--allowedTools</code> breadth.</strong> A git-only Bash allowlist denies <code>mkdir/mv/rm</code> → file renames/dir restructuring get silently denied headless → spurious empty-diff escalate. <strong>Fix:</strong> widen Task 0 acceptance to a realistic multi-file task <strong>including a file rename</strong>; document the <code>MRA_DEV_ALLOWED_TOOLS</code> override and any intentionally-denied verbs; broaden the default to common safe verbs (<code>mkdir/mv/cp</code>) only if Task 0 shows it is needed.</li>
+<li><strong>(MED) incomplete <code>sub-agent.md</code> override.</strong> Covered in D9 (§7): neutralize the TDD-first step, the Docker/mra-test steps, the DONE-after-tests rule, and self-branch-creation — not just the test gate.</li>
+</ol>
+<h2 id="11-safety-summary">11. Safety summary</h2>
+<p>False-green firewall (verdict only from validated result-file status; missing/empty/invalid ⇒ <code>REVIEW_INCOMPLETE</code>, never <code>APPROVED</code>) · force <code>MRA_REVIEW_VERIFY_APPROVE=1</code> · GitHub APPROVE opt-in only · <code>MRA_REVIEW_PR_CONTEXT=0</code> on re-reviews · empty-diff guard before every review · unconditional top-of-loop push · scoped write grant (no <code>acceptEdits</code>/<code>--dangerously-skip</code>) · no <code>git add -A</code> · fork from <code>origin/&lt;default&gt;</code> · cwd+<code>GH_TOKEN</code> pinned · all logs on stderr · <code>|| true</code> guards under <code>set -e</code>.</p>
+<h2 id="12-failure-handling">12. Failure handling</h2>
+<p>Dirty tree / unresolved project / protected branch / missing gh auth → ABORT before mutation. Existing <code>mra/&lt;slug&gt;</code> → refuse unless <code>--resume</code>. IMPLEMENT empty-diff or <code>BLOCKED</code> → escalate, no review fired. <code>claude -p</code> stall → <code>&lt;/dev/null</code> + explicit allowlist so it never waits on a prompt; per-phase wall-clock → treat as <code>BLOCKED</code>. <code>review_project</code> transient / empty result file → <code>REVIEW_INCOMPLETE</code> retry sub-cap then escalate. Malformed JSON → repair → still bad → <code>REVIEW_INCOMPLETE</code>. No-progress (identical fingerprint OR empty fix diff) → escalate. Global ceiling + wall-clock → escalate even if per-loop caps not hit. PR already open → update-or-create. <code>gh</code>/push failure → escalate with branch state for resume. Background PKB jobs waited/disabled on every teardown. Every escalate path calls <code>notify_escalation</code> + <code>mra_log</code> + a stderr message carrying the reason, so a headless run with no operator still surfaces.</p>
+<h2 id="13-testing-plan">13. Testing plan</h2>
+<p><code>tests/test_dev_verdict.sh</code> — result-file written with canonical object on debate path; empty/malformed-after-repair → <code>REVIEW_INCOMPLETE</code> (not approved); <strong><code>review_project</code> returning 1 under <code>set -e</code> still yields <code>REVIEW_INCOMPLETE</code>, loop not aborted</strong> (§10-1); exit-code-0-with-<code>CHANGES_REQUESTED</code> does not advance; status drives verdict independently of exit code; <code>COMMENT/INCOMPLETE</code> never treated as <code>CHANGES_REQUESTED</code>; logs on stdout do not contaminate the channel; verdict object exposes <code>comments[]</code> for the fingerprint; <code>--pr</code> path both posts and writes the file orthogonally; teed after repair; mode rejected with <code>--working/--no-debate</code> at parse time.</p>
+<p><code>tests/test_dev_state_machine.sh</code> — validate aborts on dirty tree / protected branch; branch forks from <code>origin/&lt;default&gt;</code> not current HEAD; existing branch refused without <code>--resume</code>; implement empty-diff / <code>BLOCKED</code> escalate before review; approved-first advances; changes-requested → fix → re-review; incomplete → retry sub-cap → escalate; no-progress fingerprint escalates; empty-fix-diff escalates; code-review round cap escalates; global ceiling escalates; pr-review pushes before each review; <strong>pr-review fix → next iteration's <code>--pr</code> review re-confirms (no separate <code>v2</code>, §10-2)</strong>; pr-review keeps a single pinned review across rounds (§10-3); pr-review approved completes; <code>MRA_REVIEW_VERIFY_APPROVE</code> force-exported <code>1</code> even when env <code>0</code>; pr-context disabled on re-review; existing open PR updates not recreates; escalation calls notify + mra_log; background PKB jobs waited on teardown.</p>
+<p><code>tests/test_dev_cli.sh</code> — missing project/task → usage nonzero; <code>--max-rounds</code> rejects non-positive int / default 3; <code>--dry-run</code> validates and exits before mutation; <code>--no-pr</code> stops at approved local branch (no push) and skips <code>check_gh_auth</code>; default posts COMMENT (no <code>ALLOW_APPROVE</code>); <code>--auto-approve</code> sets <code>ALLOW_APPROVE</code> on the PR post only; <code>--base</code> arity checked and agrees across review and PR; dev-agent honors <code>MRA_DEV_CLAUDE_BIN</code> mock seam.</p>
+<h2 id="14-task-breakdown">14. Task breakdown</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Task</th>
+<th>Deps</th>
+<th>Acceptance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>0</strong></td>
+<td><strong>De-risk the write-enabled <code>claude -p</code></strong></td>
+<td>—</td>
+<td>A one-off <code>claude -p &lt;prompt&gt; --allowedTools 'Edit,Write,Read,Bash(git:*)' --setting-sources project --add-dir &lt;repo&gt; &lt;/dev/null</code> in a scratch repo WRITES a file, <strong>renames/moves a file</strong>, AND runs <code>git add</code>/<code>git commit</code> non-interactively with no permission prompt and no TTY; exact flag names + colon syntax recorded; documented fallback if the grant can't cover <code>Bash(git)</code> without <code>--dangerously-skip</code>. <strong>Blocks all later tasks.</strong></td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>review.sh</code> verdict-emission mode + result-file channel (D1/D2/D3)</td>
+<td>—</td>
+<td>Debate path writes canonical validated <code>review_json</code> (synthetic <code>REVIEW_INCOMPLETE</code> on failure) to <code>$MRA_REVIEW_RESULT_FILE</code>; <code>--pr</code> tees after repair; parse-time guards; existing output unchanged. <code>test_dev_verdict.sh</code> green.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>lib/dev-agent.sh</code> headless write-driver (D8/D9/D10/D14)</td>
+<td>0</td>
+<td>Dispatches <code>claude -p</code> with <code>sub-agent.md</code> + task/fix text, scoped allowlist incl <code>Bash(git:*)</code> + <code>&lt;/dev/null</code> + <code>--setting-sources project</code> + <code>--add-dir</code> + outputLanguage + comprehensive no-test/no-branch override; emits/parses sentinel; returns <code>BLOCKED</code> reason; self-commits surgically; honors <code>MRA_DEV_CLAUDE_BIN</code>. Unit-mockable.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>lib/dev.sh</code> validate + branch ownership + implement + PKB ensure (D9/D12/D14)</td>
+<td>2</td>
+<td>Preconditions; forks <code>mra/&lt;slug&gt;</code> from <code>origin/&lt;default&gt;</code> via <code>checkout -B</code>; <code>--resume</code> reattaches; <code>ensure_pkb</code> before first review; empty-diff/<code>BLOCKED</code> escalate before any review; <code>mra_log</code> path captured once on stderr; cwd/<code>GH_TOKEN</code> pinned; workspace threaded.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>lib/dev.sh</code> code-review loop — three-valued + caps + no-progress + <code>set -e</code> guards (D4/D5/D13, §10-1)</td>
+<td>1,3</td>
+<td>APPROVED advances; CHANGES_REQUESTED → FIX → re-review; COMMENT/INCOMPLETE → retry sub-cap; empty/BLOCKED/identical-fingerprint/ceiling/wall-clock → escalate; <code>VERIFY_APPROVE</code> forced on; verdict only from result file; <code>|| true</code> guards verified. <code>test_dev_state_machine.sh</code> loop cases green.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>lib/dev.sh</code> PR step + pr-review loop (top-of-loop push, single pinned review) (D6/D7/D11/D12, §10-2/3)</td>
+<td>4</td>
+<td>Idempotent <code>gh pr view</code>→update-or-create; unconditional push at top of each iteration; <code>--pr</code> review each round with <code>MRA_REVIEW_PR_CONTEXT=0</code>; default COMMENT, <code>--auto-approve</code> gates <code>ALLOW_APPROVE</code> on post only; prior MRA review dismissed/replaced so exactly one pinned review persists; next iteration re-confirms (no <code>v2</code>); caps escalate.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>bin/mra.sh</code> dev dispatch + flags (D16)</td>
+<td>3,4,5</td>
+<td>Plan-style parser; <code>--max-rounds</code> positive-int; all flags per §3; <code>check_gh_auth</code> unless <code>--no-pr</code>; dry-run exits before mutation; usage line added; file <strong>modified</strong>. <code>test_dev_cli.sh</code> green.</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Escalation/report/teardown wiring (D12/D13, §10-4)</td>
+<td>4,5</td>
+<td>Every terminal/escalate path calls <code>notify_escalation</code> (3-arg) + <code>mra_log</code> on stderr, prints branch/PR/rounds report, waits/disables background <code>_review_pkb_auto_update</code> jobs, unsets <code>MRA_REVIEW_RESULT_FILE</code>.</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Tests pass via <code>test.sh</code> + docs note</td>
+<td>6,7</td>
+<td><code>tests/test_dev_*.sh</code> auto-discovered and green under <code>./test.sh</code>; brief usage + env-knob doc; cost-accounting deferral recorded in backlog.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="15-residual-risks-deferrals">15. Residual risks &amp; deferrals</h2>
+<ul>
+<li><strong>The write-enabled <code>claude -p</code> is net-new with zero precedent.</strong> Even with Task 0 + the <code>Bash(git:*)</code> allowlist, real risk the headless agent stalls/refuses edits → perpetual empty-diff-escalate. Needs an early smoke test on a real repo before the loop is trusted. CLI flag names/syntax may drift between <code>claude</code> versions and must be re-verified at Task 0.</li>
+<li><strong>Verifier <code>INCONCLUSIVE</code> is not directly observable</strong> (internal to <code>run_debate_review</code>, falls back to 2-agent approval). Force-<code>VERIFY=1</code> + D7 fresh-diff re-review mitigate but do not eliminate a residual false-green if the verifier is flaky AND both agents wrongly approve.</li>
+<li><strong>No-progress fingerprint</strong> can mis-fire if a fix shifts line numbers without resolving the issue; kept conservative (exact-set match) — tune after first real runs.</li>
+<li><strong>Global ceiling (~12) and wall-clock defaults are guesses</strong>; multiplicative cost on large diffs may force re-tuning.</li>
+<li><strong>No per-phase <code>claude -p</code> watchdog today</strong>; the wall-clock ceiling bounds the whole run but a single hung agent still burns to max-turns within it — a per-phase timeout→<code>BLOCKED</code> is a fast-follow.</li>
+<li><strong>Deferred:</strong> cross-repo orchestration; test-suite gate; cost reporting (<code>--output-format json</code>); slugify-collision UX; PR-review re-flow beyond v1's single mirror.</li>
+</ul>
+<h2 id="16-provenance">16. Provenance</h2>
+<p>Designed by a multi-agent council (4 recon lenses → 16 canonical decisions → 3 philosophy planners → 4 judges → synthesize + adversarial critic). Genuine three-way vote: <strong>P1 (YAGNI) 8.7/Borda 8 won</strong>, P3 (maximal-reuse) 8.6/7, P2 (safety-first) 7.8/3. The winning plan is P1's minimal backbone with the decisive grafts noted inline (D8 allowlist + <code>acceptEdits</code> rejection from P1; result-file naming + top-of-loop push from P3; Task 0 de-risk from P2; tee-after-repair from a judge). Six adversarial-critic gaps closed (§10).</p>
+  </main>
+</div>
+</body>
+</html>
