@@ -36,6 +36,7 @@ grep -q 'PM/brainstorm\|mra prd session\|prd-issues --req' <<<"$argv" && ok "prd
 grep -q 'user,project' <<<"$argv" && ok "setting-sources" || fail "no setting-sources"
 [[ -n "${MRA_PRD_REQ_ID:-}" ]] && ok "exports MRA_PRD_REQ_ID" || fail "no MRA_PRD_REQ_ID"
 assert_eq "exports MRA_PRD_PROJECTS" "fe be" "${MRA_PRD_PROJECTS:-}"
+[[ -f "$WS/.collab/requirements/$MRA_PRD_REQ_ID-scope" ]] && ok "prd_launch writes scope sidecar" || fail "scope sidecar missing after prd_launch"
 
 rm -rf "$WS" "$SHIM"; unset MRA_CLAUDE_BIN
 
@@ -49,8 +50,25 @@ WS2=$(mktemp -d); mkdir -p "$WS2/.collab/requirements"
 cat > "$WS2/.collab/requirements/REQ-2026-0001-tasks.json" <<'JSON'
 {"requirement_id":"REQ-2026-0001","title":"t","tasks":[{"id":"t1","project":"fe","title":"x","tier":1,"dependencies":[],"acceptance_criteria":["a"]}]}
 JSON
-( cd "$WS2" && MRA_WORKSPACE="$WS2" MRA_PRD_PROJECTS="fe" bash "$MRA" prd-issues --req REQ-2026-0001 </dev/null >/dev/null 2>&1 ); rc=$?
+printf 'fe\n' > "$WS2/.collab/requirements/REQ-2026-0001-scope"
+( cd "$WS2" && MRA_WORKSPACE="$WS2" bash "$MRA" prd-issues --req REQ-2026-0001 </dev/null >/dev/null 2>&1 ); rc=$?
 [[ "$rc" -eq 0 ]] && ok "prd-issues preview exits 0" || fail "prd-issues preview nonzero ($rc)"
+
+# --- scope guard: out-of-scope project aborts at apply time ---
+cat > "$WS2/.collab/requirements/REQ-2026-0002-tasks.json" <<'JSON'
+{"requirement_id":"REQ-2026-0002","title":"t","tasks":[{"id":"t1","project":"ops","title":"x","tier":1,"dependencies":[],"acceptance_criteria":["a"]}]}
+JSON
+printf 'fe\n' > "$WS2/.collab/requirements/REQ-2026-0002-scope"
+( cd "$WS2" && MRA_WORKSPACE="$WS2" bash "$MRA" prd-issues --req REQ-2026-0002 </dev/null >/dev/null 2>&1 ); rc=$?
+[[ "$rc" -ne 0 ]] && ok "out-of-scope task aborts at apply time (scope guard)" || fail "out-of-scope task was not rejected ($rc)"
+
+# --- missing scope file aborts ---
+cat > "$WS2/.collab/requirements/REQ-2026-0003-tasks.json" <<'JSON'
+{"requirement_id":"REQ-2026-0003","title":"t","tasks":[{"id":"t1","project":"fe","title":"x","tier":1,"dependencies":[],"acceptance_criteria":["a"]}]}
+JSON
+( cd "$WS2" && MRA_WORKSPACE="$WS2" bash "$MRA" prd-issues --req REQ-2026-0003 </dev/null >/dev/null 2>&1 ); rc=$?
+[[ "$rc" -ne 0 ]] && ok "missing scope file aborts" || fail "prd-issues did not abort when scope file absent ($rc)"
+
 rm -rf "$WS2"
 
 echo ""
