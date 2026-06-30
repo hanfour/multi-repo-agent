@@ -81,6 +81,37 @@ rm -f "$PM_CONFIG"
 
 rm -rf "$TEST_DIR" "$CAPTURE"
 
+# --- Regression guard: MRA_CLAUDE_BIN shim (extraction seam) ---
+# These assertions must FAIL before _launch_interactive is extracted (current
+# code calls bare `claude` bash-function, not MRA_CLAUDE_BIN, so the shim is
+# never invoked and SHIM_OUT stays empty).  They must PASS after extraction.
+SHIM_DIR=$(mktemp -d)
+SHIM_OUT_FILE=$(mktemp)
+export SHIM_OUT="$SHIM_OUT_FILE"
+cat > "$SHIM_DIR/claude" <<'SHIMSCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$SHIM_OUT"
+SHIMSCRIPT
+chmod +x "$SHIM_DIR/claude"
+export MRA_CLAUDE_BIN="$SHIM_DIR/claude"
+
+SHIM_WS=$(mktemp -d)
+mkdir -p "$SHIM_WS/fe"
+printf '{}' > "$SHIM_WS/dep-graph.json"
+config_get() { [[ "$1" == "outputLanguage" ]] && echo "正體中文" || echo ""; }
+
+launch_claude "$SHIM_WS" "$SHIM_WS/dep-graph.json" fe >/dev/null 2>&1
+shim_argv=$(cat "$SHIM_OUT_FILE")
+asp_count=$(grep -c -- '--append-system-prompt' <<<"$shim_argv" || true)
+[[ "$asp_count" == "1" ]] || fail "shim: expected exactly one --append-system-prompt (got $asp_count)"
+grep -q -- '--setting-sources' <<<"$shim_argv" || fail "shim: no --setting-sources"
+grep -q 'user,project' <<<"$shim_argv" || fail "shim: wrong setting-sources value"
+grep -q 'Multi-Repo Orchestrator' <<<"$shim_argv" || fail "shim: orchestrator prompt missing"
+grep -q '正體中文' <<<"$shim_argv" || fail "shim: lang directive missing"
+
+rm -rf "$SHIM_DIR" "$SHIM_WS" "$SHIM_OUT_FILE"
+unset MRA_CLAUDE_BIN SHIM_OUT
+
 if [[ $errors -eq 0 ]]; then
   echo "PASS: all launch tests passed"
 else
