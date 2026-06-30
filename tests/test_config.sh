@@ -45,6 +45,18 @@ tmp_before=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -
 config_set "autoScan" 'not-json' "$TEST_CONFIG" 2>/dev/null || true
 tmp_after=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -l | tr -d ' ')
 if [[ "$tmp_after" -gt "$tmp_before" ]]; then echo "FAIL: config_set leaked a temp file on jq failure"; errors=$((errors+1)); fi
+
+# config_handle ghAccounts accepts a JSON object (the per-repo gh-login map mra prd-issues reads)
+if ! MRA_CONFIG="$TEST_CONFIG" config_handle "ghAccounts" '{"onead":"HanfourHuangOneAD"}' >/dev/null 2>&1; then
+  echo "FAIL: config_handle ghAccounts should accept a JSON object"; errors=$((errors+1))
+fi
+result=$(config_get "ghAccounts" "$TEST_CONFIG" | jq -r '.onead')
+if [[ "$result" != "HanfourHuangOneAD" ]]; then echo "FAIL: ghAccounts.onead should be HanfourHuangOneAD, got $result"; errors=$((errors+1)); fi
+# a non-object value is rejected (not silently stored)
+if MRA_CONFIG="$TEST_CONFIG" config_handle "ghAccounts" 'not-an-object' >/dev/null 2>&1; then
+  echo "FAIL: config_handle ghAccounts should reject a non-object value"; errors=$((errors+1))
+fi
+
 rm -f "$TEST_CONFIG"
 if [[ $errors -eq 0 ]]; then echo "PASS: all config tests passed"
 else echo "FAIL: $errors tests failed"; exit 1; fi
