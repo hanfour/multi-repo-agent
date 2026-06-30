@@ -895,7 +895,12 @@ main() {
       else
         validate_repo_subset "$workspace" "${prd_projects[@]}" || exit 1
       fi
-      [[ "$no_sync" == true ]] || sync_from_repos_json "$workspace" >/dev/null 2>&1 || true
+      if [[ "$no_sync" != true ]]; then
+        # Pass git_org (sync_from_repos_json takes "$2"; omitting it aborts under set -u),
+        # and run in a subshell so an internal exit/error can NEVER kill `mra prd` (non-fatal).
+        local prd_git_org; prd_git_org=$(jq -r '.gitOrg' "$graph_file" 2>/dev/null)
+        ( sync_from_repos_json "$workspace" "$prd_git_org" ) >/dev/null 2>&1 || true
+      fi
       prd_launch "$workspace" "$graph_file" "${prd_projects[@]}"
       ;;
 
