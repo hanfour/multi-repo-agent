@@ -481,6 +481,8 @@ Generate templates: `mra template`
 | `mra ask <project> "<question>"` | Codebase query |
 | `mra export [project]` | Export project context |
 | `mra dev <project> "<task>" [--no-pr] [--auto-approve] [--resume] [--dry-run]` | Autonomous headless implement→review→fix→PR loop (single repo; debate+verifier gate) |
+| `mra prd [projects…] [--no-sync]` | Interactive cross-repo PRD/spec planner — brainstorms FE/BE/data, writes HTML PRD + per-repo specs + a task plan under `.collab/`, opens **no** issues |
+| `mra prd-issues --req <ID> [--confirm]` | Apply step (operator-run, TTY-gated): open the planned dependency-ordered GitHub issues |
 
 ### Code Review & Analysis
 
@@ -708,6 +710,12 @@ the `claude` session mra launches. It does **not** affect Agent Skills
 (`.claude/skills/`, already auto-loaded via `--add-dir`) or `settings.local.json`.
 The interactive orchestrator uses `--setting-sources user,project`, so a repo's
 gitignored `CLAUDE.local.md` is never pulled into the shared cross-repo context.
+
+### Issue creation accounts
+
+`mra config ghAccounts '{"acme":"acme-bot"}'` maps an owner-org to a `gh` login for per-repo issue creation (used by `mra prd-issues`). Without an entry for an owner, the default authenticated account is used.
+
+> **⚠ Do not allowlist `gh` or `mra prd-issues`** in your Claude Code `settings.json`. The `mra prd-issues` create gate relies on an interactive TTY prompt — allowlisting `gh` bypasses that gate and enables unsupervised issue creation.
 
 </details>
 
