@@ -30,7 +30,9 @@ config_get() { echo ""; }; display_deps() { :; }
 prd_launch "$WS" "$WS/g.json" fe be >/dev/null 2>&1
 argv=$(cat "$SHIM_OUT")
 grep -q 'PM/brainstorm\|mra prd session\|prd-issues --req' <<<"$argv" && ok "prd-agent prompt/fragments injected" || fail "prd prompt missing"
-[[ "$(grep -c -- '--add-dir' <<<"$argv")" == "2" ]] && ok "two --add-dir (fe,be)" || fail "wrong add-dir count"
+# -cx: whole-line match counts only the actual --add-dir FLAG lines, not prompt
+# text that mentions "--add-dir" (agents/prd-agent.md does, inside the injected prompt).
+[[ "$(grep -cx -- '--add-dir' <<<"$argv")" == "2" ]] && ok "two --add-dir (fe,be)" || fail "wrong add-dir count (got $(grep -cx -- '--add-dir' <<<"$argv"))"
 grep -q 'user,project' <<<"$argv" && ok "setting-sources" || fail "no setting-sources"
 [[ -n "${MRA_PRD_REQ_ID:-}" ]] && ok "exports MRA_PRD_REQ_ID" || fail "no MRA_PRD_REQ_ID"
 assert_eq "exports MRA_PRD_PROJECTS" "fe be" "${MRA_PRD_PROJECTS:-}"

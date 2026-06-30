@@ -102,7 +102,7 @@ config_get() { [[ "$1" == "outputLanguage" ]] && echo "正體中文" || echo "";
 
 launch_claude "$SHIM_WS" "$SHIM_WS/dep-graph.json" fe >/dev/null 2>&1
 shim_argv=$(cat "$SHIM_OUT_FILE")
-asp_count=$(grep -c -- '--append-system-prompt' <<<"$shim_argv" || true)
+asp_count=$(grep -cx -- '--append-system-prompt' <<<"$shim_argv" || true)
 [[ "$asp_count" == "1" ]] || fail "shim: expected exactly one --append-system-prompt (got $asp_count)"
 grep -q -- '--setting-sources' <<<"$shim_argv" || fail "shim: no --setting-sources"
 grep -q 'user,project' <<<"$shim_argv" || fail "shim: wrong setting-sources value"
