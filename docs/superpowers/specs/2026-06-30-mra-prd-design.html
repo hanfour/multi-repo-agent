@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>`mra prd` — Interactive Cross-Repo PRD / Spec / Issues Planner — Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
+    <div class="toc-title">`mra prd` — Interactive Cross-Repo PRD / Spec / Issues Planner — Design</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#1-problem">1. Problem</a></li>
+<li><a href="#2-goals-non-goals">2. Goals / Non-goals</a></li>
+<li><a href="#3-command-surface">3. Command surface</a></li>
+<li><a href="#4-the-planapply-split-and-why-the-load-bearing-safety-decision">4. The plan/apply split — and why (the load-bearing safety decision)</a></li>
+<li><a href="#5-architecture">5. Architecture</a></li>
+<li><a href="#6-interactive-plan-flow-mra-prd-driven-by-agentsprd-agentmd">6. Interactive plan flow (mra prd, driven by agents/prd-agent.md)</a></li>
+<li><a href="#7-apply-flow-mra-prd-issues-operator-run">7. Apply flow (mra prd-issues, operator-run)</a></li>
+<li><a href="#8-artifacts-workspace-collab">8. Artifacts (workspace .collab/)</a></li>
+<li><a href="#9-safety">9. Safety</a></li>
+<li><a href="#10-failure-handling">10. Failure handling</a></li>
+<li><a href="#11-integration-with-mra-dev-backlog">11. Integration with mra dev (backlog)</a></li>
+<li><a href="#12-testing">12. Testing</a></li>
+<li><a href="#13-task-breakdown">13. Task breakdown</a></li>
+<li><a href="#14-residual-risks">14. Residual risks</a></li>
+<li><a href="#15-provenance-critic-gaps-closed">15. Provenance &amp; critic gaps closed</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">技術詳規格</div>
+      <h1>`mra prd` — Interactive Cross-Repo PRD / Spec / Issues Planner — Design</h1>
+      <div class="meta"></div>
+    </div>
+    <p><strong>Date:</strong> 2026-06-30
+<strong>Status:</strong> Approved design (v1), deepened by multi-agent council. Pending implementation.
+<strong>Scope:</strong> A <strong>plan → apply</strong> pair of commands:
+- <strong><code>mra prd [projects…]</code></strong> — an <strong>interactive</strong> guided session that brainstorms a cross-repo feature (frontend + backend + data architecture), writes an <strong>HTML PRD</strong> + <strong>per-repo HTML specs</strong> + a machine-readable <strong>task plan</strong>, and prints the issue plan. It does <strong>not</strong> open issues.
+- <strong><code>mra prd-issues --req &lt;REQ-ID&gt; [--confirm] [--dry-run]</code></strong> — an <strong>operator-run</strong> apply step that opens the dependency-ordered GitHub issues. The human running this command in their own shell <strong>is</strong> the create gate.</p>
+<p>It is the upstream of <code>mra dev</code>: <code>mra prd</code> decides <em>what</em> to build and lands the artifacts/plan; the operator applies the issues; <code>mra dev</code> implements them.
+<strong>Relationship to existing commands:</strong> the existing <code>mra plan</code> (5-persona strategy council) and <code>agents/pm-agent.md</code> are <strong>left untouched</strong>. <code>mra prd</code> reuses pm-agent's Requirement-Card + Task-Plan-JSON formats, the launch infrastructure, PKB, the dep-graph, and <code>render-html.py</code>.
+<strong>Provenance:</strong> deepened by a multi-agent council — genuine 3-way vote (<strong>P2 <em>safety-first</em> won 8.7 / Borda 11</strong>; P3 <em>max-reuse</em> 8.5 / 8; P1 <em>YAGNI</em> 7.9 / 5), then hardened by an adversarial critic (7 gaps closed, §15). Every decision is grounded in real <code>mra</code> source.</p>
+<hr />
+<h2 id="1-problem">1. Problem</h2>
+<p><code>mra</code> has no upstream planning command. The closest capability (<code>agents/pm-agent.md</code>) only runs dispatched-by-the-orchestrator inside a session, produces markdown only, and cannot open issues. <code>mra dev</code> consumes a <em>task</em> but nothing produces those tasks in a structured, cross-repo, human-validated way. <code>mra prd</code> fills the gap — and, crucially, does so without handing an autonomous agent the keys to create irreversible, possibly-public GitHub issues (§4).</p>
+<h2 id="2-goals-non-goals">2. Goals / Non-goals</h2>
+<p><strong>Goals</strong>
+- <code>mra prd [projects…]</code> runs an <strong>interactive</strong> brainstorm (FE/BE/data, one question at a time), grounded in the loaded repos (dep-graph + PKB).
+- Produce a <strong>workspace-level HTML PRD</strong> + <strong>per-repo HTML specs</strong> + a <strong>Task-Plan JSON</strong> (pm-agent schema), all under <code>&lt;workspace&gt;/.collab/</code>.
+- Open <strong>dependency-ordered GitHub issues</strong> — one per task in the owning repo — via a <strong>separate operator-run apply step</strong> with a genuine human gate.
+- Be the clean upstream of <code>mra dev</code>.</p>
+<p><strong>Non-goals (v1)</strong>
+- Headless one-shot generation (the planner is interactive by design).
+- Letting the <strong>agent</strong> create issues directly (the safety finding in §4 — the agent plans; the operator applies).
+- Implementing anything (<code>mra dev</code>'s job).
+- <code>mra dev --issue N</code> integration (backlog; the create→number contract + <code>mra-prd</code> label are designed to support it later).
+- Touching <code>mra plan</code> / <code>pm-agent.md</code> / the orchestrator.</p>
+<h2 id="3-command-surface">3. Command surface</h2>
+<div class="highlight"><pre><span></span><code>mra prd [projects…] [--no-sync]
+mra prd-issues --req &lt;REQ-ID&gt; [--confirm] [--dry-run]
+</code></pre></div>
+
+<p><strong><code>mra prd</code></strong> — <code>[projects…]</code> resolved like the default launch (workspace + dep-graph + <code>--add-dir</code>). Named projects are validated up front via the existing <code>validate_repo_subset</code> (<code>lib/pr-ops.sh:41</code>, fails loud on any missing/non-repo); empty → all repos (<code>list_all_projects</code>, mirroring <code>--all</code>, not the literal empty-array path). <code>--no-sync</code> skips the non-fatal pre-sync. The planner never creates issues, so it has no <code>--dry-run</code> of its own — preview/create lives entirely in <code>mra prd-issues</code>.</p>
+<p><strong><code>mra prd-issues</code></strong> — the apply step, <strong>run by the operator</strong>, not the agent. <code>--req</code> selects the REQ to apply (reads <code>&lt;workspace&gt;/.collab/requirements/REQ-…-tasks.json</code>). Without <code>--confirm</code> it prints the full shell-computed plan and creates nothing (preview). With <code>--confirm</code> it creates the issues — <strong>but only from an interactive terminal</strong>: the create path requires a TTY <code>Create N issues across M repos? [y/N]</code> confirmation (<code>[ -t 0 ]</code>), so a non-TTY caller (an agent's Bash tool, CI) can never create. <code>--dry-run</code> forces preview even with <code>--confirm</code>.</p>
+<h2 id="4-the-planapply-split-and-why-the-load-bearing-safety-decision">4. The plan/apply split — and why (the load-bearing safety decision)</h2>
+<p>The council's first design had the <strong>interactive agent</strong> call a hidden <code>mra prd-issues</code> after an in-session "yes". The adversarial critic showed this gate is <strong>illusory</strong> for two compounding reasons (both verified):
+1. The confirm token lives in the <strong>agent's own environment</strong>, so the agent can pass <code>--confirm</code> without a genuine human yes.
+2. The only true human barrier left is the harness <strong>OS permission prompt</strong> on the agent's Bash call — but the interactive launch passes <strong>no <code>--allowedTools</code></strong> (<code>lib/launch.sh:101-102</code>), so it is governed entirely by <strong>user settings</strong>, and <strong>this operator's documented practice is to allowlist tools</strong> (<code>rules/common/hooks.md</code>, MEMORY). A single <code>Bash</code>/<code>mra</code> allowlist entry suppresses the prompt → <strong>zero human gate</strong> for an irreversible, possibly-public write.
+3. <code>--dry-run</code> was only an env var the agent could <code>unset</code>.</p>
+<p><strong>Resolution (this design):</strong> <strong>the agent never creates issues.</strong> <code>mra prd</code> (interactive) ends by writing the Task-Plan JSON and printing:</p>
+<blockquote>
+<p>Review the PRD: <code>&lt;…REQ-…html&gt;</code>. To create the N issues, run: <code>mra prd-issues --req REQ-YYYY-NNNN --confirm</code></p>
+</blockquote>
+<p>The operator runs <code>mra prd-issues</code> <strong>in their own shell</strong>. Mechanically, the create path <strong>requires an interactive TTY</strong>: it prompts <code>[y/N]</code> and reads from the terminal, and <strong>refuses to create when stdin is not a TTY</strong> (<code>[ -t 0 ]</code>). The agent's Bash tool is not a TTY, so even if <code>prd-issues</code>/<code>gh</code> are allowlisted and the agent invokes <code>--confirm</code>, it gets the printed plan and exits — it cannot create. Only a human at a real terminal can. This is the standard <em>plan/apply</em> split (terraform-style) applied to an irreversible public boundary, with the TTY check making it agent- and allowlist-proof regardless of settings. As defense-in-depth, <code>mra doctor</code> warns if <code>mra</code>/<code>gh</code>/<code>prd-issues</code> appear in the user allowlist. (A documented <code>--yes</code> escape for deliberate automation is backlog.)</p>
+<blockquote>
+<p>This <strong>supersedes</strong> the earlier "agent opens issues after in-session confirm." If you prefer the in-session flow despite the finding, that is the one decision to flag on review.</p>
+</blockquote>
+<h2 id="5-architecture">5. Architecture</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Action</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/launch.sh</code></td>
+<td><strong>modify</strong></td>
+<td>Extract <code>_launch_interactive(workspace, graph, sys_prompt_file, extra_fragments[], projects…)</code> holding the shared add-dir / <code>--setting-sources user,project</code> / PKB-injection / fragment-join / exec assembly. <code>launch_claude</code> becomes a thin wrapper passing <code>agents/orchestrator.md</code>. <strong>Regression-gated</strong> (§12): before extracting, <code>test_launch.sh</code> must assert the single <code>--append-system-prompt</code> join (launch.sh:90-99), the <code>--setting-sources</code> flag (launch.sh:33), and PKB-present injection (launch.sh:72-87) via a <code>CLAUDE_BIN</code> stub — so "no behavior change" is enforced, not assumed.</td>
+</tr>
+<tr>
+<td><code>lib/prd.sh</code></td>
+<td><strong>create</strong></td>
+<td><code>_prd_alloc_req_id</code> (atomic REQ-YYYY-NNNN via <code>mkdir</code>-lock in <code>.collab/requirements/.locks/</code>, max+1 scan, retry on EEXIST, per-year reset, on-exit cleanup of an empty reservation); pure <code>_prd_build_launch_argv</code>; <code>prd_launch</code> (export <code>MRA_PRD_REQ_ID</code> + <code>MRA_PRD_PROJECTS</code> (resolved scope); build abs-workspace + abs-<code>mra</code>-path + "present-and-stop" narration fragments; <code>( cd "$workspace" &amp;&amp; _launch_interactive agents/prd-agent.md … )</code> interactive).</td>
+</tr>
+<tr>
+<td><code>agents/prd-agent.md</code></td>
+<td><strong>create</strong></td>
+<td>Interactive PM/brainstorm prompt: FE/BE/data one-question-at-a-time, surface-assumptions discipline, reuse pm-agent Requirement-Card + Task-Plan-JSON formats, treat <code>MRA_PRD_REQ_ID</code> + abs workspace as given, write <code>.collab/</code> <code>.md</code>, call <code>prd_render_html</code>, then <strong>present the shell-printed issue plan and STOP</strong>, instructing the operator to run <code>mra prd-issues</code>. Forbids secrets/PII in PRD/issue bodies.</td>
+</tr>
+<tr>
+<td><code>lib/prd-issues.sh</code></td>
+<td><strong>create</strong></td>
+<td><code>prd_render_html</code> (render-html.py wrapper: <code>import markdown</code> preflight, <code>.collab</code> path-prefix guard, <strong>non-empty source AND non-empty sibling <code>.html</code></strong> post-verify); <code>mra_prd_open_issues</code> (validate → topo-order → accounts → labels → PII scan → two-pass create+link → ledger; the create gate).</td>
+</tr>
+<tr>
+<td><code>bin/mra.sh</code></td>
+<td><strong>modify</strong></td>
+<td>Source the two libs; add <code>prd)</code> dispatch (validate_repo_subset, empty→all, sync-unless-<code>--no-sync</code>, alloc, <code>prd_launch</code>) and a <strong>public</strong> <code>prd-issues)</code> dispatch → <code>mra_prd_open_issues</code>; usage rows. <code>mra plan</code> untouched.</td>
+</tr>
+<tr>
+<td><code>lib/doctor.sh</code></td>
+<td><strong>modify</strong></td>
+<td>Warn when <code>mra</code>/<code>gh</code>/<code>prd-issues</code> are present in the user allowlist (defense-in-depth for §4).</td>
+</tr>
+<tr>
+<td><code>tests/test_prd_*.sh</code></td>
+<td><strong>create</strong></td>
+<td><code>test_prd_cli.sh</code>, <code>test_prd_issues.sh</code>, <code>test_prd_render.sh</code> (§12).</td>
+</tr>
+<tr>
+<td><code>README.md</code> / <code>CHANGELOG.md</code></td>
+<td><strong>modify</strong></td>
+<td>Command rows, the <code>ghAccounts</code> config key, the allowlist posture.</td>
+</tr>
+</tbody>
+</table>
+<p>Reused as-is: <code>lib/launch.sh</code> assembly, <code>lib/pkb.sh</code>, dep-graph, <code>render-html.py</code>, pm-agent formats, <code>validate_repo_subset</code>/<code>list_all_projects</code>/<code>sync_from_repos_json</code>, <code>order_repos_by_deps</code> structure, the <code>review.sh</code> owner-from-origin sed idiom, the <code>dev.sh</code> GH_TOKEN-pinning precedent.</p>
+<h2 id="6-interactive-plan-flow-mra-prd-driven-by-agentsprd-agentmd">6. Interactive plan flow (<code>mra prd</code>, driven by <code>agents/prd-agent.md</code>)</h2>
+<div class="highlight"><pre><span></span><code>0. Init: read .collab/dep-graph.json + each loaded repo&#39;s PKB/CLAUDE.md; identify affected
+   repos + roles (frontend/backend/service/data) from the graph.
+1. Intent &amp; scope: purpose, users, success criteria; confirm in-scope repos (surface
+   assumptions, ask before guessing).
+2. Frontend Q&amp;A  (components / routes / state / interactions)        ← one question at a time
+3. Backend Q&amp;A   (API contracts / services / auth / side effects)
+4. Data Q&amp;A      (schema / models / migrations / ownership / consistency)
+5. Write artifacts: .collab/requirements/REQ-…md (PRD), .collab/specs/REQ-…-&lt;repo&gt;.md
+   (per repo), .collab/requirements/REQ-…-tasks.json (requirement_id == MRA_PRD_REQ_ID).
+6. Render HTML: prd_render_html on the PRD + every spec (always, even under --dry-run).
+7. PRESENT the shell-printed issue plan (from `mra prd-issues --req … --dry-run`) and STOP,
+   telling the operator to run `mra prd-issues --req REQ-… --confirm`. The agent does NOT create.
+</code></pre></div>
+
+<p>The agent surfaces assumptions before acting (mirrors <code>orchestrator.md</code>), and never creates issues.</p>
+<h2 id="7-apply-flow-mra-prd-issues-operator-run">7. Apply flow (<code>mra prd-issues</code>, operator-run)</h2>
+<p><code>mra_prd_open_issues</code> does, in order, <strong>all mechanical facts in shell (never agent prose)</strong>:
+1. <strong>Validate</strong> the Task-Plan JSON before any <code>gh</code> call (D14): each task has <code>id/project/tier/dependencies/acceptance_criteria</code>; every <code>task.project</code> is a member of <code>MRA_PRD_PROJECTS</code> (the resolved launch scope — not merely any workspace repo, so blast radius can't widen); every <code>dependencies</code> id exists in the plan; <code>requirement_id == --req</code>. Abort cleanly naming the bad field; no self-heal.
+2. <strong>Topo-order</strong> tasks by the intra-plan task-id DAG (Kahn) with <code>tier</code> ascending as tie-break (mirrors <code>order_repos_by_deps</code>' structure, <code>pr-ops.sh</code>). <strong>On a cycle</strong>: warn and fall back to input order (matching <code>pr-ops.sh:23-26</code>), still create all N. The workspace dep-graph <code>consumedBy</code>/<code>deps</code> is a non-blocking sanity warning on contradiction.
+3. <strong>Accounts</strong> (D9): per target repo, resolve owner from the <code>origin</code> remote (<code>review.sh:44-45</code> sed idiom), map owner-org → gh login via a <strong>new config key <code>ghAccounts</code></strong> (JSON object), set <code>GH_TOKEN=$(gh auth token --user &lt;login&gt;)</code> per <code>gh</code> call. <strong>Abort loudly</strong> if (a) no mapping for the owner, <strong>or (b)</strong> the token resolves empty / non-zero exit (login never authenticated) — with a <code>gh auth login --user &lt;login&gt;</code> hint — before any create, so <code>gh</code> can never fall back to the active/wrong account.
+4. <strong>Labels</strong> (D13): <code>gh label create mra-prd --force</code> + <code>tier:&lt;n&gt; --force</code> per repo (idempotent), so a missing label can't abort mid-batch.
+5. <strong>PII/secret scan</strong> (grafted): scan each issue/PRD body for the same patterns as the public-push hygiene (real names / <code>@</code>-emails / internal hosts / token shapes); abort and report if hit. Human still reviews the printed plan.
+6. <strong>Confirm gate</strong>: re-print the FULL shell-computed plan; the create path requires <code>--confirm</code> AND not <code>--dry-run</code> AND <strong>an interactive TTY</strong> <code>[y/N]</code> confirmation (<code>[ -t 0 ]</code>). A non-TTY caller (agent Bash, CI) prints the plan and exits 0 with zero creates — this is what makes the gate agent- and allowlist-proof. (A documented <code>--yes</code> escape for deliberate automation is backlog.)
+7. <strong>Two-pass create + link</strong> (D11/D12): pass 1 creates all issues dep-ordered, parsing the trailing <code>/issues/&lt;N&gt;</code> from <code>gh issue create</code> stdout into an <strong>immutable sidecar ledger</strong> <code>.collab/requirements/REQ-…-issues.json</code> (<code>task-id → {owner/repo, number, url}</code>) plus a hidden body marker (<code>&lt;!-- mra-prd REQ-id:task-id --&gt;</code>); pass 2 <code>gh issue edit --body</code> injects plain-text <code>Depends on: owner/repo#N</code> from the ledger (idempotent, best-effort). Re-run after partial failure consults the ledger, <strong>skips already-created task-ids</strong>, and resumes — so a retry never files duplicate public issues. The <code>mra-prd</code> label is the stable resume-discovery filter (<code>gh issue list --label mra-prd</code> can rebuild the ledger).</p>
+<h2 id="8-artifacts-workspace-collab">8. Artifacts (workspace <code>.collab/</code>)</h2>
+<ul>
+<li><strong>PRD</strong> — <code>&lt;workspace&gt;/.collab/requirements/REQ-YYYY-NNNN.md</code> → <code>.html</code>. Sections: Problem / Goals &amp; Non-goals / Users / <strong>Frontend architecture</strong> / <strong>Backend architecture</strong> / <strong>Data architecture</strong> / Cross-repo impact (from <code>consumedBy</code>/<code>deps</code>) / Task decomposition / Open questions.</li>
+<li><strong>Spec</strong> — per affected repo: <code>&lt;workspace&gt;/.collab/specs/REQ-YYYY-NNNN-&lt;repo&gt;.md</code> → <code>.html</code> (API contracts, models, file-level changes, test plan).</li>
+<li><strong>Task Plan</strong> — <code>&lt;workspace&gt;/.collab/requirements/REQ-YYYY-NNNN-tasks.json</code> (pm-agent <code>tasks[]</code> schema) — the machine source for the apply step.</li>
+<li><strong>Issue ledger</strong> — <code>&lt;workspace&gt;/.collab/requirements/REQ-YYYY-NNNN-issues.json</code> (written by the apply step).</li>
+<li>REQ-id is allocated atomically by <code>_prd_alloc_req_id</code> (mkdir-lock, §5) and re-validated for uniqueness (no existing ledger) before any create. HTML via the existing <code>render-html.py</code> (writes <code>.html</code> beside the source). Artifacts are confined to <code>.collab/</code> by <code>cd</code> + an abs-path fragment + <code>prd_render_html</code>'s path-prefix guard — <strong>never</strong> a repo's git tree, never a commit/push.</li>
+</ul>
+<h2 id="9-safety">9. Safety</h2>
+<ul>
+<li><strong>Genuine human create-gate (§4):</strong> the create path requires an interactive TTY <code>[y/N]</code> (<code>[ -t 0 ]</code>); a non-TTY caller (agent Bash, CI) cannot create — agent-uncircumventable and allowlist-proof regardless of settings. <code>mra doctor</code> additionally warns if <code>mra</code>/<code>gh</code>/<code>prd-issues</code> are allowlisted.</li>
+<li><strong><code>--dry-run</code> / no-<code>--confirm</code> create nothing</strong>; TTY runs add a <code>[y/N]</code> prompt.</li>
+<li><strong>Correct-account writes:</strong> per-repo <code>GH_TOKEN</code> from <code>ghAccounts</code>, abort on missing mapping OR unresolvable token — never file under the active/wrong account.</li>
+<li><strong>Bounded blast radius:</strong> <code>task.project</code> must be in the resolved <code>MRA_PRD_PROJECTS</code> scope; full schema/dep-id/requirement_id validation before any <code>gh</code> call → no half-created sets.</li>
+<li><strong>No duplicate public issues on resume:</strong> immutable ledger keyed on task-id + hidden body marker.</li>
+<li><strong>No repo mutation:</strong> artifacts confined to <code>.collab/</code>.</li>
+<li><strong>PII/secret scan</strong> before any create, plus the agent prompt forbids secrets/PII and the human reviews the printed plan.</li>
+<li><strong>Concurrency-safe REQ ids:</strong> atomic mkdir-lock + helper re-validation.</li>
+</ul>
+<h2 id="10-failure-handling">10. Failure handling</h2>
+<p>Named-but-missing project → <code>validate_repo_subset</code> reports all and aborts before launch. Sync failure → non-fatal. <code>markdown</code> import missing or <code>.html</code> empty/skip → <code>prd_render_html</code> fails loudly with an install hint (<code>render-html.py</code> returns 0 on a <strong>missing</strong> source and writes a non-empty template for an <strong>empty</strong> source — so the wrapper checks <strong>both</strong> source-non-empty and sibling-<code>.html</code>-non-empty). Malformed tasks.json / unknown dep-id / out-of-scope <code>task.project</code> / <code>requirement_id</code> mismatch → abort before the first create, naming the bad field. No <code>ghAccounts</code> mapping or unresolvable token → abort that loop loudly. <code>gh create</code> fails mid-batch → ledger holds successes; re-run skips them and surfaces remaining task-ids. <code>gh issue edit</code> (pass 2) failure → non-blocking, logged. REQ-id mkdir clash → retry next number; abandoned reservation cleaned on normal exit (accepted gap on crash).</p>
+<h2 id="11-integration-with-mra-dev-backlog">11. Integration with <code>mra dev</code> (backlog)</h2>
+<p>Issues filed here are the input to a future <code>mra dev --issue &lt;N&gt;</code> (fetch issue title/body as the task). The create→number contract + <code>mra-prd</code>/<code>tier:&lt;n&gt;</code> labels are designed to support it; the <code>prd → issue → dev</code> loop is not closed in v1.</p>
+<h2 id="12-testing">12. Testing</h2>
+<p>Plain-bash (<code>ok</code>/<code>fail</code>/<code>assert_eq</code>, no <code>.bats</code>); the interactive <code>claude</code> launch is not executed in CI — only arg/context assembly and the gh/helper seam are tested.
+- <strong><code>test_prd_cli.sh</code></strong> — prd arg parsing; empty→all, named-missing aborts via <code>validate_repo_subset</code>; <code>_prd_build_launch_argv</code> asserts add-dir count, <strong><code>prd-agent.md</code> not <code>orchestrator.md</code></strong>, <code>--setting-sources user,project</code>, a single <code>--append-system-prompt</code>, lang directive, <code>REQ_ID</code>/<code>PROJECTS</code> propagation (via <code>MRA_PRD_CLAUDE_BIN</code> stub); concurrent <code>_prd_alloc_req_id</code> yields distinct ids.
+- <strong><code>test_prd_issues.sh</code></strong> — gh mocked as a bash function recording argv + echoing <code>https://github.com/&lt;owner&gt;/&lt;repo&gt;/issues/&lt;counter&gt;</code>: ordering, stdout-<code>#</code>-parse, two-pass <code>owner/repo#N</code> linking, label-ensure, per-repo <code>GH_TOKEN</code> pin + <strong>unmapped-owner abort + unresolvable-token abort</strong>, ledger resume keyed on task-id, schema/dep-id/<strong>scope (MRA_PRD_PROJECTS)</strong>/requirement_id validation aborts, <strong>cycle fixture</strong> (all N still created + linked, fallback order + warning), PII-scan abort, and the <strong>zero-create invariants</strong> (no <code>--confirm</code>; <code>--dry-run</code>; <strong>non-TTY even with <code>--confirm</code></strong> — the create path checks <code>[ -t 0 ]</code>).
+- <strong><code>test_prd_render.sh</code></strong> — <code>prd_render_html</code> on a fixture produces a non-empty sibling <code>.html</code>; <strong>refuses a source outside <code>&lt;workspace&gt;/.collab</code></strong>; <code>markdown</code>-import preflight fails loudly; <strong>missing source AND empty source</strong> are both caught by post-verify (separate cases).
+- <strong><code>test_launch.sh</code></strong> (pre-work, §5 D1) — assert the prompt-join, <code>--setting-sources</code>, and PKB-injection BEFORE the <code>_launch_interactive</code> extraction.</p>
+<h2 id="13-task-breakdown">13. Task breakdown</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Task</th>
+<th>Deps</th>
+<th>Acceptance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>lib/prd-issues.sh</code>: <code>prd_render_html</code> + <code>mra_prd_open_issues</code> (print-first, mock-gh) — <strong>build the irreversible boundary first</strong></td>
+<td>—</td>
+<td><code>test_prd_issues.sh</code> + <code>test_prd_render.sh</code> green: validate (fields+scope+dep-id+requirement_id), topo+cycle-fallback, per-repo GH_TOKEN pin + unmapped/unresolvable abort, label <code>--force</code>, PII scan, two-pass create+stdout-#-parse + ledger/marker + <code>owner/repo#N</code> links; dry-run, no-confirm, and non-TTY-with-confirm create nothing; render produces non-empty <code>.html</code> with path guard + missing/empty source detection.</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>lib/launch.sh</code>: add the §5 regression assertions to <code>test_launch.sh</code>, then extract <code>_launch_interactive</code>; <code>launch_claude</code> → thin wrapper</td>
+<td>—</td>
+<td>Existing launch tests (with the new prompt-join/setting-sources/PKB assertions) pass; no behavior change for <code>mra &lt;projects…&gt;</code>.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>lib/prd.sh</code>: <code>_prd_alloc_req_id</code> (mkdir-lock + on-exit cleanup), pure <code>_prd_build_launch_argv</code>, <code>prd_launch</code> (export token/dry-run/req-id/<strong>projects</strong>, cd+exec)</td>
+<td>1</td>
+<td><code>test_prd_cli.sh</code> passes via stub; argv asserts add-dir/PKB/lang/req-id/projects/workspace+mra-path fragments; REQ-id atomic + distinct under concurrency.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>agents/prd-agent.md</code>: interactive FE/BE/data brainstorm reusing pm-agent formats; render + <strong>present-and-stop</strong> (instruct operator to run <code>mra prd-issues</code>); forbids secrets/PII</td>
+<td>0,2</td>
+<td>Prompt writes <code>.collab</code> <code>.md</code>, calls <code>prd_render_html</code>, treats <code>MRA_PRD_REQ_ID</code> + abs workspace as given, presents the plan and STOPS (does not create).</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>bin/mra.sh</code>: <code>prd)</code> dispatch + public <code>prd-issues)</code> dispatch; source libs; usage. <code>lib/doctor.sh</code>: allowlist warning</td>
+<td>0,3</td>
+<td><code>mra prd</code> launches via stub; empty→all, named-missing aborts; <code>mra prd-issues</code> routes to the helper; usage lists both; <code>mra plan</code> untouched; <code>mra doctor</code> warns on allowlisted <code>gh</code>/<code>prd-issues</code>; full <code>test.sh</code> green.</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Docs: README <code>mra prd</code>/<code>mra prd-issues</code> rows + <code>ghAccounts</code> key + allowlist posture; CHANGELOG; re-render this spec <code>.md</code>→<code>.html</code></td>
+<td>4</td>
+<td>README/CHANGELOG updated; <code>render-html.py</code> run on this spec (MEMORY <code>feedback_render_html</code>).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="14-residual-risks">14. Residual risks</h2>
+<ul>
+<li><strong><code>mra</code>-on-PATH handoff</strong> (council-flagged): <code>mra prd</code> instructs the operator to run <code>mra prd-issues</code>; if the operator's <code>mra</code> isn't on PATH the apply step needs the absolute path (printed in the instruction). Covered by the direct-subcommand tests, not a live agent run.</li>
+<li><strong>In-session "yes" is gone as a risk</strong> — the agent no longer creates; the operator-run apply is the gate. (This is the main improvement over the council's first design.)</li>
+<li><strong><code>gh issue create</code> stdout-URL format is pinned by assumption</strong> (no precedent; grep-confirmed). A gh CLI change to stdout breaks number parsing and the mock contract.</li>
+<li><strong><code>ghAccounts</code> is a new operator config key</strong> — unmapped owner safely aborts but is a setup burden; needs clear <code>doctor</code>/preflight messaging.</li>
+<li><strong>PII scan is pattern-based</strong> — reduces but doesn't eliminate the possibly-public-write risk; the human review of the printed plan remains the backstop.</li>
+<li><strong><code>render-html.py</code> hardcodes <code>lang=zh-Hant</code></strong> and a generic eyebrow (render-html.py:259,333-342) — accepted for v1; revisit for non-zh PRDs without forking the renderer.</li>
+<li><strong><code>_launch_interactive</code> extraction touches the shared default-launch path</strong> — regression risk bounded only by the (now-strengthened) launch tests staying green.</li>
+<li><strong><code>mra dev --issue N</code></strong> is backlog; the <code>prd → issue → dev</code> loop is not closed in v1.</li>
+</ul>
+<h2 id="15-provenance-critic-gaps-closed">15. Provenance &amp; critic gaps closed</h2>
+<p>Council vote: <strong>P2 (safety-first) won</strong> 8.7/Borda 11 (P3 8.5/8, P1 7.9/5; 4 judges, all 3 plans scored). Synthesized on P2's backbone with P3/P1 grafts (max-reuse <code>_launch_interactive</code> extraction; YAGNI deferrals). The adversarial critic's 7 gaps are all folded in:
+1. <strong>(HIGH)</strong> <code>--dry-run</code> was a soft env var + token minted under dry-run → could create. <strong>Closed</strong> by the §4 plan/apply split (agent never creates; the create path requires an interactive TTY) — the operator-run apply is the gate.
+2. <strong>(HIGH)</strong> in-session confirm gate illusory (token in agent env + user allowlists suppress the OS prompt). <strong>Closed</strong> by §4: the create path requires an interactive TTY (<code>[ -t 0 ]</code>), so a non-TTY agent Bash call can't create regardless of allowlist, + <code>mra doctor</code> warning.
+3. <strong>(MED)</strong> <code>task.project</code> scope guard degraded to existence-only. <strong>Closed</strong> by exporting <code>MRA_PRD_PROJECTS</code> and asserting membership (§7.1).
+4. <strong>(MED)</strong> <code>gh auth token --user</code> could fail silently → wrong-account write. <strong>Closed</strong> by checking exit/emptiness and aborting with a re-auth hint (§7.3).
+5. <strong>(MED)</strong> <code>_launch_interactive</code> extraction's regression gate didn't cover prompt-join/setting-sources/PKB. <strong>Closed</strong> by adding those assertions to <code>test_launch.sh</code> first (§5/§12).
+6. <strong>(LOW)</strong> render post-verify missed the empty-source case. <strong>Closed</strong> by asserting source-non-empty too (§5/§10).
+7. <strong>(LOW)</strong> task-id cycle behavior unspecified. <strong>Closed</strong> by Kahn cycle-detect → input-order fallback + warning + a cycle test fixture (§7.2).</p>
+  </main>
+</div>
+</body>
+</html>
