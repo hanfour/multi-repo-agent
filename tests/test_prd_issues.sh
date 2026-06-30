@@ -46,6 +46,17 @@ cat > "$WS/.collab/requirements/cyc.json" <<'JSON'
 JSON
 cyc=$(_prd_topo_order "$WS/.collab/requirements/cyc.json" 2>/dev/null | sort | tr '\n' ' ')
 assert_eq "cycle: all ids still emitted" "a b " "$cyc"
+cerr=$(_prd_topo_order "$WS/.collab/requirements/cyc.json" 2>&1 >/dev/null)
+[[ "$cerr" == *"cycle detected"* ]] && ok "cycle warns on stderr" || fail "no cycle warning on stderr"
+
+# --- resolve owner ---
+tmp_repo=$(mktemp -d)
+git -C "$tmp_repo" init -q
+git -C "$tmp_repo" remote add origin https://github.com/acme/widget.git
+assert_eq "_prd_resolve_owner https url" "acme/widget" "$(_prd_resolve_owner "$tmp_repo")"
+git -C "$tmp_repo" remote set-url origin git@github.com:acme/widget.git
+assert_eq "_prd_resolve_owner ssh url" "acme/widget" "$(_prd_resolve_owner "$tmp_repo")"
+rm -rf "$tmp_repo"
 
 # --- account resolution ---
 config_get() { [[ "$1" == "ghAccounts" ]] && echo '{"acme":"acme-bot"}' || echo ""; }  # stub

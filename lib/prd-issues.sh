@@ -53,26 +53,39 @@ _prd_validate_tasks() {
 }
 
 # Kahn topological sort over the task-id DAG; tier ascending as tie-break.
-# On a cycle: warn and fall back to input order (all ids still emitted).
+# On a cycle: warns (stderr) and falls back to input order (all ids still emitted).
 _prd_topo_order() {
   local tj="$1"
-  jq -r '
+  local total ids emitted
+  total=$(jq '.tasks|length' "$tj")
+  # jq emits only the acyclic prefix; when a cycle is detected ($ready empty)
+  # it returns [] (no further ids), so the shell can count and detect the gap.
+  ids=$(jq -r '
     .tasks as $t
     | ([$t[] | {id, tier, deps: .dependencies}]) as $nodes
-    | ($nodes | map(.id)) as $all
     | def kahn(ns):
         if (ns|length)==0 then []
         else
           ([ ns[] | select([.deps[]? | select(. as $d | (ns|map(.id)|index($d)) != null)] | length == 0) ]
             | sort_by(.tier, .id)) as $ready
-          | if ($ready|length)==0 then (ns|sort_by(.tier,.id)|map(.id))   # cycle: fallback
+          | if ($ready|length)==0 then []
             else ($ready[0].id) as $pick
               | [$pick] + kahn([ ns[] | select(.id != $pick) ])
             end
         end;
       kahn($nodes)[]
-  ' "$tj" 2>/dev/null || jq -r '.tasks[].id' "$tj"
-  # cycle detection warning (non-fatal): if topo length != distinct ids, jq fell back
+  ' "$tj" 2>/dev/null)
+  # Count non-blank lines emitted
+  emitted=0
+  if [[ -n "$ids" ]]; then
+    emitted=$(printf '%s\n' "$ids" | grep -c '[^[:space:]]') || true
+  fi
+  if (( emitted < total )); then
+    log_warn "prd: dependency cycle detected — using input order" "prd" >&2
+    jq -r '.tasks[].id' "$tj"
+  else
+    printf '%s\n' "$ids"
+  fi
 }
 
 # owner/repo from origin (review.sh:44-45 idiom). Empty on failure.
