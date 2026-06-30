@@ -36,5 +36,20 @@ grep -q 'user,project' <<<"$argv" && ok "setting-sources" || fail "no setting-so
 assert_eq "exports MRA_PRD_PROJECTS" "fe be" "${MRA_PRD_PROJECTS:-}"
 
 rm -rf "$WS" "$SHIM"; unset MRA_CLAUDE_BIN
+
+# --- dispatch smoke (named-missing aborts; prd-issues routes) ---
+MRA="$SCRIPT_DIR/bin/mra.sh"
+WS2=$(mktemp -d); mkdir -p "$WS2/.collab/requirements"
+# named project that doesn't exist -> non-zero (validate_repo_subset)
+( cd "$WS2" && MRA_WORKSPACE="$WS2" bash "$MRA" prd no-such-repo </dev/null >/dev/null 2>&1 ); rc=$?
+[[ "$rc" -ne 0 ]] && ok "prd named-missing aborts" || fail "prd accepted missing project"
+# prd-issues with a fixture tasks.json, no --confirm -> zero creates, exit 0
+cat > "$WS2/.collab/requirements/REQ-2026-0001-tasks.json" <<'JSON'
+{"requirement_id":"REQ-2026-0001","title":"t","tasks":[{"id":"t1","project":"fe","title":"x","tier":1,"dependencies":[],"acceptance_criteria":["a"]}]}
+JSON
+( cd "$WS2" && MRA_WORKSPACE="$WS2" MRA_PRD_PROJECTS="fe" bash "$MRA" prd-issues --req REQ-2026-0001 </dev/null >/dev/null 2>&1 ); rc=$?
+[[ "$rc" -eq 0 ]] && ok "prd-issues preview exits 0" || fail "prd-issues preview nonzero ($rc)"
+rm -rf "$WS2"
+
 echo ""
 if [[ $errors -eq 0 ]]; then echo "PASS: all prd-cli tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
