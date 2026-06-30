@@ -102,9 +102,9 @@ LED="$WS/.collab/requirements/gate-issues.json"
 assert_eq "ledger has t1 number" "1" "$(jq -r '.t1.number' "$LED")"
 assert_eq "ledger has t2 number" "2" "$(jq -r '.t2.number' "$LED")"
 # t1 (dep) created before t2 (dependent)
-o1=$(grep -n 'issue create' "$GH_LOG" | head -1)
 assert_eq "two issues created" "2" "$(grep -c 'issue create' "$GH_LOG")"
-grep -q 'issue edit 2 .*acme/be#1\|issue edit 2' "$GH_LOG" && ok "pass2 edits dependent" || ok "pass2 edit present (loose)"
+grep -A100 'issue edit 2' "$GH_LOG" | grep -q 'Depends on: acme/be#1' \
+  && ok "pass2 links dependent to acme/be#1" || fail "pass2 did not link dependent to its dependency"
 grep -q 'label create mra-prd' "$GH_LOG" && ok "ensures mra-prd label" || fail "missing label ensure"
 # Resume: re-run skips already-created ids (no new creates)
 : > "$GH_LOG"; GH_N=2
