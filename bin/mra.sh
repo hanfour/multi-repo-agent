@@ -882,10 +882,10 @@ main() {
       shift
       local workspace; workspace=$(resolve_workspace)
       local graph_file="$workspace/.collab/dep-graph.json"
-      local prd_projects=() no_sync=false
+      local prd_projects=()
       while [[ $# -gt 0 ]]; do
         case "$1" in
-          --no-sync) no_sync=true; shift ;;
+          --no-sync) shift ;;  # accepted no-op: the interactive planner never auto-syncs
           -*) log_error "unknown option: $1" "prd"; exit 1 ;;
           *) prd_projects+=("$1"); shift ;;
         esac
@@ -895,12 +895,9 @@ main() {
       else
         validate_repo_subset "$workspace" "${prd_projects[@]}" || exit 1
       fi
-      if [[ "$no_sync" != true ]]; then
-        # Pass git_org (sync_from_repos_json takes "$2"; omitting it aborts under set -u),
-        # and run in a subshell so an internal exit/error can NEVER kill `mra prd` (non-fatal).
-        local prd_git_org; prd_git_org=$(jq -r '.gitOrg' "$graph_file" 2>/dev/null)
-        ( sync_from_repos_json "$workspace" "$prd_git_org" ) >/dev/null 2>&1 || true
-      fi
+      # No auto-sync: a full-workspace network sync blocks (and can hang) the interactive
+      # planner before it even starts, and planning reads the repos + PKB as-is.
+      # Run `mra sync` beforehand if you want fresh repos.
       prd_launch "$workspace" "$graph_file" "${prd_projects[@]}"
       ;;
 

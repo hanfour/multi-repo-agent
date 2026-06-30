@@ -481,7 +481,7 @@ Generate templates: `mra template`
 | `mra ask <project> "<question>"` | Codebase query |
 | `mra export [project]` | Export project context |
 | `mra dev <project> "<task>" [--no-pr] [--auto-approve] [--resume] [--dry-run]` | Autonomous headless implement→review→fix→PR loop (single repo; debate+verifier gate) |
-| `mra prd [projects…] [--no-sync]` | Interactive cross-repo PRD/spec planner — brainstorms FE/BE/data, writes HTML PRD + per-repo specs + a task plan under `.collab/`, opens **no** issues |
+| `mra prd [projects…]` | Interactive cross-repo PRD/spec planner — brainstorms FE/BE/data, writes HTML PRD + per-repo specs + a task plan under `.collab/`, opens **no** issues (reads repos as-is; run `mra sync` first for fresh code) |
 | `mra prd-issues --req <ID> [--confirm]` | Apply step (operator-run, TTY-gated): open the planned dependency-ordered GitHub issues |
 
 ### Code Review & Analysis
