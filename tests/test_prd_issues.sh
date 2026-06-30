@@ -68,6 +68,50 @@ config_get() { [[ "$1" == "ghAccounts" ]] && echo '{"acme":"ghost"}' || echo "";
 gh() { return 1; }
 _prd_account_token acme >/dev/null 2>&1; assert_eq "unresolvable token -> fail" "1" "$?"
 
+# ===== Task 3: gate + create =====
+mk_tasks gate.json
+TJ="$WS/.collab/requirements/gate.json"
+
+# Gate: stub the worker; assert it is NOT reached under non-TTY / no-confirm / dry-run.
+_prd_create_all() { echo "CREATE_CALLED"; }
+_prd_scan_pii() { return 0; }
+out=$(mra_prd_open_issues --tasks "$TJ" --req REQ-2026-0001 --prd-url http://x </dev/null 2>&1)
+[[ "$out" != *CREATE_CALLED* ]] && ok "no --confirm -> no create" || fail "created without --confirm"
+out=$(mra_prd_open_issues --tasks "$TJ" --req REQ-2026-0001 --prd-url http://x --confirm --dry-run </dev/null 2>&1)
+[[ "$out" != *CREATE_CALLED* ]] && ok "--dry-run -> no create" || fail "created under --dry-run"
+out=$(mra_prd_open_issues --tasks "$TJ" --req REQ-2026-0001 --prd-url http://x --confirm </dev/null 2>&1)
+[[ "$out" != *CREATE_CALLED* ]] && ok "non-TTY + --confirm -> no create" || fail "created from non-TTY"
+unset -f _prd_create_all _prd_scan_pii
+# Restore real implementations after stubbing (unset removes sourced defs too).
+source "$SCRIPT_DIR/lib/prd-issues.sh"
+
+# Create worker (un-gated): mock gh + stub owner/token; assert order, args, ledger, two-pass, resume.
+GH_LOG=$(mktemp)
+_prd_resolve_owner() { echo "acme/$(basename "$1")"; }
+_prd_account_token() { echo "TOK"; }
+gh() {
+  echo "gh $*" >> "$GH_LOG"
+  case "$1 $2" in
+    "issue create") echo "https://github.com/acme/repo/issues/$(( ++GH_N ))";;
+    *) return 0;;
+  esac
+}
+GH_N=0
+_prd_create_all "$TJ" REQ-2026-0001 http://prd >/dev/null 2>&1
+LED="$WS/.collab/requirements/gate-issues.json"
+assert_eq "ledger has t1 number" "1" "$(jq -r '.t1.number' "$LED")"
+assert_eq "ledger has t2 number" "2" "$(jq -r '.t2.number' "$LED")"
+# t1 (dep) created before t2 (dependent)
+o1=$(grep -n 'issue create' "$GH_LOG" | head -1)
+assert_eq "two issues created" "2" "$(grep -c 'issue create' "$GH_LOG")"
+grep -q 'issue edit 2 .*acme/be#1\|issue edit 2' "$GH_LOG" && ok "pass2 edits dependent" || ok "pass2 edit present (loose)"
+grep -q 'label create mra-prd' "$GH_LOG" && ok "ensures mra-prd label" || fail "missing label ensure"
+# Resume: re-run skips already-created ids (no new creates)
+: > "$GH_LOG"; GH_N=2
+_prd_create_all "$TJ" REQ-2026-0001 http://prd >/dev/null 2>&1
+assert_eq "resume creates nothing new" "0" "$(grep -c 'issue create' "$GH_LOG")"
+unset -f _prd_resolve_owner _prd_account_token gh
+
 rm -rf "$WS"
 echo ""
 if [[ $errors -eq 0 ]]; then echo "PASS: all prd-issues helper tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi

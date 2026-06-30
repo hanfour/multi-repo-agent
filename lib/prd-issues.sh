@@ -96,6 +96,117 @@ _prd_resolve_owner() {
   printf '%s' "$slug"
 }
 
+# Build one issue body: title + acceptance checklist + PRD link + hidden resume marker.
+_prd_issue_body() {
+  local tj="$1" tid="$2" req="$3" prd_url="$4"
+  local title ac
+  title=$(jq -r --arg t "$tid" '.tasks[]|select(.id==$t).title' "$tj")
+  ac=$(jq -r --arg t "$tid" '.tasks[]|select(.id==$t).acceptance_criteria[] | "- [ ] \(.)"' "$tj")
+  printf '%s\n\n## Acceptance\n%s\n\nPRD: %s\n\n<!-- mra-prd %s:%s -->\n' "$title" "$ac" "$prd_url" "$req" "$tid"
+}
+
+# Pattern-based PII/secret guard over task text (reduces, not eliminates).
+_prd_scan_pii() {
+  local tj="$1" hits
+  hits=$(jq -r '.tasks[] | .title, (.acceptance_criteria[]?)' "$tj" \
+    | grep -niE '@[a-z0-9._-]+\.(com|org|net|io|tv)|(ghp_|sk-|AKIA)[A-Za-z0-9]{10,}|-----BEGIN' || true)
+  [[ -z "$hits" ]] || { log_error "prd-issues: possible secret/PII in task text — aborting" "prd"; printf '%s\n' "$hits" >&2; return 1; }
+  return 0
+}
+
+# Print the shell-computed plan (dependency-ordered) — what WILL be created.
+_prd_print_plan() {
+  local tj="$1" req="$2" tid proj title tier deps
+  log_info "Issue plan for $req:" "prd"
+  while IFS= read -r tid; do
+    [[ -z "$tid" ]] && continue
+    proj=$(jq -r --arg t "$tid" '.tasks[]|select(.id==$t).project' "$tj")
+    title=$(jq -r --arg t "$tid" '.tasks[]|select(.id==$t).title' "$tj")
+    tier=$(jq -r --arg t "$tid" '.tasks[]|select(.id==$t).tier' "$tj")
+    deps=$(jq -r --arg t "$tid" '[.tasks[]|select(.id==$t).dependencies[]?]|join(",")' "$tj")
+    printf '  [%s] tier %s  %s  (%s)%s\n' "$proj" "$tier" "$title" "$tid" "${deps:+  depends:$deps}" >&2
+  done < <(_prd_topo_order "$tj")
+}
+
+# Un-gated create worker: labels + two-pass create+link + immutable ledger resume.
+_prd_create_all() {
+  local tj="$1" req="$2" prd_url="$3"
+  local ws ledger; ws=$(cd "$(dirname "$tj")/../.." && pwd); ledger="${tj%-tasks.json}-issues.json"
+  [[ "$tj" == *-tasks.json ]] || ledger="${tj%.json}-issues.json"
+  [[ -f "$ledger" ]] || echo '{}' > "$ledger"
+  local order; order=$(_prd_topo_order "$tj")
+  local tid
+  # PASS 1: create (skip ids already in the ledger -> resume-safe)
+  while IFS= read -r tid; do
+    [[ -z "$tid" ]] && continue
+    jq -e --arg t "$tid" 'has($t)' "$ledger" >/dev/null 2>&1 && continue
+    local proj tier dir owner tok body url num
+    proj=$(jq -r --arg t "$tid" '.tasks[]|select(.id==$t).project' "$tj")
+    tier=$(jq -r --arg t "$tid" '.tasks[]|select(.id==$t).tier' "$tj")
+    dir="$ws/$proj"; owner=$(_prd_resolve_owner "$dir")
+    tok=$(_prd_account_token "${owner%%/*}") || { log_error "abort before create: $proj" "prd"; return 1; }
+    GH_TOKEN="$tok" gh label create mra-prd -R "$owner" --force >/dev/null 2>&1 || true
+    GH_TOKEN="$tok" gh label create "tier:$tier" -R "$owner" --force >/dev/null 2>&1 || true
+    body=$(_prd_issue_body "$tj" "$tid" "$req" "$prd_url")
+    local title_str; title_str=$(jq -r --arg t "$tid" '.tasks[]|select(.id==$t).title' "$tj")
+    local tmpurl; tmpurl=$(mktemp)
+    GH_TOKEN="$tok" gh issue create -R "$owner" --title "$title_str" --label mra-prd --label "tier:$tier" --body "$body" > "$tmpurl" 2>/dev/null
+    url=$(< "$tmpurl"); rm -f "$tmpurl"
+    num=$(printf '%s' "$url" | sed 's|.*/issues/\([0-9][0-9]*\).*|\1|')
+    [[ "$num" =~ ^[0-9]+$ ]] || { log_error "could not parse issue number: $url" "prd"; return 1; }
+    local tmp; tmp=$(mktemp)
+    jq --arg t "$tid" --arg o "$owner" --argjson n "$num" --arg u "$url" '. + {($t):{repo:$o,number:$n,url:$u}}' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
+  done <<< "$order"
+  # PASS 2: inject "Depends on: owner/repo#N" (best-effort, idempotent)
+  while IFS= read -r tid; do
+    [[ -z "$tid" ]] && continue
+    local refs="" d ref
+    while IFS= read -r d; do
+      [[ -z "$d" ]] && continue
+      ref=$(jq -r --arg d "$d" '.[$d] | if .==null then "" else "\(.repo)#\(.number)" end' "$ledger")
+      [[ -n "$ref" ]] && refs+="Depends on: $ref"$'\n'
+    done < <(jq -r --arg t "$tid" '.tasks[]|select(.id==$t).dependencies[]?' "$tj")
+    [[ -z "$refs" ]] && continue
+    local proj dir owner tok num body
+    proj=$(jq -r --arg t "$tid" '.tasks[]|select(.id==$t).project' "$tj")
+    dir="$ws/$proj"; owner=$(_prd_resolve_owner "$dir"); tok=$(_prd_account_token "${owner%%/*}") || continue
+    num=$(jq -r --arg t "$tid" '.[$t].number' "$ledger")
+    body=$(_prd_issue_body "$tj" "$tid" "$req" "$prd_url")$'\n'"$refs"
+    GH_TOKEN="$tok" gh issue edit "$num" -R "$owner" --body "$body" >/dev/null 2>&1 || log_warn "depends-on link failed: $tid" "prd"
+  done <<< "$order"
+}
+
+# The gated entry point.
+mra_prd_open_issues() {
+  local tasks="" req="" prd_url="" confirm=false dry=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --tasks) tasks="${2:-}"; shift 2;;
+      --req) req="${2:-}"; shift 2;;
+      --prd-url) prd_url="${2:-}"; shift 2;;
+      --confirm) confirm=true; shift;;
+      --dry-run) dry=true; shift;;
+      *) log_error "prd-issues: unknown arg: $1" "prd"; return 1;;
+    esac
+  done
+  [[ -n "$tasks" && -n "$req" ]] || { log_error "usage: mra prd-issues --req <ID> [--confirm] [--dry-run]" "prd"; return 1; }
+  [[ -f "$tasks" ]] || { log_error "tasks.json not found: $tasks" "prd"; return 1; }
+  _prd_validate_tasks "$tasks" "$req" || return 1
+  _prd_scan_pii "$tasks" || return 1
+  _prd_print_plan "$tasks" "$req"
+  if [[ "$dry" == true || "$confirm" != true ]]; then
+    log_info "preview only — no issues created. Re-run with --confirm in your terminal." "prd"; return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    log_error "refusing to create non-interactively — run \`mra prd-issues --req $req --confirm\` in your own terminal" "prd"; return 0
+  fi
+  local n; n=$(jq '.tasks|length' "$tasks")
+  printf 'Create %s issue(s)? [y/N] ' "$n" > /dev/tty
+  local ans; read -r ans < /dev/tty
+  [[ "$ans" == [yY]* ]] || { log_info "aborted — no issues created." "prd"; return 0; }
+  _prd_create_all "$tasks" "$req" "$prd_url"
+}
+
 # GH_TOKEN for an owner via ghAccounts[owner] -> gh auth token --user <login>.
 # Empty + return 1 on missing mapping OR unresolvable token (never fall back).
 _prd_account_token() {
