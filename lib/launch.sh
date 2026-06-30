@@ -16,9 +16,22 @@ build_add_dir_args() {
   done
 }
 
-launch_claude() {
-  local workspace="$1" graph_file="$2"
-  shift 2
+# _launch_interactive: shared assembly used by launch_claude and mra prd.
+#
+# Parameters:
+#   $1  workspace      — root directory containing project sub-dirs
+#   $2  graph_file     — path to dep-graph.json (may not exist)
+#   $3  sys_prompt_file — base system-prompt file to read (e.g. agents/orchestrator.md)
+#   $4  extra_fragments — optional additional text appended after lang directive (may be empty)
+#   $5… projects        — one or more project names (relative to workspace)
+#
+# Changes vs original launch_claude body:
+#   (a) reads base system prompt from $sys_prompt_file instead of hardcoding agents/orchestrator.md
+#   (b) appends $extra_fragments as one more sys_prompt_parts entry when non-empty
+#   (c) execs "${MRA_CLAUDE_BIN:-claude}" instead of bare claude (enables test shims)
+_launch_interactive() {
+  local workspace="$1" graph_file="$2" sys_prompt_file="$3" extra_fragments="$4"
+  shift 4
   local projects=("$@")
   local claude_args=()
 
@@ -49,15 +62,13 @@ launch_claude() {
 
   # Collect system-prompt fragments, then emit a SINGLE --append-system-prompt.
   # The claude CLI rejects mixing --append-system-prompt with
-  # --append-system-prompt-file, so we read the orchestrator file inline and
+  # --append-system-prompt-file, so we read the prompt file inline and
   # join every fragment into one flag value.
   local sys_prompt_parts=()
 
-  # Orchestrator system prompt if available
-  local mra_dir
-  mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  if [[ -f "$mra_dir/agents/orchestrator.md" ]]; then
-    sys_prompt_parts+=("$(cat "$mra_dir/agents/orchestrator.md")")
+  # (a) Base system prompt read from the caller-supplied file
+  if [[ -f "$sys_prompt_file" ]]; then
+    sys_prompt_parts+=("$(cat "$sys_prompt_file")")
   fi
 
   # Inject output language from config
@@ -65,6 +76,11 @@ launch_claude() {
   output_lang=$(config_get "outputLanguage" 2>/dev/null)
   if [[ -n "$output_lang" && "$output_lang" != "null" ]]; then
     sys_prompt_parts+=("Output Language: $output_lang. All agents (orchestrator, sub-agents, reviewers, PM) must use this language for descriptive output. Pass this language directive when dispatching any sub-agent.")
+  fi
+
+  # (b) Append caller-supplied extra fragments when non-empty
+  if [[ -n "$extra_fragments" ]]; then
+    sys_prompt_parts+=("$extra_fragments")
   fi
 
   # Inject PKB context if available for any loaded project
@@ -98,6 +114,12 @@ launch_claude() {
     claude_args+=(--append-system-prompt "$combined_prompt")
   fi
 
-  # Launch claude (array preserves spaces in paths)
-  claude "${claude_args[@]}"
+  # (c) Launch via MRA_CLAUDE_BIN when set (enables test shims), fall back to claude
+  "${MRA_CLAUDE_BIN:-claude}" "${claude_args[@]}"
+}
+
+launch_claude() {
+  local workspace="$1" graph_file="$2"; shift 2
+  local mra_dir; mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  _launch_interactive "$workspace" "$graph_file" "$mra_dir/agents/orchestrator.md" "" "$@"
 }
