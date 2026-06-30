@@ -912,7 +912,9 @@ main() {
       [[ -n "$req" ]] || { log_error "usage: mra prd-issues --req <REQ-ID> [--confirm] [--dry-run]" "prd"; exit 1; }
       local tasks="$workspace/.collab/requirements/$req-tasks.json"
       local prd_html="$workspace/.collab/requirements/$req.html"
-      : "${MRA_PRD_PROJECTS:=$(list_all_projects "$workspace/.collab/dep-graph.json" | tr '\n' ' ')}"; export MRA_PRD_PROJECTS
+      local scope_file="$workspace/.collab/requirements/$req-scope"
+      [[ -f "$scope_file" ]] || { log_error "no scope record for $req — was it created by 'mra prd'?" "prd"; exit 1; }
+      MRA_PRD_PROJECTS="$(cat "$scope_file")"; export MRA_PRD_PROJECTS
       mra_prd_open_issues --tasks "$tasks" --req "$req" --prd-url "$prd_html" "${extra[@]}"
       ;;
 

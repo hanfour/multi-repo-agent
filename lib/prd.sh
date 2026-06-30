@@ -29,6 +29,7 @@ prd_launch() {
   local req; req=$(_prd_alloc_req_id "$workspace") || return 1
   export MRA_PRD_REQ_ID="$req"
   export MRA_PRD_PROJECTS="${projects[*]}"
+  printf '%s\n' "${projects[*]}" > "$workspace/.collab/requirements/$req-scope"
   local frags
   frags="## mra prd session
 You are planning ${req}. Workspace root: ${workspace}. Write ALL artifacts under ${workspace}/.collab/ only.
