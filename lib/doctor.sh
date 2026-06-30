@@ -515,6 +515,18 @@ doctor_security() {
   echo "$pass $fail $warn"
 }
 
+# Warn if the issue-create gate could be bypassed by a tool allowlist.
+_doctor_check_prd_allowlist() {
+  local f hit=""
+  for f in "$HOME/.claude/settings.json" ".claude/settings.json"; do
+    [[ -f "$f" ]] || continue
+    grep -qE '"(Bash\(gh|Bash\(mra|prd-issues)' "$f" 2>/dev/null && hit="$f"
+  done
+  if [[ -n "$hit" ]]; then
+    log_warn "doctor: '$hit' allowlists gh/mra/prd-issues — this can bypass the human gate on 'mra prd-issues'. Remove it so issue creation always prompts." "doctor"
+  fi
+}
+
 run_doctor() {
   local workspace="$1"
   local filter_project="${2:-}"
@@ -572,6 +584,9 @@ run_doctor() {
   ((total_pass += sec_pass)) || true
   ((total_fail += sec_fail)) || true
   ((total_warn += sec_warn)) || true
+
+  # PRD allowlist gate check (does not affect pass/fail counts — advisory only)
+  _doctor_check_prd_allowlist
 
   # Summary
   log_info "=== Summary ===" "doctor"

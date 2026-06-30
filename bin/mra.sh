@@ -63,6 +63,8 @@ source "$MRA_DIR/lib/pkb.sh"
 source "$MRA_DIR/lib/eval.sh"
 source "$MRA_DIR/lib/dev-agent.sh"
 source "$MRA_DIR/lib/dev.sh"
+source "$MRA_DIR/lib/prd.sh"
+source "$MRA_DIR/lib/prd-issues.sh"
 
 usage() {
   cat <<'USAGE'
@@ -110,6 +112,9 @@ Commands:
   branch merge [--strategy S] [--dry-run] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [repos...]  Merge open PRs across repos (deps first; mergeable+CI gated; --wait-ci polls CI; repos... = subset)
   review <project> [--pr N] [--working] [--range A..B] [--head <ref>] [--no-debate]  Code review
   plan <project> "<task>" [--model M] [--dual]  Multi-expert plan; --dual = claude+codex council
+  prd [projects…] [--no-sync]      Interactive cross-repo PRD/spec planner (writes .collab/, opens no issues)
+  prd-issues --req <ID> [--confirm] [--dry-run]   Apply: open the planned issues (operator-run, TTY-gated)
+  prd-render <path>                 Render a .collab markdown file to .html
   dev <project> "<task>" [--base R] [--max-rounds N] [--no-pr] [--auto-approve] [--resume] [--dry-run]
                                 Autonomous implement->review->fix->PR loop (headless)
   test-audit <project> [--model M]     Audit tests vs Kent Beck 11 principles
@@ -871,6 +876,50 @@ main() {
       add_dirs=$(build_add_dir_string "$project_dir")
       run_plan_council "$plan_project" "$project_dir" "$plan_task" \
         "$(default_plan_personas)" "$plan_model" "$add_dirs" "$pkb_context" "$lang_directive" "$plan_dual"
+      ;;
+
+    prd)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      local graph_file="$workspace/.collab/dep-graph.json"
+      local prd_projects=() no_sync=false
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --no-sync) no_sync=true; shift ;;
+          -*) log_error "unknown option: $1" "prd"; exit 1 ;;
+          *) prd_projects+=("$1"); shift ;;
+        esac
+      done
+      if [[ "${#prd_projects[@]}" -eq 0 ]]; then
+        while IFS= read -r p; do prd_projects+=("$p"); done < <(list_all_projects "$graph_file")
+      else
+        validate_repo_subset "$workspace" "${prd_projects[@]}" || exit 1
+      fi
+      [[ "$no_sync" == true ]] || sync_from_repos_json "$workspace" >/dev/null 2>&1 || true
+      prd_launch "$workspace" "$graph_file" "${prd_projects[@]}"
+      ;;
+
+    prd-issues)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      local req="" extra=()
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --req) req="$2"; shift 2 ;;
+          *) extra+=("$1"); shift ;;
+        esac
+      done
+      [[ -n "$req" ]] || { log_error "usage: mra prd-issues --req <REQ-ID> [--confirm] [--dry-run]" "prd"; exit 1; }
+      local tasks="$workspace/.collab/requirements/$req-tasks.json"
+      local prd_html="$workspace/.collab/requirements/$req.html"
+      : "${MRA_PRD_PROJECTS:=$(list_all_projects "$workspace/.collab/dep-graph.json" | tr '\n' ' ')}"; export MRA_PRD_PROJECTS
+      mra_prd_open_issues --tasks "$tasks" --req "$req" --prd-url "$prd_html" "${extra[@]}"
+      ;;
+
+    prd-render)
+      shift
+      [[ -n "${1:-}" ]] || { log_error "usage: mra prd-render <.collab .md path>" "prd"; exit 1; }
+      prd_render_html "$1"
       ;;
 
     dev)
