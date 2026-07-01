@@ -112,7 +112,7 @@ grep -q '正體中文' <<<"$shim_argv" || fail "shim: lang directive missing"
 rm -rf "$SHIM_DIR" "$SHIM_WS" "$SHIM_OUT_FILE"
 unset MRA_CLAUDE_BIN SHIM_OUT
 
-ok() { :; }
+ok() { echo "PASS: $1"; }
 
 # --- greenfield: _launch_interactive with ZERO projects (empty-array safe) ---
 SHIM3=$(mktemp -d); export SHIM_OUT3=$(mktemp)
