@@ -162,5 +162,20 @@ mra_prd_scaffold --scaffold "$WS4/.collab/requirements/nope.json" --req R </dev/
 unset -f _scaffold_create_all gh config_get
 rm -rf "$WS4"
 
+# --- dispatch smoke: mra prd-scaffold dispatch is well-formed (exit 0|1, never crash) ---
+MRA="$SCRIPT_DIR/bin/mra.sh"
+WS5=$(mktemp -d); mkdir -p "$WS5/.collab/requirements"
+printf '{"gitOrg":"git@github.com:acme","projects":{}}' > "$WS5/.collab/dep-graph.json"
+cat > "$WS5/.collab/requirements/REQ-2026-0006-scaffold.json" <<'JSON'
+{"requirement_id":"REQ-2026-0006","repos":[{"name":"api","org":"acme","visibility":"private","type":"service","description":"x","deps":[]}]}
+JSON
+# Use a real temp file for MRA_CONFIG (process substitution is fragile across shells)
+MRA_CFG=$(mktemp); printf '{"ghAccounts":{"acme":"acme-bot"}}' > "$MRA_CFG"
+( cd "$WS5" && MRA_WORKSPACE="$WS5" MRA_CONFIG="$MRA_CFG" bash "$MRA" prd-scaffold --req REQ-2026-0006 </dev/null >/dev/null 2>&1 )
+rc=$?; [[ "$rc" -eq 0 || "$rc" -eq 1 ]] && ok "prd-scaffold preview dispatch is well-formed (rc=$rc)" || fail "dispatch crashed rc=$rc"
+( cd "$WS5" && MRA_WORKSPACE="$WS5" bash "$MRA" prd-scaffold --req REQ-9999-0000 </dev/null >/dev/null 2>&1 )
+assert_eq "missing scaffold plan aborts" "1" "$?"
+rm -rf "$WS5" "$MRA_CFG"
+
 echo ""
 if [[ $errors -eq 0 ]]; then echo "PASS: all prd-scaffold tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
