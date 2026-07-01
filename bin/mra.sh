@@ -882,23 +882,33 @@ main() {
       shift
       local workspace; workspace=$(resolve_workspace)
       local graph_file="$workspace/.collab/dep-graph.json"
-      local prd_projects=()
+      local prd_projects=() new_name=""
       while [[ $# -gt 0 ]]; do
         case "$1" in
+          --new)
+            [[ -n "${2:-}" && "$2" != -* ]] || { log_error "usage: mra prd --new <name>" "prd"; exit 1; }
+            new_name="$2"; shift 2 ;;
           --no-sync) shift ;;  # accepted no-op: the interactive planner never auto-syncs
           -*) log_error "unknown option: $1" "prd"; exit 1 ;;
           *) prd_projects+=("$1"); shift ;;
         esac
       done
-      if [[ "${#prd_projects[@]}" -eq 0 ]]; then
-        while IFS= read -r p; do prd_projects+=("$p"); done < <(list_all_projects "$graph_file")
+      if [[ -n "$new_name" ]]; then
+        [[ "${#prd_projects[@]}" -eq 0 ]] || { log_error "prd --new takes no positional projects" "prd"; exit 1; }
+        validate_repo_name "$new_name" || { log_error "invalid project name: $new_name" "prd"; exit 1; }
+        [[ "$new_name" =~ $_MRA_ID_REGEX ]] || { log_error "name must match $_MRA_ID_REGEX" "prd"; exit 1; }
+        prd_launch_new "$workspace" "$graph_file" "$new_name"
       else
-        validate_repo_subset "$workspace" "${prd_projects[@]}" || exit 1
+        if [[ "${#prd_projects[@]}" -eq 0 ]]; then
+          while IFS= read -r p; do prd_projects+=("$p"); done < <(list_all_projects "$graph_file")
+        else
+          validate_repo_subset "$workspace" "${prd_projects[@]}" || exit 1
+        fi
+        # No auto-sync: a full-workspace network sync blocks (and can hang) the interactive
+        # planner before it even starts, and planning reads the repos + PKB as-is.
+        # Run `mra sync` beforehand if you want fresh repos.
+        prd_launch "$workspace" "$graph_file" "${prd_projects[@]}"
       fi
-      # No auto-sync: a full-workspace network sync blocks (and can hang) the interactive
-      # planner before it even starts, and planning reads the repos + PKB as-is.
-      # Run `mra sync` beforehand if you want fresh repos.
-      prd_launch "$workspace" "$graph_file" "${prd_projects[@]}"
       ;;
 
     prd-issues)
