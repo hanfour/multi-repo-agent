@@ -65,6 +65,7 @@ source "$MRA_DIR/lib/dev-agent.sh"
 source "$MRA_DIR/lib/dev.sh"
 source "$MRA_DIR/lib/prd.sh"
 source "$MRA_DIR/lib/prd-issues.sh"
+source "$MRA_DIR/lib/prd-scaffold.sh"
 
 usage() {
   cat <<'USAGE'
@@ -114,6 +115,7 @@ Commands:
   plan <project> "<task>" [--model M] [--dual]  Multi-expert plan; --dual = claude+codex council
   prd [projects…] [--no-sync]      Interactive cross-repo PRD/spec planner (writes .collab/, opens no issues)
   prd-issues --req <ID> [--confirm] [--dry-run]   Apply: open the planned issues (operator-run, TTY-gated)
+  prd-scaffold --req <ID> [--confirm] [--dry-run]   Apply: create the greenfield-planned repos (operator-run, TTY-gated)
   prd-render <path>                 Render a .collab markdown file to .html
   dev <project> "<task>" [--base R] [--max-rounds N] [--no-pr] [--auto-approve] [--resume] [--dry-run]
                                 Autonomous implement->review->fix->PR loop (headless)
@@ -928,6 +930,23 @@ main() {
       [[ -f "$scope_file" ]] || { log_error "no scope record for $req — was it created by 'mra prd'?" "prd"; exit 1; }
       MRA_PRD_PROJECTS="$(cat "$scope_file")"; export MRA_PRD_PROJECTS
       mra_prd_open_issues --tasks "$tasks" --req "$req" --prd-url "$prd_html" "${extra[@]}"
+      ;;
+
+    prd-scaffold)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      local req="" extra=()
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --req) req="$2"; shift 2 ;;
+          *) extra+=("$1"); shift ;;
+        esac
+      done
+      [[ -n "$req" ]] || { log_error "usage: mra prd-scaffold --req <REQ-ID> [--confirm] [--dry-run]" "prd"; exit 1; }
+      local scaffold="$workspace/.collab/requirements/$req-scaffold.json"
+      local tasks="$workspace/.collab/requirements/$req-tasks.json"
+      [[ -f "$scaffold" ]] || { log_error "not a greenfield REQ (no scaffold plan) — was it created by 'mra prd --new'?" "prd"; exit 1; }
+      mra_prd_scaffold --scaffold "$scaffold" --tasks "$tasks" --req "$req" "${extra[@]}"
       ;;
 
     prd-render)
