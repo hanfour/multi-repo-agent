@@ -112,6 +112,20 @@ grep -q '正體中文' <<<"$shim_argv" || fail "shim: lang directive missing"
 rm -rf "$SHIM_DIR" "$SHIM_WS" "$SHIM_OUT_FILE"
 unset MRA_CLAUDE_BIN SHIM_OUT
 
+ok() { :; }
+
+# --- greenfield: _launch_interactive with ZERO projects (empty-array safe) ---
+SHIM3=$(mktemp -d); export SHIM_OUT3=$(mktemp)
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "$SHIM_OUT3"\n' > "$SHIM3/claude"; chmod +x "$SHIM3/claude"
+WS3=$(mktemp -d); printf '{}' > "$WS3/g.json"
+config_get() { echo ""; }; display_deps() { :; }
+( MRA_CLAUDE_BIN="$SHIM3/claude" _launch_interactive "$WS3" "$WS3/g.json" "$SHIM3/none.md" "frag" ) 2>&1
+rc=$?
+[[ "$rc" -eq 0 ]] && ok "zero-project launch does not crash (empty-array safe)" || fail "zero-project launch crashed rc=$rc"
+grep -q -- '--append-system-prompt' "$SHIM_OUT3" && ok "zero-project still emits prompt" || fail "no prompt with zero projects"
+[[ "$(grep -cx -- '--add-dir' "$SHIM_OUT3")" == "0" ]] && ok "zero --add-dir" || fail "expected 0 --add-dir"
+rm -rf "$SHIM3" "$WS3" "$SHIM_OUT3"
+
 if [[ $errors -eq 0 ]]; then
   echo "PASS: all launch tests passed"
 else
