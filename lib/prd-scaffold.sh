@@ -47,3 +47,36 @@ _scaffold_print_plan() {
     printf '  create %s/%s [%s] %s\n' "$org" "$(jq -r ".repos[$i].name" "$sj")" "$(jq -r ".repos[$i].visibility" "$sj")" "$(jq -r ".repos[$i].type" "$sj")" >&2
   done
 }
+
+# Additive, atomic (jq > $tmp && mv), name-keyed idempotent. NEVER build_dep_graph/mra scan.
+_scaffold_register() {
+  local ws="$1" name="$2" type="$3" desc="$4" deps_csv="$5"
+  local dg="$ws/.collab/dep-graph.json" md="$ws/.collab/manual-deps.json" rj="$ws/.collab/repos.json" tmp
+  [[ -f "$md" ]] || echo '[]' > "$md"                 # init if absent
+  [[ -f "$rj" ]] || echo '{"repos":[]}' > "$rj"
+  # 1) dep-graph node, init shape, only if absent — ATOMIC
+  tmp=$(mktemp)
+  jq --arg n "$name" --arg t "$type" \
+    '.projects[$n] = (.projects[$n] // {"type":$t,"port":null,"dockerImage":null,"dockerCompose":null,"lastCommit":"unknown","deps":{},"consumedBy":[],"confidence":{}})' \
+    "$dg" > "$tmp" && mv "$tmp" "$dg"
+  # 2) manual-deps edges (source depends on target), dedup — ATOMIC
+  local d darr
+  IFS=',' read -ra darr <<< "$deps_csv"
+  for d in ${darr[@]+"${darr[@]}"}; do
+    [[ -z "$d" ]] && continue
+    tmp=$(mktemp)
+    jq --arg s "$name" --arg t "$d" \
+      'if any(.[]?; .source==$s and .target==$t) then . else . + [{"source":$s,"target":$t,"type":"api"}] end' \
+      "$md" > "$tmp" && mv "$tmp" "$md"
+  done
+  # 3) repos.json entry, dedup — ATOMIC
+  tmp=$(mktemp)
+  jq --arg n "$name" --arg desc "$desc" \
+    'if any(.repos[]?; .name==$n) then . else .repos += [{"name":$n,"clone":true,"branch":"main","description":$desc,"archived":false}] end' \
+    "$rj" > "$tmp" && mv "$tmp" "$rj"
+}
+
+_scaffold_write_scope() {
+  local ws="$1" req="$2"; shift 2
+  printf '%s\n' "$*" > "$ws/.collab/requirements/$req-scope"
+}

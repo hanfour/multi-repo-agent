@@ -61,5 +61,32 @@ out=$( _scaffold_print_plan "$SJ" acme 2>&1 ); assert_eq "print_plan exits 0" "0
 
 # (gate + create + register cases appended in Tasks 6-8)
 rm -rf "$WS"
+
+# --- pure register: additive, atomic, curated-node-untouched, idempotent ---
+WS2=$(mktemp -d); mkdir -p "$WS2/.collab/requirements"
+# a CURATED dep-graph with an existing repo carrying edges we must not lose
+cat > "$WS2/.collab/dep-graph.json" <<'JSON'
+{"gitOrg":"git@github.com:acme","projects":{"erp":{"type":"rails-api","port":3000,"deps":{},"consumedBy":["partner-api-gateway"],"confidence":{"x":1}}}}
+JSON
+_scaffold_register "$WS2" "billing-api" "service" "api" ""
+_scaffold_register "$WS2" "billing-ui" "web" "ui" "billing-api"
+# curated node byte-preserved (still has consumedBy + confidence)
+assert_eq "curated erp.consumedBy preserved" "partner-api-gateway" "$(jq -r '.projects.erp.consumedBy[0]' "$WS2/.collab/dep-graph.json")"
+assert_eq "curated erp.confidence preserved" "1" "$(jq -r '.projects.erp.confidence.x' "$WS2/.collab/dep-graph.json")"
+# new nodes added in init shape
+assert_eq "billing-api node type" "service" "$(jq -r '.projects["billing-api"].type' "$WS2/.collab/dep-graph.json")"
+assert_eq "billing-api init shape port null" "null" "$(jq -r '.projects["billing-api"].port' "$WS2/.collab/dep-graph.json")"
+# manual-deps + repos.json created (were absent) and populated
+assert_eq "manual-deps edge ui->api" "billing-api" "$(jq -r '.[]|select(.source=="billing-ui").target' "$WS2/.collab/manual-deps.json")"
+assert_eq "repos.json entry" "billing-ui" "$(jq -r '.repos[]|select(.name=="billing-ui").name' "$WS2/.collab/repos.json")"
+# idempotent: re-run adds nothing
+before=$(jq '.projects|length' "$WS2/.collab/dep-graph.json")
+_scaffold_register "$WS2" "billing-api" "service" "api" ""
+assert_eq "register idempotent (no dup node)" "$before" "$(jq '.projects|length' "$WS2/.collab/dep-graph.json")"
+assert_eq "register idempotent (no dup repo)" "1" "$(jq '[.repos[]|select(.name=="billing-api")]|length' "$WS2/.collab/repos.json")"
+# scope written
+_scaffold_write_scope "$WS2" REQ-2026-0002 billing-api billing-ui
+assert_eq "scope file content" "billing-api billing-ui" "$(cat "$WS2/.collab/requirements/REQ-2026-0002-scope")"
+rm -rf "$WS2"
 echo ""
 if [[ $errors -eq 0 ]]; then echo "PASS: all prd-scaffold tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
