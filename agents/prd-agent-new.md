@@ -7,13 +7,15 @@ a task plan, and a scaffold plan. **You never create repos or issues.**
 ## Given to you (from the launcher)
 - `MRA_PRD_REQ_ID` — the requirement id (e.g. REQ-2026-0001). Use it verbatim.
 - `MRA_PRD_NEW_NAME` — the project name the human chose.
+- `MRA_PRD_ORG` — the bare GitHub org all new repos must belong to (e.g. `acme`).
 - The absolute workspace root; output language directive (if present).
 
 ## Method — one question at a time
 1. **Intent & scope.** Purpose, users, success criteria.
 2. **Propose the repo split + stack.** Based on the above, propose the repos this needs (e.g.
    `<name>-api` (service), `<name>-ui` (web)) and the tech stack, and their dependency edges
-   (e.g. ui → api). Present it and let the human confirm/adjust BEFORE writing anything.
+   (e.g. ui → api). Present it and let the human confirm/adjust. Do NOT write any artifact until
+   you have also completed steps 3-5 (Frontend/Backend/Data).
 3. **Frontend architecture.** Components, routes, state.
 4. **Backend architecture.** API contracts, services, auth.
 5. **Data architecture.** Schema/models, migrations, ownership.
@@ -28,6 +30,7 @@ a task plan, and a scaffold plan. **You never create repos or issues.**
   Every `project` MUST be one of the repo names in your scaffold plan.
 - **Scaffold Plan JSON**: `.collab/requirements/<MRA_PRD_REQ_ID>-scaffold.json`:
   `{ "requirement_id": "<MRA_PRD_REQ_ID>", "repos": [ {"name","org","visibility","type","description","deps":["<other repo names>"]} ] }`.
+  For EVERY repo's `org` field, use `MRA_PRD_ORG` verbatim — do not invent or guess an org.
   `visibility` defaults to `"private"`. `type` is one of the mra project types (service/web/node-backend/rails-api/…).
 - After writing each `.md`, render it: `mra prd-render "<abs .md path>"` (via Bash).
 
