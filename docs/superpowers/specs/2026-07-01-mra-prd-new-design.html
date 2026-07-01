@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>`mra prd --new` — Greenfield Interactive Planner + Scaffold Apply — Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
+    <div class="toc-title">`mra prd --new` — Greenfield Interactive Planner + Scaffold Apply — Design</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#1-problem">1. Problem</a></li>
+<li><a href="#2-goals-non-goals">2. Goals / Non-goals</a></li>
+<li><a href="#3-command-surface">3. Command surface</a></li>
+<li><a href="#4-planapply-split-the-safety-spine-reused-from-mra-prd-issues">4. Plan/apply split (the safety spine, reused from mra prd-issues)</a></li>
+<li><a href="#5-architecture">5. Architecture</a></li>
+<li><a href="#6-greenfield-session-flow-mra-prd-new">6. Greenfield session flow (mra prd --new)</a></li>
+<li><a href="#7-scaffold-plan-apply-flow-mra-prd-scaffold">7. Scaffold plan + apply flow (mra prd-scaffold)</a></li>
+<li><a href="#8-dep-graph-registration-additive-pure-jq-atomic-d9-15-fixes-1-2">8. Dep-graph registration — additive, pure-jq, atomic (D9 + §15 fixes 1 &amp; 2)</a></li>
+<li><a href="#9-safety">9. Safety</a></li>
+<li><a href="#10-failure-handling">10. Failure handling</a></li>
+<li><a href="#11-downstream-unchanged">11. Downstream (unchanged)</a></li>
+<li><a href="#12-testing">12. Testing</a></li>
+<li><a href="#13-task-breakdown">13. Task breakdown</a></li>
+<li><a href="#14-residual-risks">14. Residual risks</a></li>
+<li><a href="#15-provenance-critic-gaps-closed">15. Provenance &amp; critic gaps closed</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">技術詳規格</div>
+      <h1>`mra prd --new` — Greenfield Interactive Planner + Scaffold Apply — Design</h1>
+      <div class="meta"></div>
+    </div>
+    <p><strong>Date:</strong> 2026-07-01
+<strong>Status:</strong> Approved design (v1), deepened by multi-agent council. Pending implementation.
+<strong>Scope:</strong> Add a <strong>greenfield</strong> mode to the planner: <code>mra prd --new &lt;name&gt;</code> runs an interactive, from-scratch architecture brainstorm (no existing repos/PKB), the agent <strong>proposes a repo split + tech stack</strong> for the human to confirm, and writes a PRD + per-repo specs + Task-Plan JSON + a new <strong>scaffold plan</strong> under <code>.collab/</code>. It <strong>creates nothing</strong>. A separate operator-run, <strong>TTY-gated</strong> <code>mra prd-scaffold --req &lt;ID&gt; --confirm</code> then creates the planned GitHub repos (<code>gh repo create</code> + clone + seed + register into the dep-graph). Issue creation stays the existing <code>mra prd-issues</code>.
+<strong>Full greenfield flow:</strong> <code>mra prd --new &lt;name&gt;</code> (plan) → <code>mra prd-scaffold --req &lt;ID&gt; --confirm</code> (create repos) → <code>mra prd-issues --req &lt;ID&gt; --confirm</code> (open issues) → <code>mra dev &lt;repo&gt; "&lt;task&gt;"</code> (implement).
+<strong>Provenance:</strong> deepened by a multi-agent council — genuine 3-way vote (<strong>P2 <em>safety-first</em> won 19.6 / Borda 12</strong>; P3 <em>max-reuse</em> 18.6 / 7; P1 <em>YAGNI</em> 17.8 / 5; 4 judges), then hardened by an adversarial critic (6 gaps closed, §15). Every decision is grounded in real <code>mra</code> source.</p>
+<hr />
+<h2 id="1-problem">1. Problem</h2>
+<p><code>mra prd</code> (brownfield) plans a feature across <strong>existing</strong> repos, grounded in their PKB, and <code>validate_repo_subset</code> (<code>pr-ops.sh</code>) requires each project to already be a git-repo dir. A <strong>brand-new project</strong> has no repos, no PKB, no dep-graph entries — the architecture is being <em>invented</em>, not extended. So <code>mra prd &lt;newname&gt;</code> aborts, and there is no path from "an idea" to "repos + a PRD + tickets" inside <code>mra</code>. This adds that path without letting an autonomous agent create irreversible GitHub repos.</p>
+<h2 id="2-goals-non-goals">2. Goals / Non-goals</h2>
+<p><strong>Goals</strong>
+- <code>mra prd --new &lt;name&gt;</code> — interactive, from-scratch brainstorm (intent → FE → BE → data); the agent proposes a repo split + stack, the human confirms.
+- Emit a PRD + per-repo specs + Task-Plan JSON + a <strong><code>&lt;REQ&gt;-scaffold.json</code></strong> plan, all under <code>&lt;workspace&gt;/.collab/</code>. The interactive agent <strong>creates nothing</strong>.
+- <code>mra prd-scaffold --req &lt;ID&gt; --confirm</code> — operator-run, <strong>TTY-gated</strong> apply that <code>gh repo create</code>s the planned repos, seeds them, and <strong>registers</strong> them into the dep-graph (additively).
+- Reuse the brownfield <code>mra prd</code> machinery; leave its behavior <strong>byte-for-byte</strong> intact.</p>
+<p><strong>Non-goals (v1)</strong>
+- Auto-creating repos or issues from the interactive session (plan/apply split, §4).
+- Multi-org greenfield (<code>--org</code> override) — all new repos go to the workspace's <code>gitOrg</code>. Backlog.
+- Adopting a pre-existing remote repo into a plan (<code>--adopt</code>) — a planned name that already exists remotely <strong>aborts</strong>. Backlog.
+- Workspace bootstrap — <code>mra prd --new</code> requires an already-<code>mra init</code>'d workspace (<code>.collab/dep-graph.json</code>).
+- <code>mra dev --issue N</code> — still backlog.</p>
+<h2 id="3-command-surface">3. Command surface</h2>
+<div class="highlight"><pre><span></span><code>mra prd --new &lt;name&gt;                              # greenfield plan (interactive; creates nothing)
+mra prd-scaffold --req &lt;REQ-ID&gt; [--confirm] [--dry-run]   # operator-run, TTY-gated: create the planned repos
+</code></pre></div>
+
+<ul>
+<li><strong><code>--new &lt;name&gt;</code></strong> (D1): a value-taking arm placed <strong>above</strong> the <code>-*)</code> catch in the existing <code>prd)</code> parse loop. Accept ONLY the canonical <code>--new &lt;name&gt;</code> form; reject <code>--new=&lt;name&gt;</code> (the <code>-*)</code> arm errors) and a bare/<code>-*</code> value (<code>[[ -n "${2:-}" &amp;&amp; "$2" != -* ]]</code> guard, so <code>mra prd --new --no-sync</code> never sends <code>--no-sync</code> into <code>gh repo create org/NAME</code>). Validate <code>&lt;name&gt;</code> with <code>validate_repo_name</code> + <code>_MRA_ID_REGEX</code>. <strong>A greenfield invocation takes NO positional projects</strong> — error if any are also given (§15 fix 6).</li>
+<li><strong><code>mra prd-scaffold</code></strong> (D7): mirrors the <code>prd-issues)</code> skeleton. Requires <code>&lt;REQ&gt;-scaffold.json</code> (the greenfield marker) instead of a git dir; does NOT call <code>validate_repo_subset</code>. Without <code>--confirm</code> (or with <code>--dry-run</code>, or non-TTY) it prints the shell-computed "will create" plan and creates nothing.</li>
+</ul>
+<h2 id="4-planapply-split-the-safety-spine-reused-from-mra-prd-issues">4. Plan/apply split (the safety spine, reused from <code>mra prd-issues</code>)</h2>
+<p>Creating GitHub repos is <strong>irreversible and outward-facing</strong> — the same class as opening issues. So the greenfield mode uses the exact plan/apply split the brownfield planner established (spec <code>2026-06-30-mra-prd-design.md</code> §4):</p>
+<ul>
+<li><strong><code>mra prd --new</code> (plan):</strong> the interactive agent brainstorms + writes artifacts + the scaffold plan, then <strong>STOPS</strong>. It never runs <code>gh</code>.</li>
+<li><strong><code>mra prd-scaffold</code> (apply):</strong> the <strong>operator</strong> runs it in their own terminal. The create path requires <code>--confirm</code> AND not <code>--dry-run</code> AND <strong>an interactive TTY</strong> (<code>[ -t 0 ]</code>), byte-identical to <code>prd-issues.sh:197-206</code>. A non-TTY caller (an agent's Bash tool, CI) prints the plan and returns 0 — it <strong>can never create a repo</strong>, regardless of tool allowlists.</li>
+</ul>
+<h2 id="5-architecture">5. Architecture</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Action</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agents/prd-agent-new.md</code></td>
+<td><strong>create</strong></td>
+<td>Greenfield interactive system prompt: zero-repo from-scratch brainstorm (intent→FE→BE→data, one question at a time); <strong>propose</strong> a repo split + stack for the human to confirm; emit PRD + per-repo specs + <code>&lt;REQ&gt;-tasks.json</code> + <code>&lt;REQ&gt;-scaffold.json</code>; derive cross-repo edges + spec filenames from the proposed plan; PII ban; <strong>CREATE NOTHING</strong>; end by telling the operator to run <code>mra prd-scaffold</code> then <code>mra prd-issues</code>. No existing-repo/dep-graph assertions.</td>
+</tr>
+<tr>
+<td><code>lib/prd.sh</code></td>
+<td><strong>modify</strong></td>
+<td>Add <code>prd_launch_new</code> sibling (reads <code>agents/prd-agent-new.md</code>, <code>projects=()</code> empty-array-safe, exports <code>MRA_PRD_MODE=new</code> + <code>MRA_PRD_NEW_NAME</code>, allocates the REQ via <code>_prd_alloc_req_id</code>, writes <strong>no</strong> eager scope sidecar). Brownfield <code>prd_launch</code> + <code>_prd_alloc_req_id</code> stay <strong>byte-for-byte</strong>.</td>
+</tr>
+<tr>
+<td><code>lib/prd-scaffold.sh</code></td>
+<td><strong>create</strong></td>
+<td>The operator-gated apply lib, mirroring <code>prd-issues.sh</code>'s gated/ungated/pure three-way skeleton: gated <code>mra_prd_scaffold</code> (validate→PII→print-plan→dry/confirm→<code>[ -t 0 ]</code> gate) + <code>_scaffold_validate_plan</code>/<code>_scaffold_scan_pii</code>/<code>_scaffold_print_plan</code>/<code>_scaffold_resolve_org</code>; ungated <code>_scaffold_create_all</code> (all <code>gh</code>/<code>git</code>, mockable); pure-jq <code>_scaffold_register</code> + <code>_scaffold_write_scope</code>.</td>
+</tr>
+<tr>
+<td><code>bin/mra.sh</code></td>
+<td><strong>modify</strong></td>
+<td><code>prd)</code> loop: guarded <code>--new)</code> arm + early greenfield fork calling <code>prd_launch_new</code> (bypass <code>list_all_projects</code>/<code>validate_repo_subset</code>); <code>source lib/prd-scaffold.sh</code>; add the <code>prd-scaffold)</code> case; register both verbs in <code>usage()</code>.</td>
+</tr>
+<tr>
+<td><code>lib/launch.sh</code></td>
+<td><strong>modify</strong></td>
+<td>Guard the 4 unguarded <code>"${projects[@]}"</code> expansions with <code>${projects[@]+"${projects[@]}"}</code> (greenfield is the first empty-array caller — §15 fix 5).</td>
+</tr>
+<tr>
+<td><code>tests/test_prd.sh</code></td>
+<td><strong>create</strong></td>
+<td>Unit-tests the <code>bin/mra.sh</code> <code>prd) --new</code> dispatch fork itself.</td>
+</tr>
+<tr>
+<td><code>tests/test_prd_scaffold.sh</code></td>
+<td><strong>create</strong></td>
+<td>Plain-bash tests on a <code>mktemp</code> workspace with <code>gh(){…}</code>+<code>git(){…}</code> shims.</td>
+</tr>
+<tr>
+<td><code>test.sh</code></td>
+<td><strong>modify</strong></td>
+<td>Register the two new test files.</td>
+</tr>
+</tbody>
+</table>
+<p>Reused as-is: <code>prd_launch</code>/<code>_launch_interactive</code>, <code>_prd_alloc_req_id</code>, <code>_prd_account_token</code>/<code>ghAccounts</code>, the <code>prd-issues.sh</code> gate skeleton, <code>render_html</code>, the dep-graph node init shape (<code>init.sh:98-102</code>), the <code>repos.json</code> entry shape (<code>repos.sh:104</code>), the owner-org sed idiom (<code>repos.sh</code>).</p>
+<h2 id="6-greenfield-session-flow-mra-prd-new">6. Greenfield session flow (<code>mra prd --new</code>)</h2>
+<div class="highlight"><pre><span></span><code>mra prd --new billing
+ → prd) loop matches the guarded canonical --new arm (D1); validate_repo_name + _MRA_ID_REGEX on &quot;billing&quot;;
+   error if any positional project was also given.
+ → early fork (D2): prd_launch_new  (reaches NEITHER list_all_projects NOR validate_repo_subset)
+ → prd_launch_new: resolve_workspace requires .collab/dep-graph.json (D6); _prd_alloc_req_id reserves REQ;
+   exports MRA_PRD_REQ_ID / MRA_PRD_MODE=new / MRA_PRD_NEW_NAME; launches _launch_interactive with
+   agents/prd-agent-new.md and NO project args (zero --add-dir via build_add_dir_args no-op, zero PKB).
+ → Agent brainstorms one question at a time (intent→FE→BE→data), PROPOSES repos
+   [billing-api (service), billing-ui (web), edge ui→api] + stack, human confirms → writes:
+     .collab/requirements/&lt;REQ&gt;.md            (PRD; Cross-repo impact from the proposed edges)
+     .collab/specs/&lt;REQ&gt;-billing-api.md, &lt;REQ&gt;-billing-ui.md
+     .collab/requirements/&lt;REQ&gt;-tasks.json    (pm-agent tasks[] schema; every task.project ∈ repos[].name)
+     .collab/requirements/&lt;REQ&gt;-scaffold.json (§7 schema)
+   renders HTML; then STOPS and prints the operator next-step. NO gh, NO scope sidecar, NO issues.
+</code></pre></div>
+
+<h2 id="7-scaffold-plan-apply-flow-mra-prd-scaffold">7. Scaffold plan + apply flow (<code>mra prd-scaffold</code>)</h2>
+<p><strong>Scaffold plan schema</strong> — <code>&lt;workspace&gt;/.collab/requirements/&lt;REQ&gt;-scaffold.json</code> (D4):</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;requirement_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;REQ-YYYY-NNNN&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;repos&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;billing-api&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;org&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;onead&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;visibility&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;private&quot;</span><span class="p">,</span>
+<span class="w">              </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;service&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;deps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;&lt;other repo names&gt;&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+
+<p>Validation (D4/D13, before any <code>gh</code>): <code>requirement_id == --req</code>; every <code>repos[].name</code> matches <code>_MRA_ID_REGEX</code> AND passes <code>validate_repo_name</code> (blocks <code>-*</code>, <code>.</code>, <code>..</code>, <code>*/*</code>); every <code>tasks[].project</code> ⊆ <code>repos[].name</code>; every <code>repos[].org == workspace gitOrg</code>; default <code>visibility:"private"</code>, <code>"public"</code> requires explicit opt-in.</p>
+<p><strong>Apply flow (operator-run):</strong></p>
+<div class="highlight"><pre><span></span><code>mra prd-scaffold --req &lt;REQ&gt; --confirm
+ → prd-scaffold): resolve_workspace; require &lt;REQ&gt;-scaffold.json (greenfield marker, D7); mra_prd_scaffold
+ → GATE (mra_prd_scaffold): _scaffold_validate_plan → _scaffold_scan_pii (names+org+description)
+   → _scaffold_resolve_org (bare org via the repos.sh sed idiom) + _prd_account_token validated against
+     ghAccounts BEFORE any create (abort loud on missing mapping/unresolvable token)
+   → _scaffold_print_plan (&quot;will create org/name [private|public] &lt;type&gt;&quot;) to stderr
+   → if --dry-run or no --confirm → return 0 (inert); if `[[ ! -t 0 ]]` → return 0 (refuse non-interactively)
+   → else `Create N repo(s)? [y/N]` on /dev/tty; y → _scaffold_create_all
+ → WORKER (_scaffold_create_all): ensure ledger &lt;REQ&gt;-scaffold-repos.json exists ({}); per repo in plan order:
+     in-ledger → skip (resume);
+     else `GH_TOKEN=$tok gh repo view org/name` — exists-but-not-in-this-run&#39;s-ledger → ABORT loud (never adopt);
+          not-exists → create in a WORKSPACE-PINNED subshell (§15 fix 3):
+            ( cd &quot;$ws&quot; &amp;&amp; GH_TOKEN=$tok gh repo create org/name --&lt;vis&gt; --description d --clone )
+          write the ledger entry immediately {created:true, registered:false}; verify the clone landed at
+          $ws/name (fall back to git init / remote add on an unborn default branch, D8);
+          seed: git -C $ws/name commit --allow-empty -m &quot;chore: scaffold name (&lt;REQ&gt;)&quot; &amp;&amp; git push -u origin HEAD
+          (GH_TOKEN pinned on the push; §15 fix 4);
+          _scaffold_register (§8); flip ledger registered:true.
+ → after all repos: _scaffold_write_scope OVERWRITES &lt;REQ&gt;-scope with the names ACTUALLY created/adopted (D5),
+   so the downstream issue-creation blast-radius == reality.
+</code></pre></div>
+
+<p>Downstream (unchanged): <code>mra prd-issues --req &lt;REQ&gt; --confirm</code> now finds <code>&lt;REQ&gt;-scope</code> → loads <code>MRA_PRD_PROJECTS</code> → opens issues; then <code>mra dev billing-api "&lt;task&gt;"</code>.</p>
+<h2 id="8-dep-graph-registration-additive-pure-jq-atomic-d9-15-fixes-1-2">8. Dep-graph registration — additive, pure-jq, <strong>atomic</strong> (D9 + §15 fixes 1 &amp; 2)</h2>
+<p><code>_scaffold_register</code> does an idempotent, name-keyed <strong>additive</strong> upsert — it <strong>never</strong> calls <code>build_dep_graph</code>/<code>mra scan</code> (those rebuild and wipe the curated <code>consumedBy</code>/<code>deps</code> edges of existing repos, <code>init.sh:84-118</code>). Three targets:
+1. <code>dep-graph.json</code> <code>.projects[&lt;name&gt;]</code> in the <strong>exact init shape</strong> (<code>init.sh:98-102</code>): <code>{type, port:null, dockerImage:null, dockerCompose:null, lastCommit, deps:{}, consumedBy:[], confidence:{}}</code> with <code>type</code> from the plan; set top-level <code>gitOrg</code> only if unset.
+2. <code>manual-deps.json</code> — append planned edges <code>{source, target, type}</code>.
+3. <code>repos.json</code> <code>.repos[]</code> — append <code>{name, clone:true, branch:"main", description, archived:false}</code> (<code>repos.sh:104</code> shape).</p>
+<p><strong>Atomicity (§15 fix 1, HIGH):</strong> EVERY write goes <code>jq … "$f" &gt; "$tmp" &amp;&amp; mv "$tmp" "$f"</code> — <strong>never</strong> an in-place <code>jq … "$f" &gt; "$f"</code> (which truncates the file before <code>jq</code> reads it and <strong>destroys the curated dep-graph</strong>). This mirrors <code>_prd_create_all</code>'s ledger write (<code>prd-issues.sh:157-158</code>).
+<strong>Missing-file init (§15 fix 2, MED):</strong> <code>manual-deps.json</code> and <code>repos.json</code> may be absent in a pre-init workspace — init each before upsert (<code>[[ -f manual-deps.json ]] || echo '[]' &gt; manual-deps.json</code>; <code>[[ -f repos.json ]] || echo '{"repos":[]}' &gt; repos.json</code>), exactly as <code>_prd_create_all</code> inits its ledger, so registration can't fail <em>after</em> <code>gh repo create</code> already ran.</p>
+<h2 id="9-safety">9. Safety</h2>
+<ul>
+<li><strong>TTY gate (CRITICAL):</strong> create requires <code>--confirm</code> AND not <code>--dry-run</code> AND <code>[ -t 0 ]</code>; a non-TTY/agent/CI call returns 0 with zero creates. The zero-create-on-non-TTY test is a merge gate.</li>
+<li><strong>Name-capture guard:</strong> canonical <code>--new &lt;name&gt;</code> only, <code>$2 != -*</code>, so a flag can never become a repo name flowing into <code>gh repo create org/NAME</code> or <code>$ws/NAME</code>; <code>_MRA_ID_REGEX</code> + <code>validate_repo_name</code> re-asserted per repo at apply (since <code>--new</code> bypasses <code>validate_repo_subset</code>).</li>
+<li><strong>Dual-account:</strong> org = workspace <code>gitOrg</code>; token via <code>_prd_account_token</code> validated against <code>ghAccounts</code> <strong>before</strong> the first create; abort loud on missing mapping/unresolvable token. <code>GH_TOKEN</code> pinned on every <code>gh</code> and <code>git push</code> call (the https-credential-helper assumption is documented + verified in Task 7, §15 fix 4).</li>
+<li><strong>Idempotent resume + adopt-abort:</strong> immutable ledger keyed by name, written the instant <code>gh repo create</code> returns (<code>created</code>/<code>registered</code> split); re-runs skip ledgered repos; a planned name that exists remotely but not in this run's ledger <strong>aborts</strong> via a <code>gh repo view</code> pre-check (never silently adopts).</li>
+<li><strong>Additive registration:</strong> pure-jq, atomic (§8), never <code>build_dep_graph</code>/<code>mra scan</code>.</li>
+<li><strong>PII/name/org hygiene:</strong> scan repo names + org + description before any create; default <code>--private</code>, public is explicit opt-in (workspace memory rule: scan PII before any public-facing action); <code>org == gitOrg</code> enforced so <code>sync</code> can re-clone.</li>
+<li><strong>Brownfield untouched:</strong> <code>prd_launch</code> / <code>agents/prd-agent.md</code> byte-for-byte; greenfield forks before reaching them.</li>
+</ul>
+<h2 id="10-failure-handling">10. Failure handling</h2>
+<p><code>--new</code> with no name or a <code>-*</code> value → clean usage error, exit 1. <code>--new &lt;bad-slug&gt;</code> → regex reject, exit 1. Missing <code>.collab/dep-graph.json</code> → <code>resolve_workspace</code>'s existing error. Missing <code>&lt;REQ&gt;-scaffold.json</code> in <code>prd-scaffold)</code> → "not a greenfield REQ (no scaffold plan) — was it created by <code>mra prd --new</code>?". Invalid plan JSON / <code>requirement_id</code> mismatch / <code>task.project</code> ⊄ repos / <code>org != gitOrg</code> / bad slug → return 1 before any <code>gh</code>, naming the bad field. No <code>ghAccounts</code> mapping / token failure → abort before the first create. <code>gh repo view</code> says exists + not in this run's ledger → abort loud. <code>gh repo create</code> real failure → return 1 mid-run; prior successes ledgered → re-run resumes. <code>git clone/seed/push</code> failure after remote create → repo ledgered <code>created:true, registered:false</code> → re-run resumes seeding + registration idempotently (clone-landing/unborn-branch fallback). PII hit → abort before any create. Non-TTY / no <code>--confirm</code> / <code>--dry-run</code> → return 0 (preview only, worker unreached).</p>
+<h2 id="11-downstream-unchanged">11. Downstream (unchanged)</h2>
+<p><code>mra prd-issues --req &lt;REQ&gt; --confirm</code> finds <code>&lt;REQ&gt;-scope</code> (written by the scaffold apply from repos <em>actually</em> created) → loads <code>MRA_PRD_PROJECTS</code> → opens the planned issues into the new repos. Then <code>mra dev &lt;repo&gt; "&lt;task&gt;"</code>. If <code>prd-issues</code> is run before scaffold, no <code>&lt;REQ&gt;-scope</code> exists → issue creation is naturally gated.</p>
+<h2 id="12-testing">12. Testing</h2>
+<p>Plain-bash; the interactive <code>claude</code> launch is not run in CI — only the dispatch fork, the gate, and the <code>gh</code>/<code>git</code>-mocked apply seam.
+- <strong><code>tests/test_prd.sh</code></strong> — the <code>bin/mra.sh</code> <code>prd) --new</code> fork: <code>--new &lt;name&gt;</code> forks to <code>prd_launch_new</code> with empty projects; <code>--new --no-sync</code> errors cleanly (the flag is never captured as a repo name); <code>--new &lt;bad-slug&gt;</code> rejected; <code>--new &lt;name&gt; extra</code> errors (stray positional, §15 fix 6); stubs prove <code>list_all_projects</code> and <code>validate_repo_subset</code> are <strong>never</strong> reached on the <code>--new</code> path; brownfield <code>mra prd</code>/<code>mra prd api ui</code> unchanged.
+- <strong><code>tests/test_prd_scaffold.sh</code></strong> — on a <code>mktemp</code> workspace with <code>gh(){…}</code> + <code>git(){…}</code> shims (no network): plan validation (regex/req/subset/org), PII/name/org hygiene, the <strong>TTY/no-confirm/dry-run zero-create gate</strong> (<code>&lt;/dev/null</code>; the worker stub is never reached), <code>gh</code>+<code>git</code>-mocked create order / immutable ledger / resume-skip / <strong>adopt-abort</strong> / seed-commit+push / clone-landing verification, <strong>pure <code>_scaffold_register</code> additive + curated-node-untouched-and-not-truncated + idempotent</strong> (§15 fix 1), <strong>empty-workspace init of <code>manual-deps.json</code>/<code>repos.json</code></strong> (§15 fix 2), scope-written-from-created-not-planned.
+- <strong><code>tests/test_launch.sh</code></strong> — add a zero-project <code>_launch_interactive</code> case (empty-array guard, §15 fix 5) so greenfield's zero-<code>--add-dir</code> path is covered.</p>
+<h2 id="13-task-breakdown">13. Task breakdown</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Task</th>
+<th>Deps</th>
+<th>Acceptance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>agents/prd-agent-new.md</code> — greenfield prompt + scaffold schema</td>
+<td>—</td>
+<td>One-question FE/BE/data brainstorm, no existing-repo/dep-graph assertions; documents <code>&lt;REQ&gt;-scaffold.json</code>; instructs deriving edges + spec filenames from the proposed plan; forbids <code>gh</code>/create; ends with the prd-scaffold→prd-issues instruction.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>lib/prd.sh</code> <code>prd_launch_new</code> sibling (D3/D5) + launch.sh empty-array guards (§15 fix 5)</td>
+<td>1</td>
+<td>Launches <code>_launch_interactive</code> with <code>prd-agent-new.md</code>, <code>projects=()</code> empty-array-safe, <code>MRA_PRD_MODE=new</code>+<code>MRA_PRD_NEW_NAME</code> exported, allocates REQ, writes NO scope; brownfield <code>prd_launch</code> diff shows only additions; <code>test_launch.sh</code> zero-project case green.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>bin/mra.sh</code> <code>prd)</code> <code>--new</code> arm + early fork (D1/D2, §15 fix 6)</td>
+<td>2</td>
+<td>Guarded parse (rejects missing/<code>-*</code>/split-form/stray-positional), validates slug, forks bypassing <code>list_all_projects</code>+<code>validate_repo_subset</code>; brownfield unchanged; <code>usage()</code> updated.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>tests/test_prd.sh</code> + wire into <code>test.sh</code></td>
+<td>3</td>
+<td>All fork cases pass; runner includes the file.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>lib/prd-scaffold.sh</code> — validate + PII + resolve-org + print-plan (D4/D10/D13)</td>
+<td>—</td>
+<td>Validates regex/req/subset/org, scans names+org+desc, resolves <code>ghAccounts</code> token (abort on missing), prints will-create plan; mock <code>config_get</code>/<code>gh</code>; no create yet.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>lib/prd-scaffold.sh</code> — pure <code>_scaffold_register</code> + <code>_scaffold_write_scope</code> (D5/D9, §15 fixes 1&amp;2)</td>
+<td>5</td>
+<td>Atomic (<code>&gt;$tmp &amp;&amp; mv</code>) additive jq upsert into dep-graph node (init shape) + manual-deps edges + repos.json; inits missing <code>manual-deps.json</code>/<code>repos.json</code>; curated node/edges proven untouched <strong>and not truncated</strong>; idempotent; scope from actually-created repos; no <code>gh</code>/<code>git</code>.</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>lib/prd-scaffold.sh</code> — <code>_scaffold_create_all</code> worker (D8/D10/D11, §15 fixes 3&amp;4)</td>
+<td>6</td>
+<td>With <code>gh</code>+<code>git</code> shims: <code>gh repo view</code> pre-check, GH_TOKEN-pinned create <code>--clone</code> in a <code>(cd "$ws" &amp;&amp; …)</code> subshell, clone-landing/unborn-branch fallback, seed commit+push (GH_TOKEN pinned; https-helper assumption documented+verified), immutable ledger on-create, resume-skip, adopt-abort; token failure returns 1; calls <code>_scaffold_register</code> then flips <code>registered:true</code>.</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>lib/prd-scaffold.sh</code> — gated <code>mra_prd_scaffold</code> entry (D7/D12)</td>
+<td>7</td>
+<td>validate→PII→print→dry/confirm→<code>[ -t 0 ]</code> gate→worker; non-TTY/no-confirm/dry return 0 (worker unreached); real failures return 1; matches prd-issues gate semantics.</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>bin/mra.sh</code> <code>prd-scaffold)</code> case + source + usage (D7)</td>
+<td>8</td>
+<td><code>source lib/prd-scaffold.sh</code>; <code>mra prd-scaffold --req &lt;ID&gt; [--confirm] [--dry-run]</code> resolves workspace, requires <code>&lt;REQ&gt;-scaffold.json</code>, passes flags; does NOT call <code>validate_repo_subset</code>; verb in usage.</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>tests/test_prd_scaffold.sh</code> + wire into <code>test.sh</code></td>
+<td>9</td>
+<td>All cases pass on a mktemp workspace with <code>gh</code>+<code>git</code> shims; no network; full suite green.</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Docs + dry-run smoke</td>
+<td>10</td>
+<td><code>mra prd-scaffold --req &lt;ID&gt; --dry-run</code> on a fixture prints the will-create plan and creates nothing; README documents the greenfield flow (<code>prd --new</code> → <code>prd-scaffold</code> → <code>prd-issues</code> → <code>dev</code>) + the pre-init-workspace requirement + <code>render-html</code> re-render of this spec.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="14-residual-risks">14. Residual risks</h2>
+<ul>
+<li><strong>Name drift within a session:</strong> the agent authors <code>repos[].name</code> in both <code>scaffold.json</code> and <code>tasks.json</code>; a mismatch (<code>billing-api</code> vs <code>billing_api</code>) is caught only at apply (regex + <code>tasks ⊆ repos</code>), not during authoring.</li>
+<li><strong><code>gh repo create --clone</code> version drift</strong> (target-dir vs CWD, unborn default branch) is mitigated by the verify-and-fallback step but relies on that fallback covering field versions.</li>
+<li><strong>Multi-org deferred</strong> (D10 v1 single-org); a hand-edited foreign-org node is rejected by the <code>org==gitOrg</code> check; real cross-org needs a schema extension.</li>
+<li><strong><code>detect_project_type</code> on an empty seeded tree returns <code>unknown</code></strong>; we trust <code>plan.type</code> at registration; a later <code>mra scan</code> could relabel an empty repo (benign; self-heals once code lands).</li>
+<li><strong>PII scan is pattern-based</strong> — a novel internal codename in a public repo name could slip; default <code>--private</code> limits blast radius.</li>
+<li><strong>Greenfield brainstorm quality</strong> (good architecture from zero context) is not CI-testable — relies on <code>prd-agent-new.md</code> prompt engineering + human confirm-in-the-loop.</li>
+</ul>
+<h2 id="15-provenance-critic-gaps-closed">15. Provenance &amp; critic gaps closed</h2>
+<p>Council vote: <strong>P2 (safety-first) won</strong> 19.6/Borda 12 (P3 18.6/7, P1 17.8/5; 4 judges). Synthesized on P2's backbone with P3's minimal-surface arg discipline. The adversarial critic's 6 gaps are folded in:
+1. <strong>(HIGH)</strong> dep-graph registration atomicity — an in-place <code>jq … &gt; file</code> truncates before read, destroying the curated graph. <strong>Closed</strong> (§8): every <code>_scaffold_register</code> write uses <code>jq … "$f" &gt; "$tmp" &amp;&amp; mv "$tmp" "$f"</code>; the curated-node test asserts the file is not truncated.
+2. <strong>(MED)</strong> <code>_scaffold_register</code> missing-file init — <code>manual-deps.json</code>/<code>repos.json</code> may be absent → jq aborts <em>after</em> <code>gh repo create</code> ran. <strong>Closed</strong> (§8): init each before upsert; empty-workspace test.
+3. <strong>(MED)</strong> <code>gh repo create --clone</code> landing dir — clones into the worker's CWD, not <code>$ws</code>. <strong>Closed</strong> (§7): run in <code>( cd "$ws" &amp;&amp; … )</code>; test asserts the repo lands at <code>$ws/name</code>.
+4. <strong>(MED)</strong> <code>GH_TOKEN</code> on <code>git push</code> under dual accounts — unverified https-credential-helper path. <strong>Closed</strong> (§9/Task 7): documented + verified that <code>GH_TOKEN=$tok git push</code> authenticates as the mapped login (or push via <code>gh</code>).
+5. <strong>(MED)</strong> greenfield empty-array under <code>set -u</code> — <code>launch.sh</code>'s unguarded <code>"${projects[@]}"</code> crashes on bash 3.2. <strong>Closed</strong> (§5): guard the 4 expansions with <code>${projects[@]+"${projects[@]}"}</code> + a zero-project <code>test_launch.sh</code> case.
+6. <strong>(LOW)</strong> stray positional after <code>--new</code> silently discarded. <strong>Closed</strong> (§3): error if a greenfield invocation also has positional projects; test case.</p>
+  </main>
+</div>
+</body>
+</html>
