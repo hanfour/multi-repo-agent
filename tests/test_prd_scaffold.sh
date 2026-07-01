@@ -88,5 +88,58 @@ assert_eq "register idempotent (no dup repo)" "1" "$(jq '[.repos[]|select(.name=
 _scaffold_write_scope "$WS2" REQ-2026-0002 billing-api billing-ui
 assert_eq "scope file content" "billing-api billing-ui" "$(cat "$WS2/.collab/requirements/REQ-2026-0002-scope")"
 rm -rf "$WS2"
+# --- create worker: order, ledger, adopt-abort, resume, register+scope (gh+git shimmed) ---
+WS3=$(mktemp -d); mkdir -p "$WS3/.collab/requirements"
+printf '{"gitOrg":"git@github.com:acme","projects":{}}' > "$WS3/.collab/dep-graph.json"
+cat > "$WS3/.collab/requirements/REQ-2026-0003-scaffold.json" <<'JSON'
+{"requirement_id":"REQ-2026-0003","repos":[
+ {"name":"billing-api","org":"acme","visibility":"private","type":"service","description":"api","deps":[]},
+ {"name":"billing-ui","org":"acme","visibility":"private","type":"web","description":"ui","deps":["billing-api"]}]}
+JSON
+SJ3="$WS3/.collab/requirements/REQ-2026-0003-scaffold.json"
+GH_LOG=$(mktemp)
+config_get() { [[ "$1" == ghAccounts ]] && echo '{"acme":"acme-bot"}' || echo ""; }
+gh() {
+  echo "gh $*" >> "$GH_LOG"
+  case "$1 $2" in
+    "auth token") echo "TOK";;
+    "repo view") return 1;;                # not exists -> allow create
+    "repo create") ( cd "$3"/../ 2>/dev/null; : );;  # clone side effect faked by git() below
+    *) return 0;;
+  esac
+}
+git() { echo "git $*" >> "$GH_LOG"; case "$*" in *"init"*) mkdir -p "${3:-.}/.git";; esac; return 0; }
+# make the fake clone land at $ws/name: intercept `gh repo create ... --clone` by pre-creating the dir
+gh() {
+  echo "gh $*" >> "$GH_LOG"
+  case "$1 $2" in
+    "auth token") echo "TOK";;
+    "repo view") return 1;;
+    "repo create") local slug; for a in "$@"; do case "$a" in acme/*) slug="${a#acme/}";; esac; done; mkdir -p "$PWD/$slug/.git";;
+    *) return 0;;
+  esac
+}
+( cd "$WS3" && _scaffold_create_all "$WS3" "$SJ3" REQ-2026-0003 acme ) >/dev/null 2>&1
+LED="$WS3/.collab/requirements/REQ-2026-0003-scaffold-repos.json"
+assert_eq "ledger billing-api created" "true" "$(jq -r '.["billing-api"].created' "$LED")"
+assert_eq "ledger billing-api registered" "true" "$(jq -r '.["billing-api"].registered' "$LED")"
+assert_eq "two repo create calls" "2" "$(grep -c 'repo create' "$GH_LOG")"
+grep -q 'repo create acme/billing-api' "$GH_LOG" && ok "created api before ui (order)" || fail "creation order wrong"
+assert_eq "dep-graph got billing-ui node" "web" "$(jq -r '.projects["billing-ui"].type' "$WS3/.collab/dep-graph.json")"
+assert_eq "scope from created" "billing-api billing-ui" "$(cat "$WS3/.collab/requirements/REQ-2026-0003-scope")"
+# resume: re-run creates nothing new
+: > "$GH_LOG"; ( cd "$WS3" && _scaffold_create_all "$WS3" "$SJ3" REQ-2026-0003 acme ) >/dev/null 2>&1
+assert_eq "resume creates nothing" "0" "$(grep -c 'repo create' "$GH_LOG")"
+# adopt-abort: a fresh plan repo that gh repo view says EXISTS -> abort, no create
+cat > "$WS3/.collab/requirements/REQ-2026-0004-scaffold.json" <<'JSON'
+{"requirement_id":"REQ-2026-0004","repos":[{"name":"already-there","org":"acme","visibility":"private","type":"service","description":"x","deps":[]}]}
+JSON
+gh() { echo "gh $*" >> "$GH_LOG"; case "$1 $2" in "auth token") echo TOK;; "repo view") return 0;; "repo create") echo SHOULD_NOT >> "$GH_LOG";; *) return 0;; esac; }
+: > "$GH_LOG"; ( cd "$WS3" && _scaffold_create_all "$WS3" "$WS3/.collab/requirements/REQ-2026-0004-scaffold.json" REQ-2026-0004 acme ) >/dev/null 2>&1; rc=$?
+assert_eq "adopt-abort returns 1" "1" "$rc"
+grep -q 'SHOULD_NOT' "$GH_LOG" && fail "created an existing repo (adopt!)" || ok "adopt-abort: no create on existing repo"
+unset -f gh git config_get
+rm -rf "$WS3" "$GH_LOG"
+
 echo ""
 if [[ $errors -eq 0 ]]; then echo "PASS: all prd-scaffold tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
