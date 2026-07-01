@@ -51,6 +51,14 @@ JSON
 _scaffold_scan_pii "$WS/.collab/requirements/pii-scaffold.json" >/dev/null 2>&1; assert_eq "PII in description aborts" "1" "$?"
 _scaffold_scan_pii "$SJ"; assert_eq "clean plan passes PII" "0" "$?"
 
+# repos:null must return 1 (not abort under set -e)
+printf '{"requirement_id":"R","repos":null}' > "$WS/.collab/requirements/null-scaffold.json"
+( set -e; _scaffold_validate_plan "$WS/.collab/requirements/null-scaffold.json" "" R acme ) >/dev/null 2>&1; assert_eq "repos:null returns 1 (no set-e abort)" "1" "$?"
+
+# _scaffold_print_plan exits 0 and mentions a repo name
+out=$( _scaffold_print_plan "$SJ" acme 2>&1 ); assert_eq "print_plan exits 0" "0" "$?"
+[[ "$out" == *"billing-api"* ]] && ok "print_plan output mentions billing-api" || fail "print_plan output missing billing-api"
+
 # (gate + create + register cases appended in Tasks 6-8)
 rm -rf "$WS"
 echo ""

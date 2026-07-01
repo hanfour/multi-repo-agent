@@ -9,9 +9,9 @@ _scaffold_validate_plan() {
   local sj="$1" tj="$2" req="$3" bare_org="$4"
   jq -e . "$sj" >/dev/null 2>&1 || { log_error "scaffold.json not valid JSON: $sj" "prd"; return 1; }
   [[ "$(jq -r '.requirement_id // ""' "$sj")" == "$req" ]] || { log_error "scaffold requirement_id mismatch" "prd"; return 1; }
-  local names; names=" $(jq -r '.repos[].name' "$sj" | tr '\n' ' ') "
   local n; n=$(jq '.repos | length' "$sj")
   [[ "$n" -ge 1 ]] || { log_error "scaffold plan has no repos" "prd"; return 1; }
+  local names; names=" $(jq -r '.repos[].name' "$sj" | tr '\n' ' ') "
   local i
   for (( i=0; i<n; i++ )); do
     local r name org vis f; r=$(jq -c ".repos[$i]" "$sj")
