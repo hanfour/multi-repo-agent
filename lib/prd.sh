@@ -29,7 +29,7 @@ prd_launch_new() {
   local req; req=$(_prd_alloc_req_id "$workspace") || return 1
   # Bare org the scaffold apply will require every repo to belong to (org==gitOrg).
   # Compute it authoritatively and hand it to the agent so it can't guess wrong.
-  local bare_org; bare_org=$(jq -r '.gitOrg // ""' "$graph_file" 2>/dev/null | sed -E 's#.*github\.com[:/]([^/]+).*#\1#')
+  local bare_org; bare_org=$(jq -r '.gitOrg // ""' "$graph_file" 2>/dev/null | sed -E 's#.*github\.com[:/]([^/]+).*#\1#') || true
   export MRA_PRD_REQ_ID="$req"
   export MRA_PRD_MODE=new
   export MRA_PRD_NEW_NAME="$new_name"
