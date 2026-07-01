@@ -47,11 +47,11 @@ tmp_after=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -l
 if [[ "$tmp_after" -gt "$tmp_before" ]]; then echo "FAIL: config_set leaked a temp file on jq failure"; errors=$((errors+1)); fi
 
 # config_handle ghAccounts accepts a JSON object (the per-repo gh-login map mra prd-issues reads)
-if ! MRA_CONFIG="$TEST_CONFIG" config_handle "ghAccounts" '{"onead":"HanfourHuangOneAD"}' >/dev/null 2>&1; then
+if ! MRA_CONFIG="$TEST_CONFIG" config_handle "ghAccounts" '{"acme":"acme-bot"}' >/dev/null 2>&1; then
   echo "FAIL: config_handle ghAccounts should accept a JSON object"; errors=$((errors+1))
 fi
-result=$(config_get "ghAccounts" "$TEST_CONFIG" | jq -r '.onead')
-if [[ "$result" != "HanfourHuangOneAD" ]]; then echo "FAIL: ghAccounts.onead should be HanfourHuangOneAD, got $result"; errors=$((errors+1)); fi
+result=$(config_get "ghAccounts" "$TEST_CONFIG" | jq -r '.acme')
+if [[ "$result" != "acme-bot" ]]; then echo "FAIL: ghAccounts.acme should be acme-bot, got $result"; errors=$((errors+1)); fi
 # a non-object value is rejected (not silently stored)
 if MRA_CONFIG="$TEST_CONFIG" config_handle "ghAccounts" 'not-an-object' >/dev/null 2>&1; then
   echo "FAIL: config_handle ghAccounts should reject a non-object value"; errors=$((errors+1))

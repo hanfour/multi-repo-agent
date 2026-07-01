@@ -324,7 +324,7 @@ git commit -m "test(prd): mra prd --new dispatch fork (greenfield, flag-not-name
 **Interfaces:**
 - Consumes: `validate_repo_name` (branch-ops.sh), `_MRA_ID_REGEX` (validate.sh), `jq`.
 - Produces:
-  - `_scaffold_resolve_org "$gitorg"` → echoes the bare org (`git@github.com:onead` → `onead`).
+  - `_scaffold_resolve_org "$gitorg"` → echoes the bare org (`git@github.com:acme` → `acme`).
   - `_scaffold_validate_plan "$scaffold_json" "$tasks_json" "$req" "$bare_org"` → returns 1 (naming the bad field) if `requirement_id != req`, any repo lacks `name/org/visibility/type`, a `name` fails `validate_repo_name`/`_MRA_ID_REGEX`, `org != bare_org`, `visibility ∉ {private,public}`, or (if tasks.json exists) any `task.project ⊄ repos.name`.
   - `_scaffold_scan_pii "$scaffold_json"` → returns 1 if names/org/description hit PII/secret patterns.
   - `_scaffold_print_plan "$scaffold_json" "$bare_org"` → prints the "will create" list to stderr.

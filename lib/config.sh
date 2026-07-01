@@ -67,7 +67,7 @@ config_handle() {
       else log_error "invalid value: $value (use on/off)" "config"; return 1; fi ;;
     ghAccounts)
       if ! printf '%s' "$value" | jq -e 'type == "object"' >/dev/null 2>&1; then
-        log_error "ghAccounts must be a JSON object mapping owner-org -> gh login, e.g. '{\"onead\":\"my-gh-login\"}'" "config"; return 1
+        log_error "ghAccounts must be a JSON object mapping owner-org -> gh login, e.g. '{\"acme\":\"my-gh-login\"}'" "config"; return 1
       fi
       config_set "ghAccounts" "$value" && log_success "ghAccounts set (per-repo gh login map for mra prd-issues)" "config" ;;
     *) log_error "unknown config key: $key" "config"; return 1 ;;

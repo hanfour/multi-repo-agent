@@ -83,7 +83,7 @@ mra prd --new billing
 **Scaffold plan schema** — `<workspace>/.collab/requirements/<REQ>-scaffold.json` (D4):
 ```json
 { "requirement_id": "REQ-YYYY-NNNN",
-  "repos": [ { "name": "billing-api", "org": "onead", "visibility": "private",
+  "repos": [ { "name": "billing-api", "org": "acme", "visibility": "private",
               "type": "service", "description": "...", "deps": ["<other repo names>"] } ] }
 ```
 Validation (D4/D13, before any `gh`): `requirement_id == --req`; every `repos[].name` matches `_MRA_ID_REGEX` AND passes `validate_repo_name` (blocks `-*`, `.`, `..`, `*/*`); every `tasks[].project` ⊆ `repos[].name`; every `repos[].org == workspace gitOrg`; default `visibility:"private"`, `"public"` requires explicit opt-in.
