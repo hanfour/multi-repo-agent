@@ -81,6 +81,40 @@ _scaffold_write_scope() {
   printf '%s\n' "$*" > "$ws/.collab/requirements/$req-scope"
 }
 
+mra_prd_scaffold() {
+  local scaffold="" tasks="" req="" confirm=false dry=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scaffold) scaffold="${2:-}"; shift 2;;
+      --tasks) tasks="${2:-}"; shift 2;;
+      --req) req="${2:-}"; shift 2;;
+      --confirm) confirm=true; shift;;
+      --dry-run) dry=true; shift;;
+      *) log_error "prd-scaffold: unknown arg: $1" "prd"; return 1;;
+    esac
+  done
+  [[ -n "$scaffold" && -n "$req" ]] || { log_error "usage: mra prd-scaffold --req <ID> [--confirm] [--dry-run]" "prd"; return 1; }
+  [[ -f "$scaffold" ]] || { log_error "scaffold plan not found: $scaffold" "prd"; return 1; }
+  local ws; ws=$(cd "$(dirname "$scaffold")/../.." && pwd)
+  local gitorg bare_org
+  gitorg=$(jq -r '.gitOrg // ""' "$ws/.collab/dep-graph.json" 2>/dev/null); bare_org=$(_scaffold_resolve_org "$gitorg")
+  _scaffold_validate_plan "$scaffold" "$tasks" "$req" "$bare_org" || return 1
+  _scaffold_scan_pii "$scaffold" || return 1
+  _prd_account_token "$bare_org" >/dev/null || return 1     # fail-loud before the gate
+  _scaffold_print_plan "$scaffold" "$bare_org"
+  if [[ "$dry" == true || "$confirm" != true ]]; then
+    log_info "preview only — no repos created. Re-run with --confirm in your terminal." "prd"; return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    log_error "refusing to create repos non-interactively — run \`mra prd-scaffold --req $req --confirm\` in your own terminal" "prd"; return 0
+  fi
+  local cnt; cnt=$(jq '.repos|length' "$scaffold")
+  printf 'Create %s repo(s) in %s? [y/N] ' "$cnt" "$bare_org" > /dev/tty
+  local ans; read -r ans < /dev/tty
+  [[ "$ans" == [yY]* ]] || { log_info "aborted — no repos created." "prd"; return 0; }
+  _scaffold_create_all "$ws" "$scaffold" "$req" "$bare_org"
+}
+
 _scaffold_create_all() {
   local ws="$1" sj="$2" req="$3" bare_org="$4"
   local ledger="$ws/.collab/requirements/$req-scaffold-repos.json"
