@@ -141,5 +141,26 @@ grep -q 'SHOULD_NOT' "$GH_LOG" && fail "created an existing repo (adopt!)" || ok
 unset -f gh git config_get
 rm -rf "$WS3" "$GH_LOG"
 
+# --- gate: non-TTY / no-confirm / dry-run create nothing ---
+WS4=$(mktemp -d); mkdir -p "$WS4/.collab/requirements"
+printf '{"gitOrg":"git@github.com:acme","projects":{}}' > "$WS4/.collab/dep-graph.json"
+cat > "$WS4/.collab/requirements/REQ-2026-0005-scaffold.json" <<'JSON'
+{"requirement_id":"REQ-2026-0005","repos":[{"name":"api","org":"acme","visibility":"private","type":"service","description":"x","deps":[]}]}
+JSON
+SJ4="$WS4/.collab/requirements/REQ-2026-0005-scaffold.json"
+config_get() { [[ "$1" == ghAccounts ]] && echo '{"acme":"acme-bot"}' || echo ""; }
+gh() { case "$1 $2" in "auth token") echo TOK;; esac; return 0; }
+_scaffold_create_all() { echo "CREATE_CALLED"; }   # stub the worker; gate must not reach it
+out=$(mra_prd_scaffold --scaffold "$SJ4" --tasks "" --req REQ-2026-0005 </dev/null 2>&1)
+[[ "$out" != *CREATE_CALLED* ]] && ok "no --confirm -> no create" || fail "created without --confirm"
+out=$(mra_prd_scaffold --scaffold "$SJ4" --tasks "" --req REQ-2026-0005 --confirm --dry-run </dev/null 2>&1)
+[[ "$out" != *CREATE_CALLED* ]] && ok "--dry-run -> no create" || fail "created under --dry-run"
+out=$(mra_prd_scaffold --scaffold "$SJ4" --tasks "" --req REQ-2026-0005 --confirm </dev/null 2>&1)
+[[ "$out" != *CREATE_CALLED* ]] && ok "non-TTY + --confirm -> no create" || fail "created from non-TTY"
+# missing scaffold file -> error
+mra_prd_scaffold --scaffold "$WS4/.collab/requirements/nope.json" --req R </dev/null >/dev/null 2>&1; assert_eq "missing scaffold aborts" "1" "$?"
+unset -f _scaffold_create_all gh config_get
+rm -rf "$WS4"
+
 echo ""
 if [[ $errors -eq 0 ]]; then echo "PASS: all prd-scaffold tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
