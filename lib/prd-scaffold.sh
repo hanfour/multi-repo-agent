@@ -97,7 +97,7 @@ mra_prd_scaffold() {
   [[ -f "$scaffold" ]] || { log_error "scaffold plan not found: $scaffold" "prd"; return 1; }
   local ws; ws=$(cd "$(dirname "$scaffold")/../.." && pwd)
   local gitorg bare_org
-  gitorg=$(jq -r '.gitOrg // ""' "$ws/.collab/dep-graph.json" 2>/dev/null); bare_org=$(_scaffold_resolve_org "$gitorg")
+  gitorg=$(jq -r '.gitOrg // ""' "$ws/.collab/dep-graph.json" 2>/dev/null) || true; bare_org=$(_scaffold_resolve_org "$gitorg")
   _scaffold_validate_plan "$scaffold" "$tasks" "$req" "$bare_org" || return 1
   _scaffold_scan_pii "$scaffold" || return 1
   _prd_account_token "$bare_org" >/dev/null || return 1     # fail-loud before the gate
