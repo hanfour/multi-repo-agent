@@ -80,3 +80,40 @@ _scaffold_write_scope() {
   local ws="$1" req="$2"; shift 2
   printf '%s\n' "$*" > "$ws/.collab/requirements/$req-scope"
 }
+
+_scaffold_create_all() {
+  local ws="$1" sj="$2" req="$3" bare_org="$4"
+  local ledger="$ws/.collab/requirements/$req-scaffold-repos.json"
+  [[ -f "$ledger" ]] || echo '{}' > "$ledger"
+  local tok; tok=$(_prd_account_token "$bare_org") || return 1   # abort before any create
+  local created=() n i; n=$(jq '.repos|length' "$sj")
+  for (( i=0; i<n; i++ )); do
+    local name vis desc type deps
+    name=$(jq -r ".repos[$i].name" "$sj"); vis=$(jq -r ".repos[$i].visibility" "$sj")
+    desc=$(jq -r ".repos[$i].description // \"\"" "$sj"); type=$(jq -r ".repos[$i].type" "$sj")
+    deps=$(jq -r "[.repos[$i].deps[]?]|join(\",\")" "$sj")
+    if jq -e --arg n "$name" 'has($n)' "$ledger" >/dev/null 2>&1; then
+      created+=("$name")   # resume: already created
+    else
+      if GH_TOKEN="$tok" gh repo view "$bare_org/$name" >/dev/null 2>&1; then
+        log_error "repo $bare_org/$name already exists (not from this run) — aborting (adopt not supported)" "prd"; return 1
+      fi
+      ( cd "$ws" && GH_TOKEN="$tok" gh repo create "$bare_org/$name" "--$vis" --description "$desc" --clone ) \
+        || { log_error "gh repo create failed: $name" "prd"; return 1; }
+      local tmp; tmp=$(mktemp)
+      jq --arg n "$name" --arg o "$bare_org" --arg v "$vis" \
+        '. + {($n):{org:$o,url:("https://github.com/"+$o+"/"+$n),visibility:$v,created:true,registered:false}}' \
+        "$ledger" > "$tmp" && mv "$tmp" "$ledger"
+      # verify clone landed at $ws/name; fallback for unborn/no-clone
+      [[ -d "$ws/$name/.git" ]] || { mkdir -p "$ws/$name"; git -C "$ws/$name" init -q; \
+        git -C "$ws/$name" remote add origin "https://github.com/$bare_org/$name.git" 2>/dev/null || true; }
+      GH_TOKEN="$tok" git -C "$ws/$name" commit --allow-empty -q -m "chore: scaffold $name ($req)" || true
+      GH_TOKEN="$tok" git -C "$ws/$name" push -u origin HEAD >/dev/null 2>&1 || log_warn "push failed for $name (re-run to resume)" "prd"
+      created+=("$name")
+    fi
+    _scaffold_register "$ws" "$name" "$type" "$desc" "$deps"
+    local tmp2; tmp2=$(mktemp)
+    jq --arg n "$name" '.[$n].registered = true' "$ledger" > "$tmp2" && mv "$tmp2" "$ledger"
+  done
+  _scaffold_write_scope "$ws" "$req" ${created[@]+"${created[@]}"}
+}
