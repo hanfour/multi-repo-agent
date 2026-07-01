@@ -483,6 +483,10 @@ Generate templates: `mra template`
 | `mra dev <project> "<task>" [--no-pr] [--auto-approve] [--resume] [--dry-run]` | Autonomous headless implement→review→fix→PR loop (single repo; debate+verifier gate) |
 | `mra prd [projects…]` | Interactive cross-repo PRD/spec planner — brainstorms FE/BE/data, writes HTML PRD + per-repo specs + a task plan under `.collab/`, opens **no** issues (reads repos as-is; run `mra sync` first for fresh code) |
 | `mra prd-issues --req <ID> [--confirm]` | Apply step (operator-run, TTY-gated): open the planned dependency-ordered GitHub issues |
+| `mra prd --new <name>` | Greenfield: interactive from-scratch architecture brainstorm → proposes a repo split → writes PRD + specs + task plan + a scaffold plan under `.collab/` (creates nothing) |
+| `mra prd-scaffold --req <ID> [--confirm]` | Apply step (operator-run, TTY-gated): `gh repo create` the planned repos + seed + register into the dep-graph |
+
+**Greenfield flow** (for brand-new projects): `mra prd --new <name>` → `mra prd-scaffold --req <ID> --confirm` → `mra prd-issues --req <ID> --confirm` → `mra dev <repo> "<task>"`. Requires an already-`mra init`'d workspace (`.collab/dep-graph.json`) and a `ghAccounts` mapping for the org.
 
 ### Code Review & Analysis
 
