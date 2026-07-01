@@ -6,7 +6,7 @@ build_add_dir_args() {
   shift
   local projects=("$@")
 
-  for project in "${projects[@]}"; do
+  for project in ${projects[@]+"${projects[@]}"}; do
     local project_dir="$workspace/$project"
     if [[ -d "$project_dir" ]]; then
       printf '%s\0' "--add-dir" "$project_dir"
@@ -38,7 +38,7 @@ _launch_interactive() {
   # Build --add-dir args (null-delimited for space safety)
   while IFS= read -r -d '' arg; do
     claude_args+=("$arg")
-  done < <(build_add_dir_args "$workspace" "${projects[@]}")
+  done < <(build_add_dir_args "$workspace" ${projects[@]+"${projects[@]}"})
 
   # Restrict settings to user+project scope so the orchestrator keeps the
   # operator's global settings.json but never loads each --add-dir repo's
@@ -47,13 +47,13 @@ _launch_interactive() {
 
   # Display loaded projects
   local project_list
-  project_list=$(printf '%s, ' "${projects[@]}")
+  project_list=$(printf '%s, ' ${projects[@]+"${projects[@]}"})
   project_list="${project_list%, }"
   log_success "loaded projects: $project_list" "load"
 
   # Display dependency info
   if [[ -f "$graph_file" ]]; then
-    for project in "${projects[@]}"; do
+    for project in ${projects[@]+"${projects[@]}"}; do
       display_deps "$project" "$graph_file" 2>/dev/null || true
     done
   fi
@@ -85,7 +85,7 @@ _launch_interactive() {
 
   # Inject PKB context if available for any loaded project
   local pkb_injected=false
-  for project in "${projects[@]}"; do
+  for project in ${projects[@]+"${projects[@]}"}; do
     local project_dir="$workspace/$project"
     if pkb_exists "$project_dir" 2>/dev/null; then
       local pkb_ctx
