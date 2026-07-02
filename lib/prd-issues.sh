@@ -174,6 +174,14 @@ _prd_create_all() {
     body=$(_prd_issue_body "$tj" "$tid" "$req" "$prd_url")$'\n'"$refs"
     GH_TOKEN="$tok" gh issue edit "$num" -R "$owner" --body "$body" >/dev/null 2>&1 || log_warn "depends-on link failed: $tid" "prd"
   done <<< "$order"
+  # Completion summary + next-step hint — never a silent exit.
+  local made repos first_repo
+  made=$(jq 'length' "$ledger" 2>/dev/null || echo "?")
+  repos=$(jq -r '[to_entries[].value.repo] | unique | join(", ")' "$ledger" 2>/dev/null || true)
+  first_repo=$(jq -r 'to_entries[0].value.repo // empty' "$ledger" 2>/dev/null || true)
+  log_success "prd-issues complete — opened $made issue(s) in ${repos:-target repo} ($req)" "prd"
+  [[ -n "$first_repo" ]] && log_info "review the issues: gh issue list -R $first_repo --label mra-prd" "prd"
+  log_info "next: implement an issue — mra dev <repo> \"<task>\"" "prd"
 }
 
 # The gated entry point.
