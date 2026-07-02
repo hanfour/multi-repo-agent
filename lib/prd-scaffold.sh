@@ -44,7 +44,7 @@ _scaffold_print_plan() {
   log_info "Scaffold plan (org $org):" "prd"
   n=$(jq '.repos|length' "$sj")
   for (( i=0; i<n; i++ )); do
-    printf '  create %s/%s [%s] %s\n' "$org" "$(jq -r ".repos[$i].name" "$sj")" "$(jq -r ".repos[$i].visibility" "$sj")" "$(jq -r ".repos[$i].type" "$sj")" >&2
+    printf '  %s/%s [%s] %s  (create if new, adopt if it already exists)\n' "$org" "$(jq -r ".repos[$i].name" "$sj")" "$(jq -r ".repos[$i].visibility" "$sj")" "$(jq -r ".repos[$i].type" "$sj")" >&2
   done
 }
 
@@ -118,7 +118,7 @@ mra_prd_scaffold() {
     log_error "refusing to create repos non-interactively — run \`mra prd-scaffold --req $req --confirm\` in your own terminal" "prd"; return 0
   fi
   local cnt; cnt=$(jq '.repos|length' "$scaffold")
-  printf 'Create %s repo(s) in %s? [y/N] ' "$cnt" "$bare_org" > /dev/tty
+  printf 'Apply scaffold to %s repo(s) in %s (create new / adopt existing)? [y/N] ' "$cnt" "$bare_org" > /dev/tty
   local ans; read -r ans < /dev/tty
   [[ "$ans" == [yY]* ]] || { log_info "aborted — no repos created." "prd"; return 0; }
   _scaffold_create_all "$ws" "$scaffold" "$req" "$bare_org"
@@ -179,4 +179,10 @@ _scaffold_create_all() {
     jq --arg n "$name" '.[$n].registered = true' "$ledger" > "$tmp2" && mv "$tmp2" "$ledger"
   done
   _scaffold_write_scope "$ws" "$req" ${created[@]+"${created[@]}"}
+  # Success summary so a completed run is never a silent exit.
+  local n_created n_adopted
+  n_created=$(jq '[.[]|select(.created==true)]|length' "$ledger" 2>/dev/null || echo 0)
+  n_adopted=$(jq '[.[]|select(.adopted==true)]|length' "$ledger" 2>/dev/null || echo 0)
+  log_success "scaffold complete — created $n_created, adopted $n_adopted: ${created[*]:-none}" "prd"
+  log_info "next: mra prd-issues --req $req --confirm" "prd"
 }
