@@ -6,12 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- `mra prd-scaffold` now adopts a pre-existing planned repo after a per-repo `[y/N]` confirm (clone + register, seed only if empty) instead of aborting. An existing repo never reaches `gh repo create`.
+
 ### Breaking
 - **BREAKING** lint profile `oneAD` renamed to `ts-strict`; update any `.collab/lint-profile.json` using `{"profile":"oneAD"}` to `{"profile":"ts-strict"}`.
 
 ### Added
 - `mra prd --new <name>` — greenfield interactive planner: brainstorms a brand-new project's architecture from scratch, proposes a repo split + stack, and writes a PRD + specs + task plan + a scaffold plan. Creates nothing.
-- `mra prd-scaffold --req <ID> [--confirm]` — operator-run, **TTY-gated** apply that `gh repo create`s the planned repos (per-repo `GH_TOKEN` via `ghAccounts`, immutable ledger + `gh repo view` adopt-abort, atomic additive dep-graph registration — never `mra scan`), seeds each with an empty commit, and registers them into the workspace.
+- `mra prd-scaffold --req <ID> [--confirm]` — operator-run, **TTY-gated** apply that `gh repo create`s the planned repos (per-repo `GH_TOKEN` via `ghAccounts`, immutable ledger, atomic additive dep-graph registration — never `mra scan`), seeds each with an empty commit, and registers them into the workspace. A planned repo that already exists on GitHub triggers a per-repo `[y/N]` confirm — **y** adopts it (clone + register, seed only if empty); **N** aborts loud.
 - `mra prd <projects…>` — interactive cross-repo PRD/spec planner (FE/BE/data brainstorm → HTML PRD + per-repo specs + task plan under `.collab/`); the upstream of `mra dev`. It opens **no** issues.
 - `mra prd-issues --req <ID> [--confirm]` — operator-run, **TTY-gated** apply step that opens dependency-ordered GitHub issues (two-pass create + `Depends on` links, per-repo account pinning via the new `ghAccounts` config key, immutable resume ledger). A non-TTY caller never creates. `mra doctor` warns if a tool allowlist could bypass the gate.
 - `mra dev <project> "<task>"` — deterministic, fully-headless implement→review→fix→PR loop. Forces the debate+verifier review as the gate; transports the verdict via `$MRA_REVIEW_RESULT_FILE` (exit code is never trusted); three-valued APPROVED/CHANGES_REQUESTED/REVIEW_INCOMPLETE switch bounded by round/retry/global caps + a no-progress fingerprint. Default posts a COMMENT review (binding GitHub APPROVE is opt-in via `--auto-approve`). Env knobs: `MRA_DEV_IMPLEMENT_MAX_TURNS`, `MRA_DEV_FIX_MAX_TURNS`, `MRA_DEV_MAX_REVIEWS`, `MRA_DEV_ALLOWED_TOOLS`, `MRA_DEV_CLAUDE_BIN`. Cost accounting deferred.

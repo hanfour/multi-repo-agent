@@ -81,6 +81,15 @@ _scaffold_write_scope() {
   printf '%s\n' "$*" > "$ws/.collab/requirements/$req-scope"
 }
 
+# Ask the operator whether to adopt a pre-existing repo (never silently hijack).
+# A separate function so tests can stub the answer. Returns 0 = adopt, 1 = decline.
+_scaffold_confirm_adopt() {
+  local slug="$1"
+  printf 'repo %s already exists — adopt it (use as-is)? [y/N] ' "$slug" > /dev/tty
+  local ans; read -r ans < /dev/tty
+  [[ "$ans" == [yY]* ]]
+}
+
 mra_prd_scaffold() {
   local scaffold="" tasks="" req="" confirm=false dry=false
   while [[ $# -gt 0 ]]; do
@@ -130,20 +139,40 @@ _scaffold_create_all() {
       created+=("$name")   # resume: already created
     else
       if GH_TOKEN="$tok" gh repo view "$bare_org/$name" >/dev/null 2>&1; then
-        log_error "repo $bare_org/$name already exists (not from this run) — aborting (adopt not supported)" "prd"; return 1
+        # Repo already exists — ask the operator; never silently hijack.
+        if _scaffold_confirm_adopt "$bare_org/$name"; then
+          # clone into the workspace if not already there (fallback to init+remote)
+          [[ -d "$ws/$name/.git" ]] || ( cd "$ws" && GH_TOKEN="$tok" gh repo clone "$bare_org/$name" >/dev/null 2>&1 ) \
+            || { mkdir -p "$ws/$name"; git -C "$ws/$name" init -q; \
+                 git -C "$ws/$name" remote add origin "https://github.com/$bare_org/$name.git" 2>/dev/null || true; }
+          local tmp; tmp=$(mktemp)
+          jq --arg n "$name" --arg o "$bare_org" --arg v "$vis" \
+            '. + {($n):{org:$o,url:("https://github.com/"+$o+"/"+$n),visibility:$v,created:false,adopted:true,registered:false}}' \
+            "$ledger" > "$tmp" && mv "$tmp" "$ledger"
+          # seed ONLY if the adopted repo is empty/unborn — never clobber existing content
+          if ! git -C "$ws/$name" rev-parse HEAD >/dev/null 2>&1; then
+            GH_TOKEN="$tok" git -C "$ws/$name" commit --allow-empty -q -m "chore: scaffold $name ($req)" || true
+            GH_TOKEN="$tok" git -C "$ws/$name" push -u origin HEAD >/dev/null 2>&1 || log_warn "push failed for $name (re-run to resume)" "prd"
+          fi
+          created+=("$name")
+        else
+          log_error "adoption declined for $bare_org/$name — rename/remove it or drop it from the plan, then re-run" "prd"; return 1
+        fi
+      else
+        # Not exists — create it.
+        ( cd "$ws" && GH_TOKEN="$tok" gh repo create "$bare_org/$name" "--$vis" --description "$desc" --clone ) \
+          || { log_error "gh repo create failed: $name" "prd"; return 1; }
+        local tmp; tmp=$(mktemp)
+        jq --arg n "$name" --arg o "$bare_org" --arg v "$vis" \
+          '. + {($n):{org:$o,url:("https://github.com/"+$o+"/"+$n),visibility:$v,created:true,registered:false}}' \
+          "$ledger" > "$tmp" && mv "$tmp" "$ledger"
+        # verify clone landed at $ws/name; fallback for unborn/no-clone
+        [[ -d "$ws/$name/.git" ]] || { mkdir -p "$ws/$name"; git -C "$ws/$name" init -q; \
+          git -C "$ws/$name" remote add origin "https://github.com/$bare_org/$name.git" 2>/dev/null || true; }
+        GH_TOKEN="$tok" git -C "$ws/$name" commit --allow-empty -q -m "chore: scaffold $name ($req)" || true
+        GH_TOKEN="$tok" git -C "$ws/$name" push -u origin HEAD >/dev/null 2>&1 || log_warn "push failed for $name (re-run to resume)" "prd"
+        created+=("$name")
       fi
-      ( cd "$ws" && GH_TOKEN="$tok" gh repo create "$bare_org/$name" "--$vis" --description "$desc" --clone ) \
-        || { log_error "gh repo create failed: $name" "prd"; return 1; }
-      local tmp; tmp=$(mktemp)
-      jq --arg n "$name" --arg o "$bare_org" --arg v "$vis" \
-        '. + {($n):{org:$o,url:("https://github.com/"+$o+"/"+$n),visibility:$v,created:true,registered:false}}' \
-        "$ledger" > "$tmp" && mv "$tmp" "$ledger"
-      # verify clone landed at $ws/name; fallback for unborn/no-clone
-      [[ -d "$ws/$name/.git" ]] || { mkdir -p "$ws/$name"; git -C "$ws/$name" init -q; \
-        git -C "$ws/$name" remote add origin "https://github.com/$bare_org/$name.git" 2>/dev/null || true; }
-      GH_TOKEN="$tok" git -C "$ws/$name" commit --allow-empty -q -m "chore: scaffold $name ($req)" || true
-      GH_TOKEN="$tok" git -C "$ws/$name" push -u origin HEAD >/dev/null 2>&1 || log_warn "push failed for $name (re-run to resume)" "prd"
-      created+=("$name")
     fi
     _scaffold_register "$ws" "$name" "$type" "$desc" "$deps"
     local tmp2; tmp2=$(mktemp)
