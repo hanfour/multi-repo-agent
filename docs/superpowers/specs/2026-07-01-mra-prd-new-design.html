@@ -291,7 +291,6 @@ input[type="checkbox"] { accent-color: var(--primary); }
 <p><strong>Non-goals (v1)</strong>
 - Auto-creating repos or issues from the interactive session (plan/apply split, §4).
 - Multi-org greenfield (<code>--org</code> override) — all new repos go to the workspace's <code>gitOrg</code>. Backlog.
-- Adopting a pre-existing remote repo into a plan (<code>--adopt</code>) — a planned name that already exists remotely <strong>aborts</strong>. Backlog.
 - Workspace bootstrap — <code>mra prd --new</code> requires an already-<code>mra init</code>'d workspace (<code>.collab/dep-graph.json</code>).
 - <code>mra dev --issue N</code> — still backlog.</p>
 <h2 id="3-command-surface">3. Command surface</h2>
@@ -398,7 +397,11 @@ mra prd-scaffold --req &lt;REQ-ID&gt; [--confirm] [--dry-run]   # operator-run, 
    → else `Create N repo(s)? [y/N]` on /dev/tty; y → _scaffold_create_all
  → WORKER (_scaffold_create_all): ensure ledger &lt;REQ&gt;-scaffold-repos.json exists ({}); per repo in plan order:
      in-ledger → skip (resume);
-     else `GH_TOKEN=$tok gh repo view org/name` — exists-but-not-in-this-run&#39;s-ledger → ABORT loud (never adopt);
+     else `GH_TOKEN=$tok gh repo view org/name` — exists-but-not-in-this-run&#39;s-ledger → per-repo TTY confirm
+          `adopt it? [y/N]` via `_scaffold_confirm_adopt` (separate, test-overridable fn); **y** → clone into
+          workspace + write ledger `{created:false,adopted:true}` + seed ONLY if unborn (`git rev-parse HEAD`
+          fails; never clobbers existing content); **N** → abort loud, return 1. An existing repo NEVER reaches
+          `gh repo create` (adopt or abort only).
           not-exists → create in a WORKSPACE-PINNED subshell (§15 fix 3):
             ( cd &quot;$ws&quot; &amp;&amp; GH_TOKEN=$tok gh repo create org/name --&lt;vis&gt; --description d --clone )
           write the ledger entry immediately {created:true, registered:false}; verify the clone landed at
@@ -423,7 +426,7 @@ mra prd-scaffold --req &lt;REQ-ID&gt; [--confirm] [--dry-run]   # operator-run, 
 <li><strong>TTY gate (CRITICAL):</strong> create requires <code>--confirm</code> AND not <code>--dry-run</code> AND <code>[ -t 0 ]</code>; a non-TTY/agent/CI call returns 0 with zero creates. The zero-create-on-non-TTY test is a merge gate.</li>
 <li><strong>Name-capture guard:</strong> canonical <code>--new &lt;name&gt;</code> only, <code>$2 != -*</code>, so a flag can never become a repo name flowing into <code>gh repo create org/NAME</code> or <code>$ws/NAME</code>; <code>_MRA_ID_REGEX</code> + <code>validate_repo_name</code> re-asserted per repo at apply (since <code>--new</code> bypasses <code>validate_repo_subset</code>).</li>
 <li><strong>Dual-account:</strong> org = workspace <code>gitOrg</code>; token via <code>_prd_account_token</code> validated against <code>ghAccounts</code> <strong>before</strong> the first create; abort loud on missing mapping/unresolvable token. <code>GH_TOKEN</code> pinned on every <code>gh</code> and <code>git push</code> call (the https-credential-helper assumption is documented + verified in Task 7, §15 fix 4).</li>
-<li><strong>Idempotent resume + adopt-abort:</strong> immutable ledger keyed by name, written the instant <code>gh repo create</code> returns (<code>created</code>/<code>registered</code> split); re-runs skip ledgered repos; a planned name that exists remotely but not in this run's ledger <strong>aborts</strong> via a <code>gh repo view</code> pre-check (never silently adopts).</li>
+<li><strong>Idempotent resume + adopt-confirm:</strong> immutable ledger keyed by name, written the instant <code>gh repo create</code> (or clone) returns (<code>created</code>/<code>adopted</code>/<code>registered</code> split); re-runs skip ledgered repos; a planned name that exists remotely but not in this run's ledger triggers a per-repo TTY confirm <code>adopt it? [y/N]</code> — y adopts (clone + register + scope + seed-only-if-empty, never clobbers existing content); N aborts loud. An existing repo NEVER reaches <code>gh repo create</code>.</li>
 <li><strong>Additive registration:</strong> pure-jq, atomic (§8), never <code>build_dep_graph</code>/<code>mra scan</code>.</li>
 <li><strong>PII/name/org hygiene:</strong> scan repo names + org + description before any create; default <code>--private</code>, public is explicit opt-in (workspace memory rule: scan PII before any public-facing action); <code>org == gitOrg</code> enforced so <code>sync</code> can re-clone.</li>
 <li><strong>Brownfield untouched:</strong> <code>prd_launch</code> / <code>agents/prd-agent.md</code> byte-for-byte; greenfield forks before reaching them.</li>

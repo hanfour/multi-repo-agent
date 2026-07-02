@@ -130,15 +130,47 @@ assert_eq "scope from created" "billing-api billing-ui" "$(cat "$WS3/.collab/req
 # resume: re-run creates nothing new
 : > "$GH_LOG"; ( cd "$WS3" && _scaffold_create_all "$WS3" "$SJ3" REQ-2026-0003 acme ) >/dev/null 2>&1
 assert_eq "resume creates nothing" "0" "$(grep -c 'repo create' "$GH_LOG")"
-# adopt-abort: a fresh plan repo that gh repo view says EXISTS -> abort, no create
+# adopt-confirm: a pre-existing planned repo prompts the operator — never reaches gh repo create
 cat > "$WS3/.collab/requirements/REQ-2026-0004-scaffold.json" <<'JSON'
 {"requirement_id":"REQ-2026-0004","repos":[{"name":"already-there","org":"acme","visibility":"private","type":"service","description":"x","deps":[]}]}
 JSON
-gh() { echo "gh $*" >> "$GH_LOG"; case "$1 $2" in "auth token") echo TOK;; "repo view") return 0;; "repo create") echo SHOULD_NOT >> "$GH_LOG";; *) return 0;; esac; }
-: > "$GH_LOG"; ( cd "$WS3" && _scaffold_create_all "$WS3" "$WS3/.collab/requirements/REQ-2026-0004-scaffold.json" REQ-2026-0004 acme ) >/dev/null 2>&1; rc=$?
-assert_eq "adopt-abort returns 1" "1" "$rc"
-grep -q 'SHOULD_NOT' "$GH_LOG" && fail "created an existing repo (adopt!)" || ok "adopt-abort: no create on existing repo"
-unset -f gh git config_get
+# Case A: adopt=yes => clone + register + scope, NO create
+_scaffold_confirm_adopt() { return 0; }
+gh() {
+  echo "gh $*" >> "$GH_LOG"
+  case "$1 $2" in
+    "auth token")  echo "TOK";;
+    "repo view")   return 0;;                                # exists
+    "repo create") echo "SHOULD_NOT" >> "$GH_LOG";;
+    "repo clone")  mkdir -p "$WS3/already-there/.git";;     # clone lands
+    *) return 0;;
+  esac
+}
+git() {
+  echo "git $*" >> "$GH_LOG"
+  case "$*" in
+    *"rev-parse HEAD"*) return 1;;  # unborn — seed triggers
+    *) return 0;;
+  esac
+}
+: > "$GH_LOG"
+( cd "$WS3" && _scaffold_create_all "$WS3" "$WS3/.collab/requirements/REQ-2026-0004-scaffold.json" REQ-2026-0004 acme ) >/dev/null 2>&1; rc=$?
+LED4="$WS3/.collab/requirements/REQ-2026-0004-scaffold-repos.json"
+assert_eq "adopt=yes returns 0" "0" "$rc"
+grep -q 'SHOULD_NOT' "$GH_LOG" && fail "adopt=yes: gh repo create was called (must not)" || ok "adopt=yes: no repo create on existing repo"
+assert_eq "ledger adopted:true" "true" "$(jq -r '.["already-there"].adopted' "$LED4")"
+assert_eq "ledger created:false" "false" "$(jq -r '.["already-there"].created' "$LED4")"
+assert_eq "adopt=yes: dep-graph got node" "service" "$(jq -r '.projects["already-there"].type' "$WS3/.collab/dep-graph.json")"
+grep -q 'already-there' "$WS3/.collab/requirements/REQ-2026-0004-scope" 2>/dev/null \
+  && ok "adopt=yes: scope contains already-there" || fail "adopt=yes: scope missing already-there"
+# Case B: adopt=no => abort loud, no create
+_scaffold_confirm_adopt() { return 1; }
+rm -f "$WS3/.collab/requirements/REQ-2026-0004-scaffold-repos.json"
+: > "$GH_LOG"
+( cd "$WS3" && _scaffold_create_all "$WS3" "$WS3/.collab/requirements/REQ-2026-0004-scaffold.json" REQ-2026-0004 acme ) >/dev/null 2>&1; rc=$?
+assert_eq "adopt=no returns 1" "1" "$rc"
+grep -q 'SHOULD_NOT' "$GH_LOG" && fail "adopt=no: gh repo create was called (must not)" || ok "adopt=no: no repo create when adoption declined"
+unset -f _scaffold_confirm_adopt gh git config_get
 rm -rf "$WS3" "$GH_LOG"
 
 # --- gate: non-TTY / no-confirm / dry-run create nothing ---
