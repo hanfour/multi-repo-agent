@@ -97,8 +97,10 @@ gh() {
   esac
 }
 GH_N=0
-_prd_create_all "$TJ" REQ-2026-0001 http://prd >/dev/null 2>&1
+CREATE_OUT=$(_prd_create_all "$TJ" REQ-2026-0001 http://prd 2>&1)
 LED="$WS/.collab/requirements/gate-issues.json"
+[[ "$CREATE_OUT" == *"prd-issues complete"* ]] && ok "prints completion summary" || fail "no completion summary: $CREATE_OUT"
+[[ "$CREATE_OUT" == *"next: implement"* ]] && ok "prints next-step hint" || fail "no next-step hint"
 assert_eq "ledger has t1 number" "1" "$(jq -r '.t1.number' "$LED")"
 assert_eq "ledger has t2 number" "2" "$(jq -r '.t2.number' "$LED")"
 # t1 (dep) created before t2 (dependent)
