@@ -117,6 +117,22 @@ _review_event_for_status() {
   esac
 }
 
+# _review_effective_status: under the :a: approve-if-no-high policy, derive the
+# effective status from comment severity so the posted event, the review body,
+# and the `status:` stdout line all agree. Requires BOTH the policy flag and the
+# operator approve opt-in; otherwise the model status passes through unchanged.
+_review_effective_status() {
+  local status="${1:-}" review_json="${2:-}"
+  if [[ "${MRA_REVIEW_APPROVE_IF_NO_HIGH:-}" == "1" && "${MRA_REVIEW_ALLOW_APPROVE:-}" == "1" ]]; then
+    local high_count
+    high_count=$(printf '%s' "$review_json" \
+      | jq -r '[.comments[]? | select(.severity == "CRITICAL" or .severity == "HIGH")] | length' 2>/dev/null)
+    if [[ "${high_count:-0}" -eq 0 ]]; then echo "APPROVED"; else echo "CHANGES_REQUESTED"; fi
+    return 0
+  fi
+  echo "$status"
+}
+
 ## Strategy selection based on diff size, file count, and API change
 ## Returns: light | standard | debate
 select_review_strategy() {
@@ -709,6 +725,7 @@ post_inline_review() {
   # produced this JSON sees PR content (potentially attacker-controlled
   # via prompt injection), so treating its APPROVE verdict as binding
   # is unsafe by default. ---
+  status=$(_review_effective_status "$status" "$review_json")
   local event
   event=$(_review_event_for_status "$status")
 
