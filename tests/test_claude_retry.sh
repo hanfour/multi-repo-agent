@@ -110,23 +110,35 @@ done
 # non-transient: unknown flag with exit 1, and any exit-0 case
 _claude_is_transient 1 "unknown option --bogus" && { fail_test "should NOT be transient: bad flag"; transient_ok=0; }
 _claude_is_transient 0 "Overloaded" && { fail_test "exit 0 is never a transient error"; transient_ok=0; }
-# a 3-digit run INSIDE a larger number must NOT be read as a 5xx/429 status
+# a 3-digit run INSIDE a larger number, or one with a unit suffix, must NOT be
+# read as a 5xx/429 status
 _claude_is_transient 1 "processed 5000 files then a fatal syntax error" && { fail_test "5000 should NOT match 5xx"; transient_ok=0; }
 _claude_is_transient 1 "fatal parse error at line 1500" && { fail_test "1500 should NOT match 5xx"; transient_ok=0; }
 _claude_is_transient 1 "wrote 42900 bytes then aborted" && { fail_test "42900 should NOT match 429"; transient_ok=0; }
+_claude_is_transient 1 "request failed after 512ms" && { fail_test "512ms should NOT match 5xx"; transient_ok=0; }
+_claude_is_transient 1 "the 543rd attempt failed fatally" && { fail_test "543rd should NOT match 5xx"; transient_ok=0; }
 [[ "$transient_ok" -eq 1 ]] && pass_test "_claude_is_transient classifies transient vs fatal correctly"
 
-# --- 7. --stream mode: retries a transient failure then streams stdout through ---
+# --- 7. --stream mode does NOT retry (streamed bytes cannot be un-emitted) ---
 reset; echo 1 > "$TMP/fail_n"
 out=$(claude_invoke --stream test -p "hi" 2>/dev/null); rc=$?
 calls=$(cat "$COUNTER")
-if [[ "$out" == *"OK-RESULT"* && "$rc" -eq 0 && "$calls" -eq 2 ]]; then
-  pass_test "--stream retries transient then streams output (2 calls, rc 0)"
+if [[ "$rc" -ne 0 && "$calls" -eq 1 ]]; then
+  pass_test "--stream does not retry a transient failure (1 call, rc!=0)"
 else
-  fail_test "--stream retry: out='$out' rc=$rc calls=$calls (want OK-RESULT/0/2)"
+  fail_test "--stream no-retry: rc=$rc calls=$calls (want rc!=0, 1 call)"
 fi
 
-# --- 8. --stream cannot see an empty zero-exit result, so it does NOT retry it ---
+# --- 7b. --stream streams output through on success ---
+reset
+out=$(claude_invoke --stream test -p "hi" 2>/dev/null); rc=$?
+if [[ "$out" == *"OK-RESULT"* && "$rc" -eq 0 ]]; then
+  pass_test "--stream streams output on success"
+else
+  fail_test "--stream success: out='$out' rc=$rc (want OK-RESULT/0)"
+fi
+
+# --- 8. --stream empty zero-exit is taken as success (no retry) ---
 reset; echo 1 > "$TMP/empty_n"
 out=$(claude_invoke --stream test -p "hi" 2>/dev/null); rc=$?
 calls=$(cat "$COUNTER")
@@ -134,6 +146,18 @@ if [[ "$rc" -eq 0 && "$calls" -eq 1 ]]; then
   pass_test "--stream treats empty zero-exit as success (no retry, 1 call)"
 else
   fail_test "--stream empty: rc=$rc calls=$calls (want rc 0, 1 call)"
+fi
+
+# --- 9. retry SURVIVES `set -e` — production runs bin/mra.sh with set -euo
+# pipefail. Regression: a bare `out=$(claude ...)` aborts under errexit on a
+# non-zero exit BEFORE the retry loop reacts, silently defeating all retries.
+reset; echo 2 > "$TMP/fail_n"
+out=$( set -e; claude_invoke test -p "hi" 2>/dev/null ); rc=$?
+calls=$(cat "$COUNTER")
+if [[ "$out" == "OK-RESULT" && "$rc" -eq 0 && "$calls" -eq 3 ]]; then
+  pass_test "retry survives set -e (transient x2 -> success, 3 calls)"
+else
+  fail_test "set -e retry: out='$out' rc=$rc calls=$calls (want OK-RESULT/0/3)"
 fi
 
 echo "---"
