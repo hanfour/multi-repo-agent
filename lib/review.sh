@@ -124,21 +124,24 @@ _review_event_for_status() {
 _review_effective_status() {
   local status="${1:-}" review_json="${2:-}"
   if [[ "${MRA_REVIEW_APPROVE_IF_NO_HIGH:-}" == "1" && "${MRA_REVIEW_ALLOW_APPROVE:-}" == "1" ]]; then
-    # NEVER upgrade a review that did not COMPLETE. A REVIEW_INCOMPLETE carries
-    # status COMMENT + empty comments, which would otherwise read as "no
-    # HIGH/CRITICAL → approve" and post a false green on a review that never ran.
-    # Detect it the same way _review_issues_display does (the summary sentinel)
-    # and pass the status through unchanged.
-    local summary
-    summary=$(printf '%s' "$review_json" | jq -r '.summary // ""' 2>/dev/null)
-    if [[ "$summary" == *"REVIEW_INCOMPLETE"* ]]; then
-      echo "$status"
-      return 0
-    fi
+    # Only a COMPLETED, decisive verdict may be recomputed. Anything that is not
+    # APPROVED / CHANGES_REQUESTED (a bare COMMENT, a REVIEW_INCOMPLETE, a
+    # max-turns-truncated single-pass that emitted a premature COMMENT) signals a
+    # review that did not commit to a verdict and must NEVER be manufactured into
+    # an approval — pass it through unchanged.
+    case "$status" in
+      APPROVED|CHANGES_REQUESTED) ;;
+      *) echo "$status"; return 0 ;;
+    esac
+    # Recompute from the actual comment severities, ignoring the model's status
+    # claim (so an APPROVED verdict carrying a HIGH comment still downgrades).
+    # Fail CLOSED: only a clean numeric zero approves; empty / non-numeric jq
+    # output (should not happen post-validation) → CHANGES_REQUESTED, never a
+    # silent auto-approve.
     local high_count
     high_count=$(printf '%s' "$review_json" \
       | jq -r '[.comments[]? | select(.severity == "CRITICAL" or .severity == "HIGH")] | length' 2>/dev/null)
-    if [[ "${high_count:-0}" -eq 0 ]]; then echo "APPROVED"; else echo "CHANGES_REQUESTED"; fi
+    if [[ "$high_count" == "0" ]]; then echo "APPROVED"; else echo "CHANGES_REQUESTED"; fi
     return 0
   fi
   echo "$status"
@@ -487,12 +490,14 @@ ${prompt}"
 
   if [[ "$output_mode" == "terminal" ]]; then
     # Terminal mode: stream live (--stream) so the operator sees tokens as they
-    # arrive; still retries transient failures via claude_invoke.
-    claude_invoke --stream review -p "$prompt" "${claude_args[@]}"
+    # arrive. `|| true`: under `set -e` a total claude failure returns non-zero;
+    # swallow it so the review command exits cleanly rather than aborting mid-run.
+    claude_invoke --stream review -p "$prompt" "${claude_args[@]}" || true
   else
-    # Inline mode: get JSON, parse, post to GitHub
+    # Inline mode: get JSON, parse, post to GitHub. `|| true` keeps a total
+    # claude failure from aborting under `set -e` — we handle empty below.
     local review_json
-    review_json=$(claude_invoke review -p "$prompt" "${claude_args[@]}")
+    review_json=$(claude_invoke review -p "$prompt" "${claude_args[@]}") || true
 
     if [[ -z "$review_json" ]]; then
       log_error "Claude returned empty response" "review"
