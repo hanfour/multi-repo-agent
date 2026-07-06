@@ -6,6 +6,7 @@ MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Source all libs
 source "$MRA_DIR/lib/colors.sh"
 source "$MRA_DIR/lib/claude-invoke.sh"
+source "$MRA_DIR/lib/review-verdict.sh"
 source "$MRA_DIR/lib/args.sh"
 source "$MRA_DIR/lib/security-log.sh"
 source "$MRA_DIR/lib/project-path.sh"
