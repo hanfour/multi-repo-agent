@@ -12,26 +12,11 @@
 #
 # Usage: called from review.sh when strategy=debate
 
-# The review agents end their output with a verdict line that BOTH confirms the
-# review finished AND states the verdict explicitly:
-#   ===MRA-REVIEW-COMPLETE: APPROVED===
-#   ===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===
-# Deciding from this explicit signal — never by regex-counting the agents'
-# free-text findings (bullet / bold "- **[MED]**" / "### [HIGH]" heading / prose
-# all occur live) — is what keeps a failed/garbled/cut-off review from
-# masquerading as a clean approval. Absence of the line = the agent did not finish.
-MRA_REVIEW_SENTINEL_TOKEN="MRA-REVIEW-COMPLETE"
+# The sentinel token + verdict parser now live in lib/review-verdict.sh so the
+# debate and single-pass paths judge completeness by one rule. _debate_verdict_of
+# is kept as a thin alias for readability at debate call sites.
 
-# Extract one agent's declared verdict: APPROVED | CHANGES_REQUESTED | NONE.
-_debate_verdict_of() {
-  if printf '%s\n' "$1" | grep -qE "${MRA_REVIEW_SENTINEL_TOKEN}:[[:space:]]*CHANGES_REQUESTED"; then
-    printf 'CHANGES_REQUESTED'
-  elif printf '%s\n' "$1" | grep -qE "${MRA_REVIEW_SENTINEL_TOKEN}:[[:space:]]*APPROVED"; then
-    printf 'APPROVED'
-  else
-    printf 'NONE'
-  fi
-}
+_debate_verdict_of() { review_verdict_of "$1"; }
 
 # Decide from the two agents' EXPLICIT verdicts. Prints one of:
 #   PROCEED — at least one agent reports CHANGES_REQUESTED; go to synthesis.
@@ -194,7 +179,7 @@ run_debate_review() {
       log_error >&2 "[fast] agent diagnostics:" "debate"
       printf '%s\n' "$agent_stderr" | tail -12 | sed 's/^/    /' >&2
     fi
-    echo '{"status":"COMMENT","summary":"⚠️ REVIEW_INCOMPLETE — at least one analysis agent did not finish (no completion verdict; likely an agent failure or a max-turns cutoff — try MRA_REVIEW_AGENT_MAX_TURNS or a PKB). This is NOT an approval; re-run or review manually.","comments":[]}'
+    review_incomplete_json "at least one analysis agent did not finish (no completion verdict; likely an agent failure or a max-turns cutoff — try MRA_REVIEW_AGENT_MAX_TURNS or a PKB). This is NOT an approval; re-run or review manually."
     return
   fi
 
