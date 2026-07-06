@@ -34,8 +34,11 @@ investigation). The debate sentinel has the same blind spot — that is a
 reviewer-**quality** concern owned by `agents/code-reviewer.md`, not a
 completeness signal. Out of scope here.
 
-This covers **both** output modes (per the design decision): `inline` (JSON,
-`--pr`, posts to GitHub) and `terminal` (prose, local print).
+**Scope: `inline` (JSON, `--pr`) only.** That is the only path that posts to
+GitHub and runs the approve gate — the only false-green surface. `terminal`
+(prose, local print) has no posting / APPROVE path, so it keeps its live
+streaming (`claude_invoke --stream`, added in PR #7) unchanged and is out of
+scope for the sentinel — no benefit to justify losing the stream.
 
 ## Design
 
@@ -60,40 +63,36 @@ existing debate tests must stay green). `bin/mra.sh` sources
 
 ### 2. Prompt contract — `lib/review-prompt.sh` (`build_review_prompt`)
 
-Append, to BOTH the `inline` (STRICT JSON) and `terminal` (prose) output-format
-blocks, a required final line:
+Append, to the `inline` (STRICT JSON) output-format block only, a required
+final line:
 
-> After the JSON/review, output EXACTLY ONE final line on its own:
+> After the JSON, output EXACTLY ONE final line on its own:
 > `===MRA-REVIEW-COMPLETE: APPROVED===` or
 > `===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===`.
 > Omitting it marks the review incomplete.
 
-For `inline`, this is tolerated by `extract_json` (its `/^{/,/^}/p` fallback
-grabs the JSON object and ignores the trailing sentinel line).
+This is tolerated by `extract_json` (its `/^{/,/^}/p` fallback grabs the JSON
+object and ignores the trailing sentinel line). The `terminal` block is
+unchanged.
 
-### 3. Detection + handling — `lib/review.sh` single-pass path
+### 3. Detection + handling — `lib/review.sh` single-pass path (inline branch only)
 
-After `claude_invoke` returns the raw output (`review_json` inline /
-streamed-or-captured terminal), before extract/validate/post:
+The `inline` branch already **buffers** the response
+(`review_json=$(claude_invoke review …)`), so the sentinel is inspectable with
+no change to I/O. After the call, before extract/validate/post:
 
-- Compute `verdict=$(review_verdict_of "$raw")`.
+- Compute `verdict=$(review_verdict_of "$review_json")`.
 - **Sentinel present** (`APPROVED`/`CHANGES_REQUESTED`): proceed exactly as
-  today — `extract_json` → validate → `post_inline_review` (inline) or print
-  (terminal). The JSON's own `status` still governs the posted verdict; the
-  sentinel is only completion proof.
-- **Sentinel absent** (`NONE`):
-  - `inline`: replace the body with `review_incomplete_json` and route it
-    through `post_inline_review` → posts a neutral **COMMENT** (the round-3 gate
-    passes COMMENT through, never APPROVE). Replaces today's `return 1`.
-  - `terminal`: print a `⚠️ REVIEW_INCOMPLETE — …` notice instead of the
-    (partial) body.
+  today — `extract_json` → validate → `post_inline_review`. The JSON's own
+  `status` still governs the posted verdict; the sentinel is only completion
+  proof.
+- **Sentinel absent** (`NONE`): replace the body with `review_incomplete_json`
+  and route it through `post_inline_review` → posts a neutral **COMMENT** (the
+  round-3 gate passes COMMENT through, never APPROVE). Replaces today's
+  `return 1` on the incomplete case.
 
-Terminal streaming note: the terminal path currently uses
-`claude_invoke --stream` (stdout goes live, not captured), so the sentinel
-cannot be inspected after the fact. To detect it, the terminal single-pass
-switches to **buffered** `claude_invoke` (capture, then check sentinel, then
-print). Acceptable: single-pass terminal output is short; the resilience/retry
-behaviour is unchanged.
+The `terminal` branch is untouched — it keeps `claude_invoke --stream` and its
+live output; no sentinel handling there (no posting / APPROVE path).
 
 ### 4. Error handling
 
@@ -109,13 +108,13 @@ Mirror `tests/test_review_debate.sh`'s sentinel assertions in a new
   (incl. token embedded after a JSON body).
 - `review_incomplete_json`: valid JSON, `status==COMMENT`, empty comments,
   summary contains `REVIEW_INCOMPLETE`.
-- Single-pass handling (with a stubbed `claude`/`MRA_CLAUDE_BIN`):
-  - sentinel present → normal verdict flows to post/print.
-  - sentinel absent (inline) → `post_inline_review` receives the incomplete
-    JSON; effective event is COMMENT, never APPROVE (even with the `:a:` policy
-    + `MRA_REVIEW_ALLOW_APPROVE=1`).
-  - sentinel absent (terminal) → REVIEW_INCOMPLETE notice, non-zero/handled.
-- `build_review_prompt` (both modes) includes the sentinel instruction.
+- Single-pass inline handling (with a stubbed `claude`/`MRA_CLAUDE_BIN`):
+  - sentinel present → normal verdict flows to `post_inline_review`.
+  - sentinel absent → `post_inline_review` receives the incomplete JSON;
+    effective event is COMMENT, never APPROVE (even with the `:a:` policy +
+    `MRA_REVIEW_ALLOW_APPROVE=1`).
+- `build_review_prompt` inline mode includes the sentinel instruction; terminal
+  mode does not.
 - Regression: `tests/test_review_debate.sh` stays green (aliases preserved).
 
 ## Out of scope
