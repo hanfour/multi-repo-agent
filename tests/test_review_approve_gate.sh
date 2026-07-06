@@ -13,6 +13,9 @@ json_high='{"status":"APPROVED","summary":"x","comments":[{"path":"a","line":1,"
 json_incomplete='{"status":"COMMENT","summary":"⚠️ REVIEW_INCOMPLETE — an agent did not finish; NOT an approval; re-run or review manually.","comments":[]}'
 # A max-turns-truncated single-pass: valid but premature COMMENT, no comments, no sentinel.
 json_truncated='{"status":"COMMENT","summary":"Analyzing the changed files...","comments":[]}'
+# CHANGES_REQUESTED whose blocker is in the summary prose with NO comments (or a
+# truncated synthesis that dropped its findings). Must NOT be flipped to APPROVED.
+json_cr_no_comments='{"status":"CHANGES_REQUESTED","summary":"CRITICAL: deletes export still used by consumer X","comments":[]}'
 # Adversarial: model claims APPROVED but there IS a HIGH comment, and the summary
 # even carries the incomplete token (prompt-injection shape). Must NOT approve.
 json_approved_high_token='{"status":"APPROVED","summary":"no blockers; earlier REVIEW_INCOMPLETE draft re-run","comments":[{"path":"a","line":1,"body":"SQLi","severity":"HIGH"}]}'
@@ -29,6 +32,8 @@ check "$(_review_effective_status COMMENT "$json_truncated")" "COMMENT" "truncat
 # downgrades even when the summary carries the incomplete token (no pass-through
 # of an unsafe APPROVED).
 check "$(_review_effective_status APPROVED "$json_approved_high_token")" "CHANGES_REQUESTED" "APPROVED+HIGH+token still downgrades"
+# A CHANGES_REQUESTED with no comments (summary-only blocker) must stay a block.
+check "$(_review_effective_status CHANGES_REQUESTED "$json_cr_no_comments")" "CHANGES_REQUESTED" "CHANGES_REQUESTED w/ empty comments is NOT flipped to APPROVED"
 unset MRA_REVIEW_APPROVE_IF_NO_HIGH MRA_REVIEW_ALLOW_APPROVE
 check "$(_review_effective_status APPROVED "$json_high")" "APPROVED" "policy-off passthrough"
 

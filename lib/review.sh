@@ -124,23 +124,32 @@ _review_event_for_status() {
 _review_effective_status() {
   local status="${1:-}" review_json="${2:-}"
   if [[ "${MRA_REVIEW_APPROVE_IF_NO_HIGH:-}" == "1" && "${MRA_REVIEW_ALLOW_APPROVE:-}" == "1" ]]; then
-    # Only a COMPLETED, decisive verdict may be recomputed. Anything that is not
-    # APPROVED / CHANGES_REQUESTED (a bare COMMENT, a REVIEW_INCOMPLETE, a
-    # max-turns-truncated single-pass that emitted a premature COMMENT) signals a
-    # review that did not commit to a verdict and must NEVER be manufactured into
-    # an approval — pass it through unchanged.
+    # Decide whether this verdict is eligible for the "approve if no HIGH" flip.
+    #   APPROVED         -> recompute (downgrade if a HIGH comment slipped in).
+    #   CHANGES_REQUESTED-> only if it itemised its concerns as comments. A
+    #                       CHANGES_REQUESTED with NO comments put its blocker in
+    #                       the summary prose (or is a truncated synthesis that
+    #                       dropped its findings) — never manufacture that into an
+    #                       approval; pass it through as a block.
+    #   anything else    -> non-verdict (bare COMMENT / REVIEW_INCOMPLETE /
+    #                       truncated single-pass) — pass through, never approve.
     case "$status" in
-      APPROVED|CHANGES_REQUESTED) ;;
+      APPROVED) ;;
+      CHANGES_REQUESTED)
+        local cc
+        cc=$(printf '%s' "$review_json" | jq -r '.comments | length' 2>/dev/null) || cc=""
+        [[ "$cc" == "0" || -z "$cc" ]] && { echo "$status"; return 0; }
+        ;;
       *) echo "$status"; return 0 ;;
     esac
     # Recompute from the actual comment severities, ignoring the model's status
     # claim (so an APPROVED verdict carrying a HIGH comment still downgrades).
     # Fail CLOSED: only a clean numeric zero approves; empty / non-numeric jq
-    # output (should not happen post-validation) → CHANGES_REQUESTED, never a
-    # silent auto-approve.
+    # output (incl. a jq error — `|| high_count=""` keeps errexit from aborting
+    # here) → CHANGES_REQUESTED, never a silent auto-approve.
     local high_count
     high_count=$(printf '%s' "$review_json" \
-      | jq -r '[.comments[]? | select(.severity == "CRITICAL" or .severity == "HIGH")] | length' 2>/dev/null)
+      | jq -r '[.comments[]? | select(.severity == "CRITICAL" or .severity == "HIGH")] | length' 2>/dev/null) || high_count=""
     if [[ "$high_count" == "0" ]]; then echo "APPROVED"; else echo "CHANGES_REQUESTED"; fi
     return 0
   fi
