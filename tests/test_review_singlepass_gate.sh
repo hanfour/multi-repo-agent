@@ -34,6 +34,23 @@ out=$(_review_singlepass_body "$(printf '%s\n%s' 'not json at all' '===MRA-REVIE
 # always emits exactly one valid JSON object
 echo "$out" | jq . >/dev/null 2>&1 && ok "always valid json" || fail "not valid json: [$out]"
 
+# regression (#8): a HIGH comment whose BODY TEXT merely mentions the
+# sentinel token (very plausible when mra reviews its own sentinel-mechanism
+# PRs) must survive the strip. Only the real trailing sentinel LINE may be
+# removed — a substring grep would delete the comment's line wholesale,
+# silently dropping the HIGH finding while leaving the JSON still valid.
+TOKEN_IN_BODY_RAW=$(cat <<'EOF'
+{"status":"CHANGES_REQUESTED","summary":"needs work","comments":[
+{"severity":"HIGH","body":"See ===MRA-REVIEW-COMPLETE: APPROVED=== mentioned in the code comment - this is the bug"},
+{"severity":"LOW","body":"minor nit"}
+]}
+===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===
+EOF
+)
+out=$(_review_singlepass_body "$TOKEN_IN_BODY_RAW")
+echo "$out" | jq . >/dev/null 2>&1 && ok "token-in-body -> still valid json" || fail "token-in-body: not valid json: [$out]"
+[[ "$(echo "$out" | jq '[.comments[]|select(.severity=="HIGH")]|length')" == "1" ]] && ok "token-in-body -> HIGH comment survives strip" || fail "token-in-body: HIGH comment lost: [$out]"
+
 # wiring: review.sh actually calls the helper on the inline path
 grep -q '_review_singlepass_body' "$MRA_DIR/lib/review.sh" && ok "inline path uses _review_singlepass_body" || fail "review.sh does not call _review_singlepass_body"
 
