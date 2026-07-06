@@ -107,7 +107,14 @@ Rules for "comments":
 
 Rules for "body":
 - Be specific about the problem and suggest a fix.
-- For API breaking changes, mention which consumer file and line is affected.'
+- For API breaking changes, mention which consumer file and line is affected.
+
+## Completion (REQUIRED)
+After the JSON object, output EXACTLY ONE final line on its own — it confirms the
+review finished:
+===MRA-REVIEW-COMPLETE: APPROVED===           (status APPROVED)
+===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===   (status CHANGES_REQUESTED)
+Omitting this line marks the review INCOMPLETE (it will not be treated as an approval).'
   else
     output_instructions='## Review Output
 
