@@ -659,7 +659,7 @@ _repair_review_json() {
   prompt="The text below is meant to be ONE JSON object for a code review but is malformed (most likely an unescaped double-quote inside a string value, or stray markdown). Output ONLY the corrected JSON object: no markdown fences, no commentary, nothing before or after. Backslash-escape every double-quote that appears inside a string value. Preserve ALL original content (paths, line numbers, severities, comment bodies) exactly.
 
 ${broken}"
-  "${MRA_CLAUDE_BIN:-claude}" -p "$prompt" \
+  claude_invoke review-repair -p "$prompt" \
     --model "${MRA_REVIEW_REPAIR_MODEL:-haiku}" \
     --max-turns 1 \
     --disallowedTools "Write,Edit,NotebookEdit" \
