@@ -152,6 +152,18 @@ select_review_strategy() {
   fi
 }
 
+## Turn budget for a single-pass strategy. Tunable via env; too low a value cuts
+## the agent off mid-analysis and yields an empty/garbled response (an incomplete
+## review, not a clean one). standard default raised 3 -> 6.
+##   light    -> MRA_REVIEW_LIGHT_MAX_TURNS    (default 2)
+##   standard -> MRA_REVIEW_STANDARD_MAX_TURNS (default 6)
+_review_strategy_turns() {
+  case "$1" in
+    light) echo "${MRA_REVIEW_LIGHT_MAX_TURNS:-2}" ;;
+    *)     echo "${MRA_REVIEW_STANDARD_MAX_TURNS:-6}" ;;
+  esac
+}
+
 review_project() {
   local workspace="$1"
   shift
@@ -449,12 +461,14 @@ ${prompt}"
   claude_args+=(--model "$model")
   claude_args+=(--setting-sources "project")
 
-  # Light strategy: fewer turns, no consumer context search
+  # Turn budget per strategy (see _review_strategy_turns — tunable via env).
+  local strategy_turns
+  strategy_turns=$(_review_strategy_turns "$strategy")
+  claude_args+=(--max-turns "$strategy_turns")
   if [[ "$strategy" == "light" ]]; then
-    claude_args+=(--max-turns 2)
-    log_info "light strategy: max-turns=2, focused context" "review"
+    log_info "light strategy: max-turns=$strategy_turns, focused context" "review"
   else
-    claude_args+=(--max-turns 3)
+    log_info "standard strategy: max-turns=$strategy_turns" "review"
   fi
 
   # --- Run Claude ---
@@ -462,11 +476,11 @@ ${prompt}"
 
   if [[ "$output_mode" == "terminal" ]]; then
     # Terminal mode: just print
-    claude -p "$prompt" "${claude_args[@]}" 2>/dev/null
+    claude_invoke review -p "$prompt" "${claude_args[@]}"
   else
     # Inline mode: get JSON, parse, post to GitHub
     local review_json
-    review_json=$(claude -p "$prompt" "${claude_args[@]}" 2>/dev/null)
+    review_json=$(claude_invoke review -p "$prompt" "${claude_args[@]}")
 
     if [[ -z "$review_json" ]]; then
       log_error "Claude returned empty response" "review"

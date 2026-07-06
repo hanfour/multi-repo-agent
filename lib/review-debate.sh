@@ -142,13 +142,18 @@ run_debate_review() {
   local findings_a_file findings_b_file
   findings_a_file=$(mktemp)
   findings_b_file=$(mktemp)
+  # Capture each agent's stderr (claude_invoke's retry/failure diagnostics) so a
+  # transient failure is not silently swallowed; surfaced below if we hit ERROR.
+  local err_a_file err_b_file
+  err_a_file=$(mktemp)
+  err_b_file=$(mktemp)
 
   # Agent A: Impact Analyst — focuses on what's broken by the changes
   # With PKB: uses focused dirs + knowledge context (avoids full codebase scan)
   # Without PKB: uses full --add-dir (needs to search entire codebase)
   run_agent_a "$project" "$project_dir" "$diff" "$changed_files" \
     "$consumers" "$lang_directive" "$model" "$claude_add_dirs" \
-    "$mra_dir" "$pkb_context" > "$findings_a_file" 2>/dev/null &
+    "$mra_dir" "$pkb_context" > "$findings_a_file" 2>"$err_a_file" &
   local pid_a=$!
 
   # Agent B: Quality Auditor — focuses on code quality, security, patterns
@@ -156,14 +161,15 @@ run_debate_review() {
   # Without PKB: uses full --add-dir
   run_agent_b "$project" "$project_dir" "$diff" "$changed_files" \
     "$project_type" "$lang_directive" "$model" "$claude_add_dirs" \
-    "$mra_dir" "$pkb_context" > "$findings_b_file" 2>/dev/null &
+    "$mra_dir" "$pkb_context" > "$findings_b_file" 2>"$err_b_file" &
   local pid_b=$!
 
   wait $pid_a $pid_b
-  local findings_a findings_b
+  local findings_a findings_b agent_stderr
   findings_a=$(cat "$findings_a_file")
   findings_b=$(cat "$findings_b_file")
-  rm -f "$findings_a_file" "$findings_b_file"
+  agent_stderr=$(cat "$err_a_file" "$err_b_file" 2>/dev/null)
+  rm -f "$findings_a_file" "$findings_b_file" "$err_a_file" "$err_b_file"
 
   # =====================================================================
   # FAST CONVERGENCE: decide from the agents' EXPLICIT verdict sentinels.
@@ -178,6 +184,12 @@ run_debate_review() {
 
   if [[ "$decision" == "ERROR" ]]; then
     log_error >&2 "[fast] no completed verdict from both agents (failure or max-turns cutoff) — NOT approving" "debate"
+    # Surface the agents' captured stderr so the operator can tell a transient
+    # API failure apart from a genuine max-turns cutoff (no longer swallowed).
+    if [[ -n "$agent_stderr" ]]; then
+      log_error >&2 "[fast] agent diagnostics:" "debate"
+      printf '%s\n' "$agent_stderr" | tail -12 | sed 's/^/    /' >&2
+    fi
     echo '{"status":"COMMENT","summary":"⚠️ REVIEW_INCOMPLETE — at least one analysis agent did not finish (no completion verdict; likely an agent failure or a max-turns cutoff — try MRA_REVIEW_AGENT_MAX_TURNS or a PKB). This is NOT an approval; re-run or review manually.","comments":[]}'
     return
   fi
@@ -189,9 +201,10 @@ run_debate_review() {
     # agents, the last one adversarial.
     if [[ "${MRA_REVIEW_VERIFY_APPROVE:-1}" != "0" ]]; then
       log_progress >&2 "[verify] both approved — adversarial verifier re-checking before approving..." "debate"
-      local verify_out gate
+      local verify_out gate verify_err_file
+      verify_err_file=$(mktemp)
       verify_out=$(run_agent_verify "$project" "$project_dir" "$diff" "$changed_files" \
-        "$lang_directive" "$model" "$claude_add_dirs" "$mra_dir" "$pkb_context" 2>/dev/null)
+        "$lang_directive" "$model" "$claude_add_dirs" "$mra_dir" "$pkb_context" 2>"$verify_err_file")
       gate=$(_debate_verify_gate "$verify_out")
       log_info >&2 "[verify] verifier gate=$gate" "debate"
       if [[ "$gate" == "DOWNGRADE" ]]; then
@@ -202,8 +215,11 @@ run_debate_review() {
           "$consumers" "$has_api_change" "$lang_directive" "$model" "$focused_ctx" "$mra_dir"
         return
       fi
-      [[ "$gate" == "INCONCLUSIVE" ]] && \
+      if [[ "$gate" == "INCONCLUSIVE" ]]; then
         log_warn >&2 "[verify] verifier did not complete — falling back to the 2-agent approval" "debate"
+        [[ -s "$verify_err_file" ]] && tail -8 "$verify_err_file" | sed 's/^/    /' >&2
+      fi
+      rm -f "$verify_err_file"
     fi
     log_success >&2 "[fast] approved (verifier confirmed)" "debate"
     echo '{"status":"APPROVED","summary":"No issues found by either agent","comments":[]}'
@@ -369,12 +385,12 @@ PROMPT
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
 
 # -----------------------------------------------------------------------
@@ -438,12 +454,12 @@ PROMPT
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
 
 # -----------------------------------------------------------------------
@@ -513,12 +529,12 @@ PROMPT
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
 
 # -----------------------------------------------------------------------
@@ -579,12 +595,12 @@ PROMPT
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 5 \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
 
 # -----------------------------------------------------------------------
@@ -665,12 +681,12 @@ PROMPT
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 3 \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
 
 # -----------------------------------------------------------------------
@@ -778,10 +794,10 @@ Rules for line numbers:
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 3 \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
