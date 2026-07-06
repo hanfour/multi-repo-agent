@@ -235,7 +235,7 @@ ${prompt}"
   claude_args+=(--setting-sources "project")
 
   local raw_output
-  raw_output=$(claude_invoke eval -p "$prompt" "${claude_args[@]}")
+  raw_output=$(claude_invoke eval -p "$prompt" "${claude_args[@]}") || true  # tolerate total failure under set -e
 
   # Extract JSON
   extract_json "$raw_output"
@@ -301,5 +301,5 @@ Use the output language from config if available.
 PROMPT
 )
 
-  claude_invoke eval -p "$compare_prompt" --model "$model" --max-turns 1 --setting-sources "project"
+  claude_invoke eval -p "$compare_prompt" --model "$model" --max-turns 1 --setting-sources "project" || true  # tolerate total failure under set -e
 }
