@@ -1,0 +1,125 @@
+# Single-pass review completeness sentinel — design
+
+**Date:** 2026-07-06
+**Issue:** [#8](https://github.com/hanfour/multi-repo-agent/issues/8)
+**Status:** design (pending review)
+
+## Problem
+
+The **debate** strategy requires each agent to end its output with an explicit
+verdict sentinel (`===MRA-REVIEW-COMPLETE: APPROVED===` /
+`CHANGES_REQUESTED`, `lib/review-debate.sh`); `_debate_assess` treats a missing
+sentinel as `ERROR → REVIEW_INCOMPLETE`, so a cut-off agent can never
+masquerade as a clean review.
+
+The **single-pass** strategies (`light` / `standard`, `lib/review.sh`) have **no
+such signal**. They run Claude under a low `--max-turns` (light=2, standard=6)
+and trust whatever comes back. On a max-turns cutoff Claude emits
+`Error: Reached max turns …` (not valid JSON), which the current code catches
+with a hard `return 1` — safe from a false green, but an unstructured error: the
+gateway / `mra dev` see a raw non-zero exit rather than a REVIEW_INCOMPLETE
+verdict, and any future cutoff shape that happens to yield valid-looking JSON
+would slip through with no completion check at all.
+
+## Scope — what this catches, and what it does not
+
+**Catches (the value):** a truncated / cut-off single-pass review. Absent the
+completion sentinel, the review is reported as a structured `REVIEW_INCOMPLETE`
+(never APPROVE), matching the debate contract, instead of a raw error — and it
+covers any cutoff that yields a syntactically valid but sentinel-less body.
+
+**Does NOT catch (explicit non-goal):** a model that emits a *complete but
+blind* review in one shot (valid JSON + sentinel, having done no real
+investigation). The debate sentinel has the same blind spot — that is a
+reviewer-**quality** concern owned by `agents/code-reviewer.md`, not a
+completeness signal. Out of scope here.
+
+This covers **both** output modes (per the design decision): `inline` (JSON,
+`--pr`, posts to GitHub) and `terminal` (prose, local print).
+
+## Design
+
+### 1. Shared verdict contract — `lib/review-verdict.sh` (new)
+
+Extract the primitives currently living in `lib/review-debate.sh` so both the
+debate and single-pass paths share one definition (DRY; lets `lib/review.sh` use
+them without a runtime dependency on `review-debate.sh` being sourced, and keeps
+unit tests isolated):
+
+- `MRA_REVIEW_SENTINEL_TOKEN="MRA-REVIEW-COMPLETE"` (moved here).
+- `review_verdict_of "<text>"` → `APPROVED` | `CHANGES_REQUESTED` | `NONE`
+  (moved from `_debate_verdict_of`; grep for the token).
+- `review_incomplete_json [reason]` → the canonical neutral incomplete verdict
+  `{"status":"COMMENT","summary":"⚠️ REVIEW_INCOMPLETE — …","comments":[]}`
+  (factored from the literal currently inlined in `run_debate_review`).
+
+`lib/review-debate.sh` keeps `_debate_verdict_of` / `MRA_REVIEW_SENTINEL_TOKEN`
+as thin aliases delegating to the shared names (behaviour-preserving; the
+existing debate tests must stay green). `bin/mra.sh` sources
+`review-verdict.sh` before both `review.sh` and `review-debate.sh`.
+
+### 2. Prompt contract — `lib/review-prompt.sh` (`build_review_prompt`)
+
+Append, to BOTH the `inline` (STRICT JSON) and `terminal` (prose) output-format
+blocks, a required final line:
+
+> After the JSON/review, output EXACTLY ONE final line on its own:
+> `===MRA-REVIEW-COMPLETE: APPROVED===` or
+> `===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===`.
+> Omitting it marks the review incomplete.
+
+For `inline`, this is tolerated by `extract_json` (its `/^{/,/^}/p` fallback
+grabs the JSON object and ignores the trailing sentinel line).
+
+### 3. Detection + handling — `lib/review.sh` single-pass path
+
+After `claude_invoke` returns the raw output (`review_json` inline /
+streamed-or-captured terminal), before extract/validate/post:
+
+- Compute `verdict=$(review_verdict_of "$raw")`.
+- **Sentinel present** (`APPROVED`/`CHANGES_REQUESTED`): proceed exactly as
+  today — `extract_json` → validate → `post_inline_review` (inline) or print
+  (terminal). The JSON's own `status` still governs the posted verdict; the
+  sentinel is only completion proof.
+- **Sentinel absent** (`NONE`):
+  - `inline`: replace the body with `review_incomplete_json` and route it
+    through `post_inline_review` → posts a neutral **COMMENT** (the round-3 gate
+    passes COMMENT through, never APPROVE). Replaces today's `return 1`.
+  - `terminal`: print a `⚠️ REVIEW_INCOMPLETE — …` notice instead of the
+    (partial) body.
+
+Terminal streaming note: the terminal path currently uses
+`claude_invoke --stream` (stdout goes live, not captured), so the sentinel
+cannot be inspected after the fact. To detect it, the terminal single-pass
+switches to **buffered** `claude_invoke` (capture, then check sentinel, then
+print). Acceptable: single-pass terminal output is short; the resilience/retry
+behaviour is unchanged.
+
+### 4. Error handling
+
+Fail-safe throughout: a missing/garbled sentinel, an empty response, or a jq
+failure all resolve to REVIEW_INCOMPLETE (COMMENT / notice), **never** APPROVE.
+
+## Testing
+
+Mirror `tests/test_review_debate.sh`'s sentinel assertions in a new
+`tests/test_review_verdict.sh` + additions to the single-pass tests:
+
+- `review_verdict_of`: APPROVED / CHANGES_REQUESTED / NONE classification
+  (incl. token embedded after a JSON body).
+- `review_incomplete_json`: valid JSON, `status==COMMENT`, empty comments,
+  summary contains `REVIEW_INCOMPLETE`.
+- Single-pass handling (with a stubbed `claude`/`MRA_CLAUDE_BIN`):
+  - sentinel present → normal verdict flows to post/print.
+  - sentinel absent (inline) → `post_inline_review` receives the incomplete
+    JSON; effective event is COMMENT, never APPROVE (even with the `:a:` policy
+    + `MRA_REVIEW_ALLOW_APPROVE=1`).
+  - sentinel absent (terminal) → REVIEW_INCOMPLETE notice, non-zero/handled.
+- `build_review_prompt` (both modes) includes the sentinel instruction.
+- Regression: `tests/test_review_debate.sh` stays green (aliases preserved).
+
+## Out of scope
+
+- Blind-but-complete review detection (reviewer-quality; `code-reviewer.md`).
+- Auto-retry / max-turns bump on incomplete (max-turns is already env-tunable
+  via `MRA_REVIEW_STANDARD_MAX_TURNS` / `MRA_REVIEW_LIGHT_MAX_TURNS`).
