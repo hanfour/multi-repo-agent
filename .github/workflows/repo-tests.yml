@@ -16,8 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install jq + python markdown (test_prd_render.sh renders .collab md)
+        run: sudo apt-get update && sudo apt-get install -y jq python3-markdown
 
       - name: Configure git identity (several legacy tests run `git commit`)
         run: |

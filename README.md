@@ -565,6 +565,25 @@ Generate templates: `mra template`
 
 All review agents are **read-only** (write tools disabled).
 
+#### Resilience & tuning
+
+Review claude calls run through a hardened wrapper (`claude_invoke`) that
+retries transient API failures (overloaded / 5xx / dropped connection / empty
+response) and surfaces the underlying stderr on final failure instead of
+swallowing it — so an API blip no longer masquerades as `REVIEW_INCOMPLETE`.
+The turn budgets and retry policy are tunable:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MRA_CLAUDE_MAX_RETRIES` | `2` | Extra attempts after the first when a claude call fails transiently or returns empty. |
+| `MRA_CLAUDE_RETRY_DELAY` | `3` | Initial backoff seconds between retries (doubles each attempt). |
+| `MRA_CLAUDE_BIN` | `claude` | Binary invoked by the wrapper (override / test-mock seam). |
+| `MRA_REVIEW_STANDARD_MAX_TURNS` | `6` | Turn budget for the single-pass **standard** strategy (raised from 3 — too low cuts the agent off mid-analysis). |
+| `MRA_REVIEW_LIGHT_MAX_TURNS` | `2` | Turn budget for the **light** strategy. |
+| `MRA_REVIEW_AGENT_MAX_TURNS` | `20` | Turn budget for each **debate** agent (Impact Analyst / Quality Auditor / verifier). |
+| `MRA_REVIEW_PERSONA_MAX_TURNS` | `8` | Turn budget for each **persona** reviewer. |
+| `MRA_REVIEW_VERIFY_APPROVE` | `1` | When both debate agents approve, an adversarial third reviewer re-checks before approving. Set `0` to skip. |
+
 ---
 
 ## Architecture

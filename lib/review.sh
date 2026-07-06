@@ -117,6 +117,45 @@ _review_event_for_status() {
   esac
 }
 
+# _review_effective_status: under the :a: approve-if-no-high policy, derive the
+# effective status from comment severity so the posted event, the review body,
+# and the `status:` stdout line all agree. Requires BOTH the policy flag and the
+# operator approve opt-in; otherwise the model status passes through unchanged.
+_review_effective_status() {
+  local status="${1:-}" review_json="${2:-}"
+  if [[ "${MRA_REVIEW_APPROVE_IF_NO_HIGH:-}" == "1" && "${MRA_REVIEW_ALLOW_APPROVE:-}" == "1" ]]; then
+    # Decide whether this verdict is eligible for the "approve if no HIGH" flip.
+    #   APPROVED         -> recompute (downgrade if a HIGH comment slipped in).
+    #   CHANGES_REQUESTED-> only if it itemised its concerns as comments. A
+    #                       CHANGES_REQUESTED with NO comments put its blocker in
+    #                       the summary prose (or is a truncated synthesis that
+    #                       dropped its findings) — never manufacture that into an
+    #                       approval; pass it through as a block.
+    #   anything else    -> non-verdict (bare COMMENT / REVIEW_INCOMPLETE /
+    #                       truncated single-pass) — pass through, never approve.
+    case "$status" in
+      APPROVED) ;;
+      CHANGES_REQUESTED)
+        local cc
+        cc=$(printf '%s' "$review_json" | jq -r '.comments | length' 2>/dev/null) || cc=""
+        [[ "$cc" == "0" || -z "$cc" ]] && { echo "$status"; return 0; }
+        ;;
+      *) echo "$status"; return 0 ;;
+    esac
+    # Recompute from the actual comment severities, ignoring the model's status
+    # claim (so an APPROVED verdict carrying a HIGH comment still downgrades).
+    # Fail CLOSED: only a clean numeric zero approves; empty / non-numeric jq
+    # output (incl. a jq error — `|| high_count=""` keeps errexit from aborting
+    # here) → CHANGES_REQUESTED, never a silent auto-approve.
+    local high_count
+    high_count=$(printf '%s' "$review_json" \
+      | jq -r '[.comments[]? | select(.severity == "CRITICAL" or .severity == "HIGH")] | length' 2>/dev/null) || high_count=""
+    if [[ "$high_count" == "0" ]]; then echo "APPROVED"; else echo "CHANGES_REQUESTED"; fi
+    return 0
+  fi
+  echo "$status"
+}
+
 ## Strategy selection based on diff size, file count, and API change
 ## Returns: light | standard | debate
 select_review_strategy() {
@@ -134,6 +173,18 @@ select_review_strategy() {
   else
     echo "debate"
   fi
+}
+
+## Turn budget for a single-pass strategy. Tunable via env; too low a value cuts
+## the agent off mid-analysis and yields an empty/garbled response (an incomplete
+## review, not a clean one). standard default raised 3 -> 6.
+##   light    -> MRA_REVIEW_LIGHT_MAX_TURNS    (default 2)
+##   standard -> MRA_REVIEW_STANDARD_MAX_TURNS (default 6)
+_review_strategy_turns() {
+  case "$1" in
+    light) echo "${MRA_REVIEW_LIGHT_MAX_TURNS:-2}" ;;
+    *)     echo "${MRA_REVIEW_STANDARD_MAX_TURNS:-6}" ;;
+  esac
 }
 
 review_project() {
@@ -433,24 +484,29 @@ ${prompt}"
   claude_args+=(--model "$model")
   claude_args+=(--setting-sources "project")
 
-  # Light strategy: fewer turns, no consumer context search
+  # Turn budget per strategy (see _review_strategy_turns — tunable via env).
+  local strategy_turns
+  strategy_turns=$(_review_strategy_turns "$strategy")
+  claude_args+=(--max-turns "$strategy_turns")
   if [[ "$strategy" == "light" ]]; then
-    claude_args+=(--max-turns 2)
-    log_info "light strategy: max-turns=2, focused context" "review"
+    log_info "light strategy: max-turns=$strategy_turns, focused context" "review"
   else
-    claude_args+=(--max-turns 3)
+    log_info "standard strategy: max-turns=$strategy_turns" "review"
   fi
 
   # --- Run Claude ---
   log_progress "running Claude ($model)..." "review"
 
   if [[ "$output_mode" == "terminal" ]]; then
-    # Terminal mode: just print
-    claude -p "$prompt" "${claude_args[@]}" 2>/dev/null
+    # Terminal mode: stream live (--stream) so the operator sees tokens as they
+    # arrive. `|| true`: under `set -e` a total claude failure returns non-zero;
+    # swallow it so the review command exits cleanly rather than aborting mid-run.
+    claude_invoke --stream review -p "$prompt" "${claude_args[@]}" || true
   else
-    # Inline mode: get JSON, parse, post to GitHub
+    # Inline mode: get JSON, parse, post to GitHub. `|| true` keeps a total
+    # claude failure from aborting under `set -e` — we handle empty below.
     local review_json
-    review_json=$(claude -p "$prompt" "${claude_args[@]}" 2>/dev/null)
+    review_json=$(claude_invoke review -p "$prompt" "${claude_args[@]}") || true
 
     if [[ -z "$review_json" ]]; then
       log_error "Claude returned empty response" "review"
@@ -629,7 +685,7 @@ _repair_review_json() {
   prompt="The text below is meant to be ONE JSON object for a code review but is malformed (most likely an unescaped double-quote inside a string value, or stray markdown). Output ONLY the corrected JSON object: no markdown fences, no commentary, nothing before or after. Backslash-escape every double-quote that appears inside a string value. Preserve ALL original content (paths, line numbers, severities, comment bodies) exactly.
 
 ${broken}"
-  "${MRA_CLAUDE_BIN:-claude}" -p "$prompt" \
+  claude_invoke review-repair -p "$prompt" \
     --model "${MRA_REVIEW_REPAIR_MODEL:-haiku}" \
     --max-turns 1 \
     --disallowedTools "Write,Edit,NotebookEdit" \
@@ -709,6 +765,7 @@ post_inline_review() {
   # produced this JSON sees PR content (potentially attacker-controlled
   # via prompt injection), so treating its APPROVE verdict as binding
   # is unsafe by default. ---
+  status=$(_review_effective_status "$status" "$review_json")
   local event
   event=$(_review_event_for_status "$status")
 

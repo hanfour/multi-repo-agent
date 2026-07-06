@@ -142,13 +142,18 @@ run_debate_review() {
   local findings_a_file findings_b_file
   findings_a_file=$(mktemp)
   findings_b_file=$(mktemp)
+  # Capture each agent's stderr (claude_invoke's retry/failure diagnostics) so a
+  # transient failure is not silently swallowed; surfaced below if we hit ERROR.
+  local err_a_file err_b_file
+  err_a_file=$(mktemp)
+  err_b_file=$(mktemp)
 
   # Agent A: Impact Analyst — focuses on what's broken by the changes
   # With PKB: uses focused dirs + knowledge context (avoids full codebase scan)
   # Without PKB: uses full --add-dir (needs to search entire codebase)
   run_agent_a "$project" "$project_dir" "$diff" "$changed_files" \
     "$consumers" "$lang_directive" "$model" "$claude_add_dirs" \
-    "$mra_dir" "$pkb_context" > "$findings_a_file" 2>/dev/null &
+    "$mra_dir" "$pkb_context" > "$findings_a_file" 2>"$err_a_file" &
   local pid_a=$!
 
   # Agent B: Quality Auditor — focuses on code quality, security, patterns
@@ -156,14 +161,19 @@ run_debate_review() {
   # Without PKB: uses full --add-dir
   run_agent_b "$project" "$project_dir" "$diff" "$changed_files" \
     "$project_type" "$lang_directive" "$model" "$claude_add_dirs" \
-    "$mra_dir" "$pkb_context" > "$findings_b_file" 2>/dev/null &
+    "$mra_dir" "$pkb_context" > "$findings_b_file" 2>"$err_b_file" &
   local pid_b=$!
 
-  wait $pid_a $pid_b
-  local findings_a findings_b
+  # `|| true`: an agent's last command is claude_invoke, which returns non-zero
+  # on total failure; a bare `wait` would then abort the whole run under `set -e`
+  # (last-pid status) BEFORE the ERROR/REVIEW_INCOMPLETE handling below. Findings
+  # are read from the files regardless, so tolerate the non-zero reap.
+  wait $pid_a $pid_b || true
+  local findings_a findings_b agent_stderr
   findings_a=$(cat "$findings_a_file")
   findings_b=$(cat "$findings_b_file")
-  rm -f "$findings_a_file" "$findings_b_file"
+  agent_stderr=$(cat "$err_a_file" "$err_b_file" 2>/dev/null)
+  rm -f "$findings_a_file" "$findings_b_file" "$err_a_file" "$err_b_file"
 
   # =====================================================================
   # FAST CONVERGENCE: decide from the agents' EXPLICIT verdict sentinels.
@@ -178,6 +188,12 @@ run_debate_review() {
 
   if [[ "$decision" == "ERROR" ]]; then
     log_error >&2 "[fast] no completed verdict from both agents (failure or max-turns cutoff) — NOT approving" "debate"
+    # Surface the agents' captured stderr so the operator can tell a transient
+    # API failure apart from a genuine max-turns cutoff (no longer swallowed).
+    if [[ -n "$agent_stderr" ]]; then
+      log_error >&2 "[fast] agent diagnostics:" "debate"
+      printf '%s\n' "$agent_stderr" | tail -12 | sed 's/^/    /' >&2
+    fi
     echo '{"status":"COMMENT","summary":"⚠️ REVIEW_INCOMPLETE — at least one analysis agent did not finish (no completion verdict; likely an agent failure or a max-turns cutoff — try MRA_REVIEW_AGENT_MAX_TURNS or a PKB). This is NOT an approval; re-run or review manually.","comments":[]}'
     return
   fi
@@ -189,9 +205,10 @@ run_debate_review() {
     # agents, the last one adversarial.
     if [[ "${MRA_REVIEW_VERIFY_APPROVE:-1}" != "0" ]]; then
       log_progress >&2 "[verify] both approved — adversarial verifier re-checking before approving..." "debate"
-      local verify_out gate
+      local verify_out gate verify_err_file
+      verify_err_file=$(mktemp)
       verify_out=$(run_agent_verify "$project" "$project_dir" "$diff" "$changed_files" \
-        "$lang_directive" "$model" "$claude_add_dirs" "$mra_dir" "$pkb_context" 2>/dev/null)
+        "$lang_directive" "$model" "$claude_add_dirs" "$mra_dir" "$pkb_context" 2>"$verify_err_file")
       gate=$(_debate_verify_gate "$verify_out")
       log_info >&2 "[verify] verifier gate=$gate" "debate"
       if [[ "$gate" == "DOWNGRADE" ]]; then
@@ -202,8 +219,11 @@ run_debate_review() {
           "$consumers" "$has_api_change" "$lang_directive" "$model" "$focused_ctx" "$mra_dir"
         return
       fi
-      [[ "$gate" == "INCONCLUSIVE" ]] && \
+      if [[ "$gate" == "INCONCLUSIVE" ]]; then
         log_warn >&2 "[verify] verifier did not complete — falling back to the 2-agent approval" "debate"
+        [[ -s "$verify_err_file" ]] && tail -8 "$verify_err_file" | sed 's/^/    /' >&2
+      fi
+      rm -f "$verify_err_file"
     fi
     log_success >&2 "[fast] approved (verifier confirmed)" "debate"
     echo '{"status":"APPROVED","summary":"No issues found by either agent","comments":[]}'
@@ -252,38 +272,54 @@ run_debate_review() {
   log_info >&2 "[round 2] merged pool: $pool_count unique findings" "debate"
 
   if [[ "$pool_count" -eq 0 ]]; then
-    log_success >&2 "[round 2] empty pool after merge — APPROVED" "debate"
-    echo '{"status":"APPROVED","summary":"No issues survived merging","comments":[]}'
+    # We only reach round 2 on a PROCEED decision — i.e. an agent's sentinel said
+    # CHANGES_REQUESTED, so findings DO exist. An empty pool here means the merge
+    # failed to capture them (e.g. an unforeseen finding format), NOT that the PR
+    # is clean. NEVER approve on this path; synthesise the raw findings instead.
+    log_warn >&2 "[round 2] empty pool despite a CHANGES_REQUESTED verdict — synthesising raw findings (NOT approving)" "debate"
+    run_synthesize "$project" "$project_dir" "$diff" "$changed_files" \
+      "$findings_a" "$findings_b" "$consumers" "$has_api_change" \
+      "$lang_directive" "$model" "$focused_ctx" "$mra_dir"
     return
   fi
 
-  # Two agents vote in parallel
-  local vote_a_file vote_b_file
-  vote_a_file=$(mktemp)
-  vote_b_file=$(mktemp)
+  # Two agents vote in parallel. Capture each voter's stderr (claude_invoke
+  # retry/failure diagnostics) so a transient vote failure is visible rather
+  # than silently thinning the tally.
+  local vote_a_file vote_b_file vote_err_a vote_err_b
+  vote_a_file=$(mktemp); vote_b_file=$(mktemp)
+  vote_err_a=$(mktemp); vote_err_b=$(mktemp)
 
   run_vote "$project_dir" "$diff" "$pool" "Agent A (Impact Analyst)" \
     "$lang_directive" "$lite_model" "$focused_ctx" \
-    "$mra_dir" "$pkb_context_lite" > "$vote_a_file" 2>/dev/null &
+    "$mra_dir" "$pkb_context_lite" > "$vote_a_file" 2>"$vote_err_a" &
   local pid_va=$!
 
   run_vote "$project_dir" "$diff" "$pool" "Agent B (Quality Auditor)" \
     "$lang_directive" "$lite_model" "$focused_ctx" \
-    "$mra_dir" "$pkb_context_lite" > "$vote_b_file" 2>/dev/null &
+    "$mra_dir" "$pkb_context_lite" > "$vote_b_file" 2>"$vote_err_b" &
   local pid_vb=$!
 
-  wait $pid_va $pid_vb
+  wait $pid_va $pid_vb || true   # tolerate a voter's non-zero reap under set -e (ballots read from files)
   local votes_a votes_b
   votes_a=$(cat "$vote_a_file")
   votes_b=$(cat "$vote_b_file")
-  rm -f "$vote_a_file" "$vote_b_file"
+  # A voter that returned nothing (after retries) means its ballot is missing —
+  # warn with its diagnostics; the tally proceeds on whatever ballots we have.
+  [[ -z "$votes_a" && -s "$vote_err_a" ]] && \
+    { log_warn >&2 "[round 2] voter A produced no ballot:" "debate"; tail -4 "$vote_err_a" | sed 's/^/    /' >&2; }
+  [[ -z "$votes_b" && -s "$vote_err_b" ]] && \
+    { log_warn >&2 "[round 2] voter B produced no ballot:" "debate"; tail -4 "$vote_err_b" | sed 's/^/    /' >&2; }
+  rm -f "$vote_a_file" "$vote_b_file" "$vote_err_a" "$vote_err_b"
 
   # Tally votes and filter surviving findings
   local surviving_findings
   surviving_findings=$(_tally_votes "$pool" "$votes_a" "$votes_b")
 
   local surviving_count
-  surviving_count=$(echo "$surviving_findings" | grep -c '^\- \[' || true)
+  # Tolerant bullet/bold/indent pattern (matches _debate_count_findings / the pool)
+  # so this log count doesn't undercount surviving bold/indented findings.
+  surviving_count=$(echo "$surviving_findings" | grep -cE '^[[:space:]]*[-*][[:space:]]*\**\[[A-Z]' || true)
   surviving_count=${surviving_count//[^0-9]/}; [[ -z "$surviving_count" ]] && surviving_count=0
   log_info >&2 "[round 2] $surviving_count findings survived voting (from $pool_count)" "debate"
 
@@ -369,12 +405,12 @@ PROMPT
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
 
 # -----------------------------------------------------------------------
@@ -438,12 +474,12 @@ PROMPT
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
 
 # -----------------------------------------------------------------------
@@ -513,12 +549,12 @@ PROMPT
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
 
 # -----------------------------------------------------------------------
@@ -579,12 +615,12 @@ PROMPT
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 5 \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
 
 # -----------------------------------------------------------------------
@@ -594,11 +630,16 @@ PROMPT
 _build_findings_pool() {
   local findings_a="$1" findings_b="$2"
 
-  # Extract finding lines from both agents
+  # Extract finding lines from both agents. MUST use the same tolerant pattern as
+  # _debate_count_findings — a bullet (- or *), optional indent/bold, then "[<UPPER>".
+  # A stricter "^- [" here would count findings (via _debate_count_findings) but
+  # fail to pool them, yielding an empty pool → a false APPROVED (see the empty-pool
+  # guard below).
+  local finding_re='^[[:space:]]*[-*][[:space:]]*\**\[[A-Z]'
   local all_findings
   all_findings=$(
-    echo "$findings_a" | grep '^\- \[' 2>/dev/null || true
-    echo "$findings_b" | grep '^\- \[' 2>/dev/null || true
+    echo "$findings_a" | grep -E "$finding_re" 2>/dev/null || true
+    echo "$findings_b" | grep -E "$finding_re" 2>/dev/null || true
   )
 
   # Number each unique finding
@@ -665,12 +706,12 @@ PROMPT
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 3 \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }
 
 # -----------------------------------------------------------------------
@@ -778,10 +819,10 @@ Rules for line numbers:
 
   local _ad_arr=()
   expand_add_dir_string _ad_arr "$claude_add_dirs"
-  claude -p "$prompt" \
+  claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 3 \
     --disallowedTools "Write,Edit,NotebookEdit" \
-    --setting-sources "project" 2>/dev/null
+    --setting-sources "project"
 }

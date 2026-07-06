@@ -96,6 +96,21 @@ else
   fail_test "clean review should show 0, got '$out'"
 fi
 
+# --- _review_strategy_turns: defaults + env overrides ---
+unset MRA_REVIEW_STANDARD_MAX_TURNS MRA_REVIEW_LIGHT_MAX_TURNS || true
+[[ "$(_review_strategy_turns standard)" == "6" ]] \
+  && pass_test "standard default max-turns is 6" \
+  || fail_test "standard default expected 6, got '$(_review_strategy_turns standard)'"
+[[ "$(_review_strategy_turns light)" == "2" ]] \
+  && pass_test "light default max-turns is 2" \
+  || fail_test "light default expected 2, got '$(_review_strategy_turns light)'"
+[[ "$(MRA_REVIEW_STANDARD_MAX_TURNS=12 _review_strategy_turns standard)" == "12" ]] \
+  && pass_test "MRA_REVIEW_STANDARD_MAX_TURNS overrides standard" \
+  || fail_test "standard override failed"
+[[ "$(MRA_REVIEW_LIGHT_MAX_TURNS=4 _review_strategy_turns light)" == "4" ]] \
+  && pass_test "MRA_REVIEW_LIGHT_MAX_TURNS overrides light" \
+  || fail_test "light override failed"
+
 echo "---"
 echo "Passed: $pass"
 echo "Failed: $errors"
