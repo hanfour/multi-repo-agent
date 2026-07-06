@@ -77,5 +77,14 @@ refs=$(grep -c 'MRA_REVIEW_AGENT_MAX_TURNS' "$SCRIPT_DIR/lib/review-debate.sh")
 [[ "$refs" -ge 2 ]] && ok "round-1 agents honor MRA_REVIEW_AGENT_MAX_TURNS" \
   || fail "round-1 agents must honor MRA_REVIEW_AGENT_MAX_TURNS (found $refs refs)"
 
+# 10. Pool/count parity: _build_findings_pool MUST capture the same bold/indented
+#     finding _debate_count_findings counts. A mismatch counts a finding (>5 →
+#     enters voting) but pools 0 → empty pool → a FALSE APPROVED (round-2 hole).
+bold_finding='- **[HIGH]** `x.ts:10` — real bug'
+pool_out=$(_build_findings_pool "$bold_finding" "")
+[[ "$pool_out" == *"[HIGH]"* ]] \
+  && ok "pool captures a bold finding (count/pool regex parity)" \
+  || fail "bold finding counted but NOT pooled -> empty-pool false-green: [$pool_out]"
+
 echo ""
 if [[ $errors -eq 0 ]]; then echo "PASS: all review-debate tests passed"; else echo "FAIL: $errors tests failed"; exit 1; fi
