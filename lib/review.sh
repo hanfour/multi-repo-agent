@@ -503,25 +503,18 @@ ${prompt}"
     # swallow it so the review command exits cleanly rather than aborting mid-run.
     claude_invoke --stream review -p "$prompt" "${claude_args[@]}" || true
   else
-    # Inline mode: get JSON, parse, post to GitHub. `|| true` keeps a total
-    # claude failure from aborting under `set -e` — we handle empty below.
-    local review_json
-    review_json=$(claude_invoke review -p "$prompt" "${claude_args[@]}") || true
-
-    if [[ -z "$review_json" ]]; then
-      log_error "Claude returned empty response" "review"
-      return 1
+    # Inline mode: get JSON, gate on the completion sentinel, post to GitHub.
+    # `|| true` keeps a total claude failure from aborting under `set -e`.
+    local review_json raw_review
+    raw_review=$(claude_invoke review -p "$prompt" "${claude_args[@]}") || true
+    # Missing sentinel / empty / unparseable => neutral REVIEW_INCOMPLETE (#8),
+    # never a false APPROVE. _review_singlepass_body always yields valid JSON.
+    review_json=$(_review_singlepass_body "$raw_review")
+    # The inline schema only permits APPROVED/CHANGES_REQUESTED, so a COMMENT
+    # status can ONLY be the neutral REVIEW_INCOMPLETE verdict — log it.
+    if [[ "$(printf '%s' "$review_json" | jq -r .status)" == "COMMENT" ]]; then
+      log_warn "single-pass review incomplete (no completion sentinel / empty / unparseable) — posting REVIEW_INCOMPLETE" "review"
     fi
-
-    # Try to extract JSON from response (Claude might wrap it in markdown)
-    review_json=$(extract_json "$review_json")
-
-    if ! echo "$review_json" | jq . &>/dev/null; then
-      log_error "Claude did not return valid JSON. Raw output:" "review"
-      echo "$review_json"
-      return 1
-    fi
-
     post_inline_review "$project_dir" "$pr_number" "$review_json"
   fi
 
@@ -633,6 +626,31 @@ build_focused_context() {
   fi
 
   printf '%s' "$context_args"
+}
+
+# Resolve a single-pass raw review response into the JSON to post. A missing
+# completion sentinel (#8), an empty response, or unparseable JSON all mean the
+# review did not cleanly complete → the neutral REVIEW_INCOMPLETE verdict (never
+# APPROVE). Otherwise the extracted, validated review JSON. Always prints ONE
+# valid JSON object.
+_review_singlepass_body() {
+  local raw="$1"
+  if [[ -z "$raw" || "$(review_verdict_of "$raw")" == "NONE" ]]; then
+    review_incomplete_json; return 0
+  fi
+  # Strip the completion-sentinel line before extraction: extract_json's
+  # last-resort "{ ... }" fallback range-matches on separate lines (sed never
+  # closes an addr1,addr2 range on the line addr1 matched, in both GNU and
+  # BSD sed), so a compact single-line JSON body immediately followed by the
+  # sentinel line would otherwise be left un-isolated and fail jq parsing.
+  local body
+  body=$(printf '%s\n' "$raw" | grep -v "${MRA_REVIEW_SENTINEL_TOKEN}:") || true
+  local j; j=$(extract_json "$body")
+  if echo "$j" | jq . &>/dev/null; then
+    printf '%s' "$j"
+  else
+    review_incomplete_json
+  fi
 }
 
 # Extract JSON from Claude response (handles markdown fencing)
