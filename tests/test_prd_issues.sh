@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # mra_prd_open_issues + helpers: validation, ordering, account pinning, gated create.
+# shellcheck disable=SC2218
+# ^ The early _prd_account_token calls use the REAL function sourced from
+#   lib/prd-issues.sh; the later `_prd_account_token() { echo "TOK"; }` is a
+#   deliberate stub-override for the create-gate tests. shellcheck sees only the
+#   local (later) definition and false-flags "defined later"; it is not.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/lib/colors.sh"
