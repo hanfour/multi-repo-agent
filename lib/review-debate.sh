@@ -164,7 +164,11 @@ run_debate_review() {
     "$mra_dir" "$pkb_context" > "$findings_b_file" 2>"$err_b_file" &
   local pid_b=$!
 
-  wait $pid_a $pid_b
+  # `|| true`: an agent's last command is claude_invoke, which returns non-zero
+  # on total failure; a bare `wait` would then abort the whole run under `set -e`
+  # (last-pid status) BEFORE the ERROR/REVIEW_INCOMPLETE handling below. Findings
+  # are read from the files regardless, so tolerate the non-zero reap.
+  wait $pid_a $pid_b || true
   local findings_a findings_b agent_stderr
   findings_a=$(cat "$findings_a_file")
   findings_b=$(cat "$findings_b_file")
@@ -268,8 +272,14 @@ run_debate_review() {
   log_info >&2 "[round 2] merged pool: $pool_count unique findings" "debate"
 
   if [[ "$pool_count" -eq 0 ]]; then
-    log_success >&2 "[round 2] empty pool after merge — APPROVED" "debate"
-    echo '{"status":"APPROVED","summary":"No issues survived merging","comments":[]}'
+    # We only reach round 2 on a PROCEED decision — i.e. an agent's sentinel said
+    # CHANGES_REQUESTED, so findings DO exist. An empty pool here means the merge
+    # failed to capture them (e.g. an unforeseen finding format), NOT that the PR
+    # is clean. NEVER approve on this path; synthesise the raw findings instead.
+    log_warn >&2 "[round 2] empty pool despite a CHANGES_REQUESTED verdict — synthesising raw findings (NOT approving)" "debate"
+    run_synthesize "$project" "$project_dir" "$diff" "$changed_files" \
+      "$findings_a" "$findings_b" "$consumers" "$has_api_change" \
+      "$lang_directive" "$model" "$focused_ctx" "$mra_dir"
     return
   fi
 
@@ -290,7 +300,7 @@ run_debate_review() {
     "$mra_dir" "$pkb_context_lite" > "$vote_b_file" 2>"$vote_err_b" &
   local pid_vb=$!
 
-  wait $pid_va $pid_vb
+  wait $pid_va $pid_vb || true   # tolerate a voter's non-zero reap under set -e (ballots read from files)
   local votes_a votes_b
   votes_a=$(cat "$vote_a_file")
   votes_b=$(cat "$vote_b_file")
@@ -618,11 +628,16 @@ PROMPT
 _build_findings_pool() {
   local findings_a="$1" findings_b="$2"
 
-  # Extract finding lines from both agents
+  # Extract finding lines from both agents. MUST use the same tolerant pattern as
+  # _debate_count_findings — a bullet (- or *), optional indent/bold, then "[<UPPER>".
+  # A stricter "^- [" here would count findings (via _debate_count_findings) but
+  # fail to pool them, yielding an empty pool → a false APPROVED (see the empty-pool
+  # guard below).
+  local finding_re='^[[:space:]]*[-*][[:space:]]*\**\[[A-Z]'
   local all_findings
   all_findings=$(
-    echo "$findings_a" | grep '^\- \[' 2>/dev/null || true
-    echo "$findings_b" | grep '^\- \[' 2>/dev/null || true
+    echo "$findings_a" | grep -E "$finding_re" 2>/dev/null || true
+    echo "$findings_b" | grep -E "$finding_re" 2>/dev/null || true
   )
 
   # Number each unique finding
