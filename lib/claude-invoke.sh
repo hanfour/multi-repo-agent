@@ -15,8 +15,9 @@
 #      raw JSON / findings text exactly as before.
 #
 # Tunables:
-#   MRA_CLAUDE_MAX_RETRIES  (default 2)   extra attempts after the first
-#   MRA_CLAUDE_RETRY_DELAY  (default 3)   initial backoff seconds (doubles each retry)
+#   MRA_CLAUDE_MAX_RETRIES  (default 2)      extra attempts after the first
+#   MRA_CLAUDE_RETRY_DELAY  (default 3)      initial backoff seconds (doubles each retry)
+#   MRA_CLAUDE_BIN          (default claude) binary/mock to invoke (test + override seam)
 
 # Classify a claude failure as transient (retryable) from its exit code + stderr.
 # A zero exit is never a transient *error* (an empty zero-exit result is handled
@@ -39,10 +40,11 @@ claude_invoke() {
   local max="${MRA_CLAUDE_MAX_RETRIES:-2}"
   local delay="${MRA_CLAUDE_RETRY_DELAY:-3}"
   local attempt=0 out ec err errf
+  local bin="${MRA_CLAUDE_BIN:-claude}"   # override/mock seam, consistent with the rest of the codebase
   errf=$(mktemp)
 
   while :; do
-    out=$(claude "$@" 2>"$errf"); ec=$?
+    out=$("$bin" "$@" 2>"$errf"); ec=$?
     err=$(cat "$errf" 2>/dev/null)
 
     # Success: non-empty output on a clean exit.

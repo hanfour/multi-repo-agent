@@ -273,26 +273,34 @@ run_debate_review() {
     return
   fi
 
-  # Two agents vote in parallel
-  local vote_a_file vote_b_file
-  vote_a_file=$(mktemp)
-  vote_b_file=$(mktemp)
+  # Two agents vote in parallel. Capture each voter's stderr (claude_invoke
+  # retry/failure diagnostics) so a transient vote failure is visible rather
+  # than silently thinning the tally.
+  local vote_a_file vote_b_file vote_err_a vote_err_b
+  vote_a_file=$(mktemp); vote_b_file=$(mktemp)
+  vote_err_a=$(mktemp); vote_err_b=$(mktemp)
 
   run_vote "$project_dir" "$diff" "$pool" "Agent A (Impact Analyst)" \
     "$lang_directive" "$lite_model" "$focused_ctx" \
-    "$mra_dir" "$pkb_context_lite" > "$vote_a_file" 2>/dev/null &
+    "$mra_dir" "$pkb_context_lite" > "$vote_a_file" 2>"$vote_err_a" &
   local pid_va=$!
 
   run_vote "$project_dir" "$diff" "$pool" "Agent B (Quality Auditor)" \
     "$lang_directive" "$lite_model" "$focused_ctx" \
-    "$mra_dir" "$pkb_context_lite" > "$vote_b_file" 2>/dev/null &
+    "$mra_dir" "$pkb_context_lite" > "$vote_b_file" 2>"$vote_err_b" &
   local pid_vb=$!
 
   wait $pid_va $pid_vb
   local votes_a votes_b
   votes_a=$(cat "$vote_a_file")
   votes_b=$(cat "$vote_b_file")
-  rm -f "$vote_a_file" "$vote_b_file"
+  # A voter that returned nothing (after retries) means its ballot is missing —
+  # warn with its diagnostics; the tally proceeds on whatever ballots we have.
+  [[ -z "$votes_a" && -s "$vote_err_a" ]] && \
+    { log_warn >&2 "[round 2] voter A produced no ballot:" "debate"; tail -4 "$vote_err_a" | sed 's/^/    /' >&2; }
+  [[ -z "$votes_b" && -s "$vote_err_b" ]] && \
+    { log_warn >&2 "[round 2] voter B produced no ballot:" "debate"; tail -4 "$vote_err_b" | sed 's/^/    /' >&2; }
+  rm -f "$vote_a_file" "$vote_b_file" "$vote_err_a" "$vote_err_b"
 
   # Tally votes and filter surviving findings
   local surviving_findings

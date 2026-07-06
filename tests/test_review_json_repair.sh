@@ -7,6 +7,7 @@ set -euo pipefail
 
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$MRA_DIR/lib/colors.sh"
+source "$MRA_DIR/lib/claude-invoke.sh"
 source "$MRA_DIR/lib/project-path.sh"
 source "$MRA_DIR/lib/review.sh"
 
