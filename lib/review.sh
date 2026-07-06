@@ -643,8 +643,14 @@ _review_singlepass_body() {
   # closes an addr1,addr2 range on the line addr1 matched, in both GNU and
   # BSD sed), so a compact single-line JSON body immediately followed by the
   # sentinel line would otherwise be left un-isolated and fail jq parsing.
+  # The match is anchored to a WHOLE line that IS the sentinel (tolerating
+  # surrounding/internal whitespace) rather than a bare substring: a
+  # substring strip would also delete any body/summary line that merely
+  # MENTIONS the token (very plausible when mra reviews its own
+  # sentinel-mechanism PRs), silently dropping a real HIGH/CRITICAL finding
+  # while leaving the resulting JSON still valid — a false green (#8).
   local body
-  body=$(printf '%s\n' "$raw" | grep -v "${MRA_REVIEW_SENTINEL_TOKEN}:") || true
+  body=$(printf '%s\n' "$raw" | grep -vE "^[[:space:]]*===${MRA_REVIEW_SENTINEL_TOKEN}:[[:space:]]*(APPROVED|CHANGES_REQUESTED)[[:space:]]*===[[:space:]]*$") || true
   local j; j=$(extract_json "$body")
   if echo "$j" | jq . &>/dev/null; then
     printf '%s' "$j"
