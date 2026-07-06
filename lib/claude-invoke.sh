@@ -22,20 +22,34 @@
 # Classify a claude failure as transient (retryable) from its exit code + stderr.
 # A zero exit is never a transient *error* (an empty zero-exit result is handled
 # separately by claude_invoke). Returns 0 (true) when transient.
+#
+# The HTTP status codes (429 / 5xx) are matched with digit boundaries so a bare
+# status like "503" matches but a 3-digit run inside a larger number ("5000",
+# "line 1500", "42900 bytes") does NOT — the latter would otherwise trigger
+# spurious retries on a genuinely fatal error.
 _claude_is_transient() {
   local ec="$1" err="$2"
   [[ "$ec" -eq 0 ]] && return 1
   printf '%s' "$err" | grep -qiE \
-    'overloaded|rate.?limit|429|5[0-9][0-9]|internal server|service unavailable|tim(e|ed).?out|connection (reset|refused|closed|error)|econnreset|network|temporarily|please try again' \
+    'overloaded|rate.?limit|internal server|service unavailable|tim(e|ed).?out|connection (reset|refused|closed|error)|econnreset|network|temporarily|please try again|(^|[^0-9])(429|5[0-9][0-9])([^0-9]|$)' \
     && return 0
   return 1
 }
 
-# claude_invoke <log_tag> <claude args...>
+# claude_invoke [--stream] <log_tag> <claude args...>
 # Runs `claude "$@"`, echoing its stdout to our stdout. Retries transient
 # failures / empty responses up to MRA_CLAUDE_MAX_RETRIES. Returns claude's
 # last exit code (stdout may be empty on total failure).
+#
+# --stream: let claude's stdout go LIVE to the caller's stdout instead of
+# buffering it (used by the terminal review path so the operator sees tokens
+# stream). The trade-off: we can no longer inspect stdout, so retries fall back
+# to exit-code-only — an empty zero-exit result is taken as success and NOT
+# retried, and a transient failure that already streamed partial output before
+# failing may re-stream on retry (rare: 429/5xx fail before emitting content).
 claude_invoke() {
+  local stream=0
+  if [[ "$1" == "--stream" ]]; then stream=1; shift; fi
   local tag="$1"; shift
   local max="${MRA_CLAUDE_MAX_RETRIES:-2}"
   local delay="${MRA_CLAUDE_RETRY_DELAY:-3}"
@@ -44,12 +58,17 @@ claude_invoke() {
   errf=$(mktemp)
 
   while :; do
-    out=$("$bin" "$@" 2>"$errf"); ec=$?
+    if [[ "$stream" -eq 1 ]]; then
+      "$bin" "$@" 2>"$errf"; ec=$?
+      out="__streamed__"   # sentinel: stdout went straight to the caller; treat as non-empty
+    else
+      out=$("$bin" "$@" 2>"$errf"); ec=$?
+    fi
     err=$(cat "$errf" 2>/dev/null)
 
-    # Success: non-empty output on a clean exit.
+    # Success: non-empty output on a clean exit (in --stream, any clean exit).
     if [[ "$ec" -eq 0 && -n "$out" ]]; then
-      printf '%s' "$out"
+      [[ "$stream" -eq 0 ]] && printf '%s' "$out"
       rm -f "$errf"
       return 0
     fi
@@ -58,9 +77,11 @@ claude_invoke() {
     # code with a retryable stderr) OR the call "succeeded" (ec=0) but returned
     # nothing — the review paths treat an empty response as a failure anyway. A
     # non-zero exit that is NOT transient (e.g. a bad flag) is a real error and
-    # is never retried, even though its stdout is also empty.
+    # is never retried, even though its stdout is also empty. In --stream mode
+    # the empty-output branch never fires (out is the sentinel), so only a
+    # transient error retries.
     if [[ "$attempt" -lt "$max" ]] && \
-       { _claude_is_transient "$ec" "$err" || [[ "$ec" -eq 0 && -z "$out" ]]; }; then
+       { _claude_is_transient "$ec" "$err" || [[ "$stream" -eq 0 && "$ec" -eq 0 && -z "$out" ]]; }; then
       attempt=$((attempt + 1))
       local why; why=$([[ "$ec" -ne 0 ]] && echo "ec=$ec" || echo "empty output")
       log_warn "claude transient failure ($why) — retry $attempt/$max in ${delay}s" "$tag" >&2
@@ -79,7 +100,8 @@ claude_invoke() {
         log_error "claude failed (ec=$ec) after $((attempt + 1)) attempt(s) with no stderr" "$tag" >&2
       fi
     fi
-    printf '%s' "$out"
+    # In --stream mode stdout already went to the caller; never echo the sentinel.
+    [[ "$stream" -eq 0 ]] && printf '%s' "$out"
     rm -f "$errf"
     return "$ec"
   done
