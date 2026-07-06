@@ -317,7 +317,9 @@ run_debate_review() {
   surviving_findings=$(_tally_votes "$pool" "$votes_a" "$votes_b")
 
   local surviving_count
-  surviving_count=$(echo "$surviving_findings" | grep -c '^\- \[' || true)
+  # Tolerant bullet/bold/indent pattern (matches _debate_count_findings / the pool)
+  # so this log count doesn't undercount surviving bold/indented findings.
+  surviving_count=$(echo "$surviving_findings" | grep -cE '^[[:space:]]*[-*][[:space:]]*\**\[[A-Z]' || true)
   surviving_count=${surviving_count//[^0-9]/}; [[ -z "$surviving_count" ]] && surviving_count=0
   log_info >&2 "[round 2] $surviving_count findings survived voting (from $pool_count)" "debate"
 
