@@ -124,6 +124,17 @@ _review_event_for_status() {
 _review_effective_status() {
   local status="${1:-}" review_json="${2:-}"
   if [[ "${MRA_REVIEW_APPROVE_IF_NO_HIGH:-}" == "1" && "${MRA_REVIEW_ALLOW_APPROVE:-}" == "1" ]]; then
+    # NEVER upgrade a review that did not COMPLETE. A REVIEW_INCOMPLETE carries
+    # status COMMENT + empty comments, which would otherwise read as "no
+    # HIGH/CRITICAL → approve" and post a false green on a review that never ran.
+    # Detect it the same way _review_issues_display does (the summary sentinel)
+    # and pass the status through unchanged.
+    local summary
+    summary=$(printf '%s' "$review_json" | jq -r '.summary // ""' 2>/dev/null)
+    if [[ "$summary" == *"REVIEW_INCOMPLETE"* ]]; then
+      echo "$status"
+      return 0
+    fi
     local high_count
     high_count=$(printf '%s' "$review_json" \
       | jq -r '[.comments[]? | select(.severity == "CRITICAL" or .severity == "HIGH")] | length' 2>/dev/null)
@@ -475,8 +486,9 @@ ${prompt}"
   log_progress "running Claude ($model)..." "review"
 
   if [[ "$output_mode" == "terminal" ]]; then
-    # Terminal mode: just print
-    claude_invoke review -p "$prompt" "${claude_args[@]}"
+    # Terminal mode: stream live (--stream) so the operator sees tokens as they
+    # arrive; still retries transient failures via claude_invoke.
+    claude_invoke --stream review -p "$prompt" "${claude_args[@]}"
   else
     # Inline mode: get JSON, parse, post to GitHub
     local review_json
