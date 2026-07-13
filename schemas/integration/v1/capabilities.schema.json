@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hanfour.github.io/multi-repo-agent/schemas/integration/v1/capabilities.schema.json",
+  "type": "object",
+  "required": ["schema", "protocolVersion", "product", "capabilities", "providers", "strategies"],
+  "properties": {
+    "schema": { "const": "io.mra.integration.capabilities/v1" },
+    "protocolVersion": { "const": "1.0" },
+    "product": { "const": "multi-repo-agent" },
+    "capabilities": {
+      "type": "object",
+      "required": ["analysisOnly", "shaBinding", "sanitizedContext", "blockerUnion", "resultArtifact"]
+    },
+    "providers": { "type": "array", "items": { "const": "codex" }, "minItems": 1, "maxItems": 1 },
+    "strategies": { "type": "array", "items": { "const": "standard" } }
+  }
+}
