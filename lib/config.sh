@@ -30,6 +30,14 @@ config_set_string() {
     return 1
   fi
 }
+config_set_bool_word() {
+  local key="$1" value="$2"
+  case "$value" in
+    true|on|1)  config_set "$key" "true" ;;
+    false|off|0) config_set "$key" "false" ;;
+    *) log_error "invalid value for $key: $value (use on/off)" "config"; return 1 ;;
+  esac
+}
 config_get_alias() {
   local name="$1" config_file="${2:-$MRA_CONFIG}"
   jq -r --arg name "$name" '.aliases[$name] // "null"' "$config_file"
@@ -70,6 +78,39 @@ config_handle() {
         log_error "ghAccounts must be a JSON object mapping owner-org -> gh login, e.g. '{\"acme\":\"my-gh-login\"}'" "config"; return 1
       fi
       config_set "ghAccounts" "$value" && log_success "ghAccounts set (per-repo gh login map for mra prd-issues)" "config" ;;
+    review.providerMode)
+      case "$value" in
+        claude|codex|fallback|dual)
+          config_set_string "$key" "$value"
+          log_success "$key set to: $value" "config" ;;
+        *) log_error "$key must be one of: claude, codex, fallback, dual" "config"; return 1 ;;
+      esac ;;
+    review.primaryProvider|review.secondaryProvider)
+      case "$value" in
+        claude|codex)
+          config_set_string "$key" "$value"
+          log_success "$key set to: $value" "config" ;;
+        *) log_error "$key must be one of: claude, codex" "config"; return 1 ;;
+      esac ;;
+    review.allowUserOverride|review.context.loadAgentsMd|review.context.loadLegacyClaudeMd|review.context.loadClaudeRules|review.context.loadClaudeSettingsLocal)
+      config_set_bool_word "$key" "$value" && log_success "$key set to: $value" "config" ;;
+    review.dualMergePolicy)
+      case "$value" in
+        union|primary|intersection)
+          config_set_string "$key" "$value"
+          log_success "$key set to: $value" "config" ;;
+        *) log_error "review.dualMergePolicy must be one of: union, primary, intersection" "config"; return 1 ;;
+      esac ;;
+    review.models.claude|review.models.codex)
+      config_set_string "$key" "$value"
+      log_success "$key set to: $value" "config" ;;
+    review.context.loadClaudeSkills)
+      case "$value" in
+        summary|full|off|false|none)
+          config_set_string "$key" "$value"
+          log_success "$key set to: $value" "config" ;;
+        *) log_error "review.context.loadClaudeSkills must be one of: summary, full, off" "config"; return 1 ;;
+      esac ;;
     *) log_error "unknown config key: $key" "config"; return 1 ;;
   esac
 }

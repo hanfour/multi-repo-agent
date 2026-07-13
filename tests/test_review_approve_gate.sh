@@ -35,6 +35,9 @@ check "$(_review_effective_status APPROVED "$json_approved_high_token")" "CHANGE
 # A CHANGES_REQUESTED with no comments (summary-only blocker) must stay a block.
 check "$(_review_effective_status CHANGES_REQUESTED "$json_cr_no_comments")" "CHANGES_REQUESTED" "CHANGES_REQUESTED w/ empty comments is NOT flipped to APPROVED"
 unset MRA_REVIEW_APPROVE_IF_NO_HIGH MRA_REVIEW_ALLOW_APPROVE
-check "$(_review_effective_status APPROVED "$json_high")" "APPROVED" "policy-off passthrough"
+check "$(_review_effective_status APPROVED "$json_high")" "COMMENT" "approve gate off -> COMMENT"
+export MRA_REVIEW_ALLOW_APPROVE=1
+check "$(_review_effective_status APPROVED "$json_clean")" "APPROVED" "allowApprove keeps APPROVED"
+unset MRA_REVIEW_ALLOW_APPROVE
 
 exit $fail
