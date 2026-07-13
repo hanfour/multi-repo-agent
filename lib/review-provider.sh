@@ -214,7 +214,18 @@ _review_without_github_credentials() {
 }
 
 _review_file_owner_uid() {
-  stat -f '%u' "$1" 2>/dev/null || stat -c '%u' "$1" 2>/dev/null
+  local uid
+  uid=$(stat -c '%u' "$1" 2>/dev/null || true)
+  if [[ "$uid" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$uid"
+    return 0
+  fi
+  uid=$(stat -f '%u' "$1" 2>/dev/null || true)
+  if [[ "$uid" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$uid"
+    return 0
+  fi
+  return 1
 }
 
 _review_copy_auth_file() {
