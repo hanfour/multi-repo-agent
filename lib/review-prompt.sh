@@ -104,10 +104,12 @@ Rules for "comments":
 - Only include comments for issues found in the DIFF. Do not comment on unchanged code.
 - Each comment must reference a specific file and line.
 - If status is APPROVED, comments array should be empty or contain only positive notes.
+- Only include CRITICAL/HIGH/MEDIUM comments for in-scope, reachable defects. Do not comment on missing future features, placeholders, or product assumptions unless they create a concrete reachable bug now.
 
 Rules for "body":
 - Be specific about the problem and suggest a fix.
 - For API breaking changes, mention which consumer file and line is affected.
+- For every CRITICAL/HIGH/MEDIUM issue, include scope relation, reachable path, evidence, impact, and why it should block this PR now.
 
 ## Completion (REQUIRED)
 After the JSON object, output EXACTLY ONE final line on its own — it confirms the
@@ -150,6 +152,20 @@ You are reviewing ${review_subject} for the project "${project}" (type: ${projec
 3. Check the project's existing patterns, naming conventions, and architecture.
 4. Apply the review criteria from your system prompt (code-reviewer.md).
 5. If consumer projects are loaded, read their code to verify API compatibility.
+
+## Scope and Severity Gate
+
+Before reporting an issue, infer the PR scope from the task/PR description, linked issue, commit messages, changed files, and existing PR discussion. Treat explicit "out of scope" comments as scope constraints unless the implementation creates a reachable security, data integrity, crash, or regression risk.
+
+A CRITICAL/HIGH/MEDIUM finding must satisfy all of these:
+- The issue is introduced or exposed by this diff.
+- A user, API client, or system job can reach it today.
+- The impact is concrete: security/authz, data loss/corruption/privacy leak, production crash, critical regression, or material breakage of this PR's scoped feature.
+- The finding is actionable by a code change in this PR.
+
+Do not mark missing future functionality as CRITICAL/HIGH/MEDIUM. A visible UI affordance such as an Add/Edit/Delete button is not proof that the workflow is in scope. For a list-page PR, missing create/edit/delete/detail behavior is non-blocking unless the PR explicitly includes that workflow or the enabled control leads to a reachable broken route/state, incorrect mutation, security issue, severe user confusion in the scoped flow, or regression.
+
+If a concern depends on an unstated product rule or unclear scope, do not file a blocking comment. Leave it out or mention it only as a non-blocking question in the summary/notes if the output format supports notes.
 ${consumer_context}
 ${dep_context}
 ${lang_directive}
@@ -170,6 +186,6 @@ Important:
 - Only flag issues that are in the DIFF. Do not review unchanged code.
 - For API changes with consumers loaded, check the actual consumer source code.
 - Be specific: include file names and line numbers.
-- If you are unsure, flag as MEDIUM with a question.
+- If you are unsure whether behavior is a bug or product scope, do not file a HIGH/MEDIUM comment; ask a non-blocking question instead.
 PROMPT
 }

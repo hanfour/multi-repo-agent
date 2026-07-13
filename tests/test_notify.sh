@@ -33,6 +33,12 @@ if ! type notify_test_failed &>/dev/null; then echo "FAIL: notify_test_failed no
 if ! type notify_scan_complete &>/dev/null; then echo "FAIL: notify_scan_complete not defined"; errors=$((errors+1)); fi
 if ! type notify_escalation &>/dev/null; then echo "FAIL: notify_escalation not defined"; errors=$((errors+1)); fi
 
+# Review incomplete notifications should be warning-level, not clean info.
+notify_review_complete "$TEST_DIR" "api" "REVIEW_INCOMPLETE" >/dev/null 2>&1
+if ! grep -R "\[warn\] review-complete: Code review for api: REVIEW_INCOMPLETE" "$TEST_DIR/.collab/logs" >/dev/null 2>&1; then
+  echo "FAIL: review incomplete notification should be warn-level"; errors=$((errors+1))
+fi
+
 rm -rf "$TEST_DIR"
 if [[ $errors -eq 0 ]]; then echo "PASS: all notify tests passed"
 else echo "FAIL: $errors tests failed"; exit 1; fi

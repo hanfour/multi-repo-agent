@@ -11,11 +11,36 @@ Context-aware code review that auto-selects strategy based on diff size.
 | **Debate** | Large diffs or API changes | 2 analysts + mailbox voting (~3 min) |
 
 ```bash
-mra review my-api                     # auto-select
+mra review my-api                     # Codex by default
 mra review my-api --pr 123            # post inline comments
-mra review my-api --strategy debate   # force debate mode
+mra review my-api --provider claude --strategy debate   # force Claude debate mode
 mra review my-api --base development  # compare against a specific branch
 ```
+
+## Providers
+
+Review defaults to Codex. Admins can switch the default:
+
+```bash
+mra config review.providerMode codex
+mra config review.providerMode claude
+mra config review.providerMode fallback
+mra config review.providerMode dual
+```
+
+CLI `--provider` overrides are blocked unless `review.allowUserOverride` is enabled or `MRA_REVIEW_ADMIN_OVERRIDE=1` is set. `fallback` tries primary then secondary; `dual` runs both providers and merges their standard single-pass findings. In this phase Codex uses single-pass review; debate and personas remain Claude-only.
+
+New installations use Codex plus the standard strategy. Unversioned legacy
+configs preserve Claude behavior until explicitly migrated. Codex runs from a
+trusted MRA cwd against a sanitized read-only snapshot; repository AGENTS,
+Claude rules, and skills are supplied only as untrusted review context.
+
+For machine integrations, use `mra integration describe|doctor|review`. Protocol
+v1 is analysis-only, emits a SHA-bound JSON artifact, and never receives GitHub
+credentials or approval intent.
+Protocol v1 advertises only Codex because it is the provider with enforced
+sanitized execution. Claude, fallback, and dual remain available for ordinary
+reviews, but their output is not approval-eligible evidence.
 
 ## --personas (opt-in)
 

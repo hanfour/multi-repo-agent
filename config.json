@@ -1,4 +1,5 @@
 {
+  "configVersion": 2,
   "autoScan": true,
   "depthDefault": 1,
   "outputLanguage": "繁體中文台灣用語",
@@ -8,5 +9,23 @@
     "reviewLoopMax": 3,
     "autoCommit": true,
     "autoPR": true
+  },
+  "review": {
+    "providerMode": "codex",
+    "primaryProvider": "codex",
+    "secondaryProvider": "claude",
+    "allowUserOverride": false,
+    "dualMergePolicy": "union",
+    "models": {
+      "claude": "sonnet",
+      "codex": ""
+    },
+    "context": {
+      "loadAgentsMd": true,
+      "loadLegacyClaudeMd": true,
+      "loadClaudeRules": true,
+      "loadClaudeSkills": "summary",
+      "loadClaudeSettingsLocal": false
+    }
   }
 }

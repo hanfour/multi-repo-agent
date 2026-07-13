@@ -47,6 +47,20 @@ grep -q 'MRA_REVIEW_PR_DISCUSSION' "$MRA_DIR/lib/review-debate.sh" \
   && ok "debate agents reference MRA_REVIEW_PR_DISCUSSION" || fail "debate agents must consume MRA_REVIEW_PR_DISCUSSION"
 grep -q 'MRA_REVIEW_PR_CONTEXT' "$MRA_DIR/lib/review.sh" \
   && ok "PR-context fetch is config-gated (MRA_REVIEW_PR_CONTEXT)" || fail "fetch must gate on MRA_REVIEW_PR_CONTEXT"
+grep -q '_review_prompt_with_pr_discussion' "$MRA_DIR/lib/review.sh" \
+  && ok "single-pass review injects PR discussion context" || fail "single-pass prompt must include PR discussion context"
+
+OUT=$(_review_format_pr_scope '{"title":"List tracking codes","body":"Create is explicitly out of scope for this PR.","base":{"ref":"main"},"head":{"ref":"feature/list"},"labels":[{"name":"frontend"}]}')
+printf '%s' "$OUT" | grep -qF 'Create is explicitly out of scope' && ok "PR description is included as scope context" || fail "PR description missing from scope context"
+printf '%s' "$OUT" | grep -qF 'Untrusted PR Scope' && ok "PR metadata is marked untrusted" || fail "PR metadata must be marked untrusted"
+
+export MRA_REVIEW_PR_DISCUSSION="$OUT"
+single_pass_prompt=$(_review_prompt_with_pr_discussion 'BASE SINGLE PASS PROMPT')
+unset MRA_REVIEW_PR_DISCUSSION
+printf '%s' "$single_pass_prompt" | grep -qF 'Create is explicitly out of scope' \
+  && ok "single-pass prompt carries out-of-scope PR text" || fail "single-pass prompt missing PR scope text"
+printf '%s' "$single_pass_prompt" | grep -qF 'BASE SINGLE PASS PROMPT' \
+  && ok "single-pass prompt preserves original review prompt" || fail "single-pass prompt lost base prompt"
 
 echo ""
 [[ $errors -eq 0 ]] && echo "PASS: all review-pr-context tests passed" || { echo "FAIL: $errors tests failed"; exit 1; }

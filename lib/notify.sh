@@ -180,7 +180,9 @@ notify_pr_created() {
 notify_review_complete() {
   local workspace="$1" project="$2" result="$3"
   local level="info"
-  [[ "$result" == "CHANGES_REQUESTED" ]] && level="warn"
+  case "$result" in
+    CHANGES_REQUESTED|REVIEW_INCOMPLETE|COMMENT) level="warn" ;;
+  esac
   notify "$workspace" "review-complete" "Code review for $project: $result" "$level"
 }
 

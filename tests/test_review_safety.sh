@@ -52,12 +52,25 @@ else
   fail_test "expected COMMENT, got '$event'"
 fi
 
+effective=$(_review_effective_status "APPROVED" "$APPROVED_JSON" 2>/dev/null)
+if [[ "$effective" == "COMMENT" ]]; then
+  pass_test "effective status matches default COMMENT event"
+else
+  fail_test "expected effective COMMENT, got '$effective'"
+fi
+
 # --- Override flag re-enables APPROVE ---
 event=$(MRA_REVIEW_ALLOW_APPROVE=1 _review_event_for_status "APPROVED" 2>/dev/null)
 if [[ "$event" == "APPROVE" ]]; then
   pass_test "MRA_REVIEW_ALLOW_APPROVE=1 keeps APPROVE"
 else
   fail_test "expected APPROVE, got '$event'"
+fi
+effective=$(MRA_REVIEW_ALLOW_APPROVE=1 _review_effective_status "APPROVED" "$APPROVED_JSON" 2>/dev/null)
+if [[ "$effective" == "APPROVED" ]]; then
+  pass_test "allowApprove keeps effective APPROVED"
+else
+  fail_test "expected effective APPROVED, got '$effective'"
 fi
 
 # --- CHANGES_REQUESTED maps to REQUEST_CHANGES regardless of flag ---
@@ -95,6 +108,31 @@ if [[ "$out" == "0" ]]; then
 else
   fail_test "clean review should show 0, got '$out'"
 fi
+
+# --- Review notification status normalization ---
+notify_status=$(_review_status_for_notify '{"status":"COMMENT","summary":"⚠️ REVIEW_INCOMPLETE — agent did not finish","comments":[]}')
+if [[ "$notify_status" == "REVIEW_INCOMPLETE" ]]; then
+  pass_test "COMMENT REVIEW_INCOMPLETE normalizes for notifications"
+else
+  fail_test "expected REVIEW_INCOMPLETE notify status, got '$notify_status'"
+fi
+notify_status=$(_review_status_for_notify "$GOOD_JSON")
+if [[ "$notify_status" == "CHANGES_REQUESTED" ]]; then
+  pass_test "valid review status passes through for notifications"
+else
+  fail_test "expected CHANGES_REQUESTED notify status, got '$notify_status'"
+fi
+unset MRA_REVIEW_ALLOW_APPROVE || true
+notify_status=$(_review_status_for_notify "$APPROVED_JSON")
+[[ "$notify_status" == "COMMENT" ]] && pass_test "notification reports downgraded COMMENT without approval authorization" || fail_test "expected COMMENT notify status, got '$notify_status'"
+notify_status=$(MRA_REVIEW_ALLOW_APPROVE=1 _review_status_for_notify "$APPROVED_JSON")
+[[ "$notify_status" == "APPROVED" ]] && pass_test "notification reports APPROVED with authorization" || fail_test "expected APPROVED notify status, got '$notify_status'"
+
+redacted=$(GH_TOKEN='ghp_abcdefghijklmnopqrstuvwxyz123456' _review_redact_secrets_json '{"status":"COMMENT","summary":"ghp_abcdefghijklmnopqrstuvwxyz123456","comments":[]}')
+case "$redacted" in *"ghp_abcdefghijklmnopqrstuvwxyz123456"*) fail_test "review JSON leaked GitHub token" ;; *) pass_test "review JSON redacts GitHub tokens" ;; esac
+
+_review_validate_expected_head abc abc abc && pass_test "matching expected/local/remote heads pass" || fail_test "matching heads should pass"
+if _review_validate_expected_head abc abc def; then fail_test "changed remote head should fail"; else pass_test "changed remote head fails closed"; fi
 
 # --- _review_strategy_turns: defaults + env overrides ---
 unset MRA_REVIEW_STANDARD_MAX_TURNS MRA_REVIEW_LIGHT_MAX_TURNS || true
