@@ -314,7 +314,7 @@ _review_call_one_provider() {
       fi
       ;;
     codex)
-      local trusted_cwd snapshot rc=0 codex_config provider_name base_url wire_api codex_last codex_stdout
+      local trusted_cwd snapshot rc=0 codex_config provider_name base_url wire_api requires_openai_auth codex_last codex_stdout
       prompt=$(_review_provider_codex_prompt "$prompt" "$system_prompt_file")
       trusted_cwd=$(mktemp -d "${TMPDIR:-/tmp}/mra-review-trusted.XXXXXX") || return 1
       snapshot=$(_review_create_sanitized_snapshot "$project_dir") || { rm -rf "$trusted_cwd"; return 1; }
@@ -327,6 +327,7 @@ _review_call_one_provider() {
       [[ "$provider_name" =~ ^[A-Za-z0-9._-]+$ ]] || provider_name="OpenAI"
       base_url=$(_review_toml_string_value "$codex_config" "model_providers.$provider_name" base_url)
       wire_api=$(_review_toml_string_value "$codex_config" "model_providers.$provider_name" wire_api)
+      requires_openai_auth=$(_review_toml_string_value "$codex_config" "model_providers.$provider_name" requires_openai_auth)
       [[ "$base_url" =~ ^https://[A-Za-z0-9._:/-]+$ ]] || base_url="https://api.openai.com/v1"
       [[ "$wire_api" =~ ^(responses|chat)$ ]] || wire_api="responses"
       local args=(exec --sandbox read-only --cd "$trusted_cwd" --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules
@@ -338,6 +339,9 @@ _review_call_one_provider() {
         -c "model_providers.$provider_name.name=\"$provider_name\""
         -c "model_providers.$provider_name.base_url=\"$base_url\""
         -c "model_providers.$provider_name.wire_api=\"$wire_api\"")
+      if [[ "$requires_openai_auth" == "true" || "$requires_openai_auth" == "false" ]]; then
+        args+=(-c "model_providers.$provider_name.requires_openai_auth=$requires_openai_auth")
+      fi
       [[ -n "$model" ]] && args+=(--model "$model")
       args+=("$prompt")
       MRA_REVIEW_AUTH_PROVIDER=codex _review_without_github_credentials "${MRA_CODEX_BIN:-codex}" "${args[@]}" >"$codex_stdout" || rc=$?
