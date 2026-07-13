@@ -199,8 +199,11 @@ _review_without_github_credentials() {
     if [[ "${MRA_REVIEW_AUTH_PROVIDER:-}" == "codex" ]]; then
       if ! command -v sandbox-exec >/dev/null 2>&1; then
         if [[ "${MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX:-}" == "1" ]]; then
+          ( sleep "${MRA_CODEX_AUTH_FILE_TTL_SECONDS:-1}"; rm -f "$codex_auth_file" ) &
+          codex_auth_deleter=$!
           "$@" || rc=$?
           rm -f "$codex_auth_file"
+          [[ -z "$codex_auth_deleter" ]] || wait "$codex_auth_deleter" 2>/dev/null || true
           return "$rc"
         fi
         log_error "codex review requires sandbox-exec to block access to local credentials" "review" >&2
