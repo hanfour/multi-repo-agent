@@ -109,7 +109,7 @@ wire_api = "responses"
 trust_level = "trusted"
 TOML
 printf '{"auth_mode":"api_key","OPENAI_API_KEY":"test-only-key"}\n' > "$TMP/home/.codex/auth.json"
-out=$(HOME="$TMP/home" ORIGINAL_HOME_FOR_STUB="$TMP/home" MRA_REVIEW_MODEL_HOME="$TMP/model-home" MRA_CODEX_AUTH_FILE_TTL_SECONDS=0 CODEX_STUB_AUTH_CHECK_DELAY=1 GH_TOKEN=secret GITHUB_TOKEN=secret2 MRA_CODEX_BIN="$BIN/codex" review_call_model review codex "PROMPT-C" "" "$TMP/project" "$add_dirs" 6 "$TMP/reviewer.md")
+out=$(HOME="$TMP/home" ORIGINAL_HOME_FOR_STUB="$TMP/home" MRA_REVIEW_MODEL_HOME="$TMP/model-home" MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 MRA_CODEX_AUTH_FILE_TTL_SECONDS=0 CODEX_STUB_AUTH_CHECK_DELAY=1 GH_TOKEN=secret GITHUB_TOKEN=secret2 MRA_CODEX_BIN="$BIN/codex" review_call_model review codex "PROMPT-C" "" "$TMP/project" "$add_dirs" 6 "$TMP/reviewer.md")
 [[ "$out" == "<codex-output>" ]] && pass "codex output returned" || fail "codex output wrong: $out"
 rec=$(cat "$REC")
 case "$rec" in *"exec --sandbox read-only --cd "*"mra-review-trusted."*" --skip-git-repo-check --ephemeral "*"--add-dir "*"mra-review-snapshot."*) pass "codex uses trusted cwd and sanitized snapshot" ;; *) fail "codex args missing trusted sandbox: $rec" ;; esac

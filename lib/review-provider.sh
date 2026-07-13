@@ -198,6 +198,11 @@ _review_without_github_credentials() {
     local rc=0
     if [[ "${MRA_REVIEW_AUTH_PROVIDER:-}" == "codex" ]]; then
       if ! command -v sandbox-exec >/dev/null 2>&1; then
+        if [[ "${MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX:-}" == "1" ]]; then
+          "$@" || rc=$?
+          rm -f "$codex_auth_file"
+          return "$rc"
+        fi
         log_error "codex review requires sandbox-exec to block access to local credentials" "review" >&2
         return 1
       fi

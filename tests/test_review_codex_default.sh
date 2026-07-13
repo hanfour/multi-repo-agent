@@ -50,8 +50,10 @@ echo "claude should not run: $*" >> "$REC"
 exit 44
 STUB
 chmod +x "$BIN/codex" "$BIN/claude"
+mkdir -p "$TMP/home/.codex"
+printf '{"auth_mode":"api_key","OPENAI_API_KEY":"test-only-key"}\n' > "$TMP/home/.codex/auth.json"
 
-if out=$(MRA_WORKSPACE="$WS" MRA_CONFIG="$CFG" MRA_CODEX_BIN="$BIN/codex" MRA_CLAUDE_BIN="$BIN/claude" \
+if out=$(HOME="$TMP/home" MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 MRA_WORKSPACE="$WS" MRA_CONFIG="$CFG" MRA_CODEX_BIN="$BIN/codex" MRA_CLAUDE_BIN="$BIN/claude" \
   bash "$SCRIPT_DIR/bin/mra.sh" review app --working --no-debate 2>&1); then
   rc=0
 else

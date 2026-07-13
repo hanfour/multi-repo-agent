@@ -27,6 +27,8 @@ cat <<'OUT'
 OUT
 STUB
 chmod +x "$TMP/bin/codex"
+mkdir -p "$TMP/home/.codex"
+printf '{"auth_mode":"api_key","OPENAI_API_KEY":"test-only-key"}\n' > "$TMP/home/.codex/auth.json"
 cat > "$TMP/config.json" <<'JSON'
 {"review":{"providerMode":"codex","allowUserOverride":true}}
 JSON
@@ -42,7 +44,7 @@ describe=$(MRA_CONFIG="$TMP/config.json" "$ROOT/bin/mra.sh" integration describe
 doctor=$(MRA_CONFIG="$TMP/config.json" MRA_CODEX_BIN="$TMP/bin/codex" "$ROOT/bin/mra.sh" integration doctor --request "$TMP/request.json" --json)
 [[ "$(jq -r .ready <<<"$doctor")" == true ]] && pass "doctor validates request readiness" || fail "doctor should pass: $doctor"
 
-env GH_TOKEN=must-not-be-used GITHUB_TOKEN=must-not-be-used MRA_CONFIG="$TMP/config.json" MRA_CODEX_BIN="$TMP/bin/codex" \
+env HOME="$TMP/home" MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 GH_TOKEN=must-not-be-used GITHUB_TOKEN=must-not-be-used MRA_CONFIG="$TMP/config.json" MRA_CODEX_BIN="$TMP/bin/codex" \
   "$ROOT/bin/mra.sh" integration review --request "$TMP/request.json" --result "$TMP/result.json" --events "$TMP/events.jsonl"
 [[ "$(jq -r '.analysis.status' "$TMP/result.json")" == complete ]] && pass "protocol writes complete artifact" || fail "artifact incomplete"
 [[ "$(jq -r '.analysis.verdict' "$TMP/result.json")" == pass ]] && pass "protocol normalizes pass verdict" || fail "artifact verdict wrong"
@@ -52,7 +54,7 @@ env GH_TOKEN=must-not-be-used GITHUB_TOKEN=must-not-be-used MRA_CONFIG="$TMP/con
 
 mkdir -p "$TMP/real-results"
 ln -s "$TMP/real-results" "$TMP/link-results"
-env GH_TOKEN=must-not-be-used GITHUB_TOKEN=must-not-be-used MRA_CONFIG="$TMP/config.json" MRA_CODEX_BIN="$TMP/bin/codex" \
+env HOME="$TMP/home" MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 GH_TOKEN=must-not-be-used GITHUB_TOKEN=must-not-be-used MRA_CONFIG="$TMP/config.json" MRA_CODEX_BIN="$TMP/bin/codex" \
   "$ROOT/bin/mra.sh" integration review --request "$TMP/request.json" --result "$TMP/link-results/result.json" --events "$TMP/link-results/events.jsonl"
 [[ "$(jq -r '.analysis.status' "$TMP/link-results/result.json")" == complete ]] && pass "protocol writes artifact through symlinked parent" || fail "symlinked parent artifact failed"
 [[ "$(wc -l < "$TMP/link-results/events.jsonl" | tr -d ' ')" == 2 ]] && pass "protocol writes events through symlinked parent" || fail "symlinked parent events failed"
