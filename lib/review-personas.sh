@@ -73,12 +73,11 @@ run_persona_review() {
       prompt=$(build_persona_prompt "$p" "$diff" "$changed_files" "$consumers" "$pkb_context" "$lang_directive")
       local _ad_arr=()
       expand_add_dir_string _ad_arr "$claude_add_dirs"
-      claude_invoke "review-persona" -p "$prompt" \
+      _review_without_github_credentials claude_invoke "review-persona" -p "$prompt" \
         "${_ad_arr[@]}" \
         --model "$model" \
         --max-turns "${MRA_REVIEW_PERSONA_MAX_TURNS:-8}" \
-        --disallowedTools "Write,Edit,NotebookEdit" \
-        --setting-sources "project"
+        --disallowedTools "Write,Edit,NotebookEdit"
     ) > "$f" 2> "$err" &
     pids+=("$!")
   done

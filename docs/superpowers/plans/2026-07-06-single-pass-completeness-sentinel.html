@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Single-pass review completeness sentinel — Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
+    <div class="toc-title">Single-pass review completeness sentinel — Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#global-constraints">Global Constraints</a><ul>
+<li><a href="#task-1-shared-verdict-contract-libreview-verdictsh">Task 1: Shared verdict contract — lib/review-verdict.sh</a></li>
+<li><a href="#task-2-point-the-debate-path-at-the-shared-contract">Task 2: Point the debate path at the shared contract</a></li>
+<li><a href="#task-3-require-the-sentinel-in-the-inline-reviewer-prompt">Task 3: Require the sentinel in the inline reviewer prompt</a></li>
+<li><a href="#task-4-gate-the-inline-single-pass-path-on-the-sentinel">Task 4: Gate the inline single-pass path on the sentinel</a></li>
+<li><a href="#task-5-verify-end-to-end-shellcheck">Task 5: Verify end-to-end + shellcheck</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>Single-pass review completeness sentinel — Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Give the single-pass (light/standard) inline review path a completion sentinel so a cut-off / sentinel-less review is posted as a neutral REVIEW_INCOMPLETE COMMENT, never a false APPROVE.</p>
+<p><strong>Architecture:</strong> Extract the verdict-sentinel primitives (token, verdict parser, neutral-incomplete JSON) from <code>lib/review-debate.sh</code> into a shared <code>lib/review-verdict.sh</code>; require the sentinel in the inline reviewer prompt; gate the inline single-pass path on it via a testable helper <code>_review_singlepass_body</code>.</p>
+<p><strong>Tech Stack:</strong> Bash, jq. Entry point <code>bin/mra.sh</code> runs <code>set -euo pipefail</code>. Tests are <code>tests/test_*.sh</code> run by <code>test.sh</code>.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-07-06-single-pass-completeness-sentinel-design.md</code>
+<strong>Issue:</strong> #8. <strong>Branch:</strong> <code>feat/single-pass-completeness-sentinel</code>.</p>
+<h2 id="global-constraints">Global Constraints</h2>
+<ul>
+<li>Scope is <strong>inline (<code>--pr</code>) only</strong>. Do NOT touch the terminal branch (<code>claude_invoke --stream</code>) or its output.</li>
+<li>Fail-safe: empty response, missing sentinel, or unparseable JSON → REVIEW_INCOMPLETE, NEVER APPROVE.</li>
+<li>Behaviour-preserving refactor: <code>tests/test_review_debate.sh</code> and the full suite (<code>bash test.sh</code>, currently 68 shell + 24 node) must stay green.</li>
+<li>Reuse, don't duplicate: single-pass and debate share ONE sentinel definition.</li>
+<li><code>MRA_REVIEW_SENTINEL_TOKEN</code> value stays exactly <code>"MRA-REVIEW-COMPLETE"</code>.</li>
+</ul>
+<hr />
+<h3 id="task-1-shared-verdict-contract-libreview-verdictsh">Task 1: Shared verdict contract — <code>lib/review-verdict.sh</code></h3>
+<p><strong>Files:</strong>
+- Create: <code>lib/review-verdict.sh</code>
+- Modify: <code>bin/mra.sh</code> (add a <code>source</code> line)
+- Test: <code>tests/test_review_verdict.sh</code> (create)</p>
+<p><strong>Interfaces:</strong>
+- Produces:
+  - <code>MRA_REVIEW_SENTINEL_TOKEN</code> — string <code>"MRA-REVIEW-COMPLETE"</code>.
+  - <code>review_verdict_of &lt;text&gt;</code> → prints <code>APPROVED</code> | <code>CHANGES_REQUESTED</code> | <code>NONE</code>.
+  - <code>review_incomplete_json [reason]</code> → prints ONE JSON object <code>{"status":"COMMENT","summary":"⚠️ REVIEW_INCOMPLETE — &lt;reason&gt;","comments":[]}</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — create <code>tests/test_review_verdict.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="c1"># Shared review verdict-sentinel primitives (lib/review-verdict.sh).</span>
+<span class="nb">set</span><span class="w"> </span>-uo<span class="w"> </span>pipefail
+<span class="nv">MRA_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review-verdict.sh&quot;</span>
+
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="nv">pass</span><span class="o">=</span><span class="m">0</span>
+ok<span class="o">()</span><span class="w">   </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">pass</span><span class="o">=</span><span class="k">$((</span><span class="nv">pass</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+fail<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+eq<span class="o">()</span><span class="w">   </span><span class="o">{</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$3</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2"> — expected [</span><span class="nv">$2</span><span class="s2">] got [</span><span class="nv">$3</span><span class="s2">]&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+<span class="c1"># token value is stable</span>
+eq<span class="w"> </span><span class="s2">&quot;token value&quot;</span><span class="w"> </span><span class="s2">&quot;MRA-REVIEW-COMPLETE&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_REVIEW_SENTINEL_TOKEN</span><span class="s2">&quot;</span>
+
+<span class="c1"># review_verdict_of classification</span>
+eq<span class="w"> </span><span class="s2">&quot;approved sentinel&quot;</span><span class="w">  </span><span class="s2">&quot;APPROVED&quot;</span><span class="w">          </span><span class="s2">&quot;</span><span class="k">$(</span>review_verdict_of<span class="w"> </span><span class="s1">&#39;body ===MRA-REVIEW-COMPLETE: APPROVED===&#39;</span><span class="k">)</span><span class="s2">&quot;</span>
+eq<span class="w"> </span><span class="s2">&quot;changes sentinel&quot;</span><span class="w">   </span><span class="s2">&quot;CHANGES_REQUESTED&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>review_verdict_of<span class="w"> </span><span class="s1">&#39;x ===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED=== &#39;</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nv">sentinel_after_json</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n%s&#39;</span><span class="w"> </span><span class="s1">&#39;{&quot;status&quot;:&quot;APPROVED&quot;,&quot;comments&quot;:[]}&#39;</span><span class="w"> </span><span class="s1">&#39;===MRA-REVIEW-COMPLETE: APPROVED===&#39;</span><span class="k">)</span><span class="s2">&quot;</span>
+eq<span class="w"> </span><span class="s2">&quot;sentinel after json&quot;</span><span class="w"> </span><span class="s2">&quot;APPROVED&quot;</span><span class="w">         </span><span class="s2">&quot;</span><span class="k">$(</span>review_verdict_of<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$sentinel_after_json</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span>
+eq<span class="w"> </span><span class="s2">&quot;no sentinel&quot;</span><span class="w">        </span><span class="s2">&quot;NONE&quot;</span><span class="w">              </span><span class="s2">&quot;</span><span class="k">$(</span>review_verdict_of<span class="w"> </span><span class="s1">&#39;{&quot;status&quot;:&quot;APPROVED&quot;,&quot;comments&quot;:[]}&#39;</span><span class="k">)</span><span class="s2">&quot;</span>
+eq<span class="w"> </span><span class="s2">&quot;empty -&gt; none&quot;</span><span class="w">      </span><span class="s2">&quot;NONE&quot;</span><span class="w">              </span><span class="s2">&quot;</span><span class="k">$(</span>review_verdict_of<span class="w"> </span><span class="s1">&#39;&#39;</span><span class="k">)</span><span class="s2">&quot;</span>
+
+<span class="c1"># review_incomplete_json is valid, neutral, never approves</span>
+<span class="nv">J</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>review_incomplete_json<span class="k">)</span><span class="s2">&quot;</span>
+eq<span class="w"> </span><span class="s2">&quot;incomplete is valid json&quot;</span><span class="w"> </span><span class="s2">&quot;0&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$J</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>.<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span><span class="k">)</span><span class="s2">&quot;</span>
+eq<span class="w"> </span><span class="s2">&quot;incomplete status COMMENT&quot;</span><span class="w"> </span><span class="s2">&quot;COMMENT&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$J</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.status<span class="k">)</span><span class="s2">&quot;</span>
+eq<span class="w"> </span><span class="s2">&quot;incomplete no comments&quot;</span><span class="w">    </span><span class="s2">&quot;0&quot;</span><span class="w">       </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$J</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.comments | length&#39;</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$J</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.summary<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*REVIEW_INCOMPLETE*<span class="o">)</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;summary carries sentinel word&quot;</span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;summary missing REVIEW_INCOMPLETE&quot;</span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># custom reason is carried</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>review_incomplete_json<span class="w"> </span><span class="s1">&#39;custom reason here.&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.summary<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;custom reason here.&quot;</span>*<span class="o">)</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;custom reason carried&quot;</span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;custom reason dropped&quot;</span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;---&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Passed: </span><span class="nv">$pass</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Failed: </span><span class="nv">$errors</span><span class="s2">&quot;</span>
+<span class="nb">exit</span><span class="w"> </span><span class="k">$((</span><span class="nv">errors</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="m">0</span><span class="w"> </span>?<span class="w"> </span><span class="m">1</span><span class="w"> </span>:<span class="w"> </span><span class="m">0</span><span class="k">))</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_verdict.sh</code>
+Expected: FAIL — <code>lib/review-verdict.sh</code> does not exist (source error / functions undefined).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Write minimal implementation</strong> — create <code>lib/review-verdict.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="c1"># Shared review verdict-sentinel contract, used by BOTH the debate path</span>
+<span class="c1"># (lib/review-debate.sh) and the single-pass path (lib/review.sh). Kept in one</span>
+<span class="c1"># place so a review can never be judged complete by two different rules.</span>
+
+<span class="c1"># The sentinel a completed review ends its output with:</span>
+<span class="c1">#   ===MRA-REVIEW-COMPLETE: APPROVED===</span>
+<span class="c1">#   ===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===</span>
+<span class="c1"># Absence == the review did not finish (cutoff/failure), never an approval.</span>
+<span class="nv">MRA_REVIEW_SENTINEL_TOKEN</span><span class="o">=</span><span class="s2">&quot;MRA-REVIEW-COMPLETE&quot;</span>
+
+<span class="c1"># Extract a declared verdict from arbitrary review text: APPROVED |</span>
+<span class="c1"># CHANGES_REQUESTED | NONE. CHANGES_REQUESTED wins if both appear.</span>
+review_verdict_of<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-qE<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">MRA_REVIEW_SENTINEL_TOKEN</span><span class="si">}</span><span class="s2">:[[:space:]]*CHANGES_REQUESTED&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;CHANGES_REQUESTED&#39;</span>
+<span class="w">  </span><span class="k">elif</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-qE<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">MRA_REVIEW_SENTINEL_TOKEN</span><span class="si">}</span><span class="s2">:[[:space:]]*APPROVED&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;APPROVED&#39;</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;NONE&#39;</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="o">}</span>
+
+<span class="c1"># The canonical neutral &quot;review did not complete&quot; verdict as ONE JSON object.</span>
+<span class="c1"># $1 = optional full reason clause (already past &quot;⚠️ REVIEW_INCOMPLETE — &quot;).</span>
+<span class="c1"># status COMMENT + empty comments =&gt; the approve gate passes it through, never</span>
+<span class="c1"># APPROVE. jq -n builds it so the reason is safely escaped.</span>
+review_incomplete_json<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">reason</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">1</span><span class="k">:-</span><span class="nv">the</span><span class="p"> single-pass review did not emit a completion sentinel (likely a max-turns cutoff or a failed call). This is NOT an approval; re-run or review manually.</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span>jq<span class="w"> </span>-cn<span class="w"> </span>--arg<span class="w"> </span>s<span class="w"> </span><span class="s2">&quot;⚠️ REVIEW_INCOMPLETE — </span><span class="si">${</span><span class="nv">reason</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s1">&#39;{status:&quot;COMMENT&quot;, summary:$s, comments:[]}&#39;</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Add the source line to <code>bin/mra.sh</code></strong> — after <code>source "$MRA_DIR/lib/colors.sh"</code> (line 7), before <code>lib/review-select.sh</code>. Place it right after the <code>claude-invoke.sh</code> source (both are low-level, dependency-free helpers):</li>
+</ul>
+<p>Change:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/colors.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/claude-invoke.sh&quot;</span>
+</code></pre></div>
+
+<p>to:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/colors.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/claude-invoke.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review-verdict.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_verdict.sh</code>
+Expected: PASS (all lines <code>PASS:</code>, <code>Failed: 0</code>). Also <code>bash -n lib/review-verdict.sh</code> clean.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-verdict.sh<span class="w"> </span>tests/test_review_verdict.sh<span class="w"> </span>bin/mra.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(review): shared review-verdict contract (token, verdict_of, incomplete_json) (#8)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="task-2-point-the-debate-path-at-the-shared-contract">Task 2: Point the debate path at the shared contract</h3>
+<p><strong>Files:</strong>
+- Modify: <code>lib/review-debate.sh</code> (lines 23, 26–34, 197)
+- Modify: <code>tests/test_review_debate.sh</code> (add a <code>source</code> line)
+- Test: <code>tests/test_review_debate.sh</code> (existing — must stay green)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>MRA_REVIEW_SENTINEL_TOKEN</code>, <code>review_verdict_of</code>, <code>review_incomplete_json</code> (Task 1).
+- Produces: <code>_debate_verdict_of</code> remains callable (thin alias) for any other reference.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Update the debate test to source the shared lib first</strong> — in <code>tests/test_review_debate.sh</code>, after <code>source "$SCRIPT_DIR/lib/colors.sh"</code> add:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review-verdict.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run the debate test to confirm it still passes BEFORE refactor</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_debate.sh</code>
+Expected: PASS (baseline; the sourced shared lib does not yet conflict — the local defs still win).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Refactor <code>lib/review-debate.sh</code></strong> — three edits:</li>
+</ul>
+<p>(a) Delete the local token definition (now owned by review-verdict.sh). Remove line 23:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">MRA_REVIEW_SENTINEL_TOKEN</span><span class="o">=</span><span class="s2">&quot;MRA-REVIEW-COMPLETE&quot;</span>
+</code></pre></div>
+
+<p>Replace the comment block + line 23 so the file explains the move; keep the surrounding sentinel-explaining comment but drop the assignment:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># The sentinel token + verdict parser now live in lib/review-verdict.sh so the</span>
+<span class="c1"># debate and single-pass paths judge completeness by one rule. _debate_verdict_of</span>
+<span class="c1"># is kept as a thin alias for readability at debate call sites.</span>
+</code></pre></div>
+
+<p>(b) Replace the <code>_debate_verdict_of</code> function body (lines 26–34) with a delegating alias:</p>
+<div class="highlight"><pre><span></span><code>_debate_verdict_of<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span>review_verdict_of<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+</code></pre></div>
+
+<p>(c) Replace the inline REVIEW_INCOMPLETE literal at line 197:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;status&quot;:&quot;COMMENT&quot;,&quot;summary&quot;:&quot;⚠️ REVIEW_INCOMPLETE — at least one analysis agent did not finish (no completion verdict; likely an agent failure or a max-turns cutoff — try MRA_REVIEW_AGENT_MAX_TURNS or a PKB). This is NOT an approval; re-run or review manually.&quot;,&quot;comments&quot;:[]}&#39;</span>
+</code></pre></div>
+
+<p>with:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span>review_incomplete_json<span class="w"> </span><span class="s2">&quot;at least one analysis agent did not finish (no completion verdict; likely an agent failure or a max-turns cutoff — try MRA_REVIEW_AGENT_MAX_TURNS or a PKB). This is NOT an approval; re-run or review manually.&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run the debate test + full suite to verify green</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_debate.sh &amp;&amp; bash -n lib/review-debate.sh</code>
+Expected: PASS, syntax clean.
+Run: <code>bash test.sh 2&gt;&amp;1 | grep -E "shell tests:|mcp-server :"</code>
+Expected: <code>shell tests: N passed, 0 failed</code> (N is now 69 with the new verdict test).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-debate.sh<span class="w"> </span>tests/test_review_debate.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;refactor(review): debate path uses the shared verdict contract (#8)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="task-3-require-the-sentinel-in-the-inline-reviewer-prompt">Task 3: Require the sentinel in the inline reviewer prompt</h3>
+<p><strong>Files:</strong>
+- Modify: <code>lib/review-prompt.sh</code> (end of the <code>inline</code> <code>output_instructions</code>, ~line 110)
+- Test: <code>tests/test_review_prompt_sentinel.sh</code> (create)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>build_review_prompt</code> (existing) with <code>output_mode</code> <code>inline</code> | <code>terminal</code>.
+- Produces: the inline prompt string now contains <code>MRA-REVIEW-COMPLETE</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — create <code>tests/test_review_prompt_sentinel.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="c1"># build_review_prompt: inline mode requires the completion sentinel; terminal does not.</span>
+<span class="nb">set</span><span class="w"> </span>-uo<span class="w"> </span>pipefail
+<span class="nv">MRA_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/colors.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review-prompt.sh&quot;</span>
+<span class="c1"># stub collaborators build_review_prompt may call for context</span>
+review_diff_text<span class="o">()</span><span class="w">  </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;diff&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+review_diff_files<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;x&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="nv">pass</span><span class="o">=</span><span class="m">0</span>
+ok<span class="o">(){</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">pass</span><span class="o">=</span><span class="k">$((</span><span class="nv">pass</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+fail<span class="o">(){</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+<span class="nv">inline</span><span class="o">=</span><span class="k">$(</span>build_review_prompt<span class="w"> </span>proj<span class="w"> </span>/tmp<span class="w"> </span>gf<span class="w"> </span>base<span class="w"> </span>nodetype<span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span>inline<span class="w"> </span>range<span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$inline</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;MRA-REVIEW-COMPLETE&quot;</span>*<span class="o">)</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;inline prompt requires sentinel&quot;</span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;inline prompt missing sentinel instruction&quot;</span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+<span class="nv">term</span><span class="o">=</span><span class="k">$(</span>build_review_prompt<span class="w"> </span>proj<span class="w"> </span>/tmp<span class="w"> </span>gf<span class="w"> </span>base<span class="w"> </span>nodetype<span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span>terminal<span class="w"> </span>range<span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$term</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;MRA-REVIEW-COMPLETE&quot;</span>*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;terminal prompt should NOT mention sentinel&quot;</span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;terminal prompt unchanged&quot;</span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;---&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Passed: </span><span class="nv">$pass</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Failed: </span><span class="nv">$errors</span><span class="s2">&quot;</span>
+<span class="nb">exit</span><span class="w"> </span><span class="k">$((</span><span class="nv">errors</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="m">0</span><span class="w"> </span>?<span class="w"> </span><span class="m">1</span><span class="w"> </span>:<span class="w"> </span><span class="m">0</span><span class="k">))</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_prompt_sentinel.sh</code>
+Expected: FAIL on "inline prompt missing sentinel instruction".</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Implement</strong> — in <code>lib/review-prompt.sh</code>, the inline <code>output_instructions</code> string ends at line 110 with <code>- For API breaking changes, mention which consumer file and line is affected.'</code>. Append the sentinel instruction INSIDE that single-quoted string, before its closing <code>'</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>-<span class="w"> </span>For<span class="w"> </span>API<span class="w"> </span>breaking<span class="w"> </span>changes,<span class="w"> </span>mention<span class="w"> </span>which<span class="w"> </span>consumer<span class="w"> </span>file<span class="w"> </span>and<span class="w"> </span>line<span class="w"> </span>is<span class="w"> </span>affected.
+
+<span class="c1">## Completion (REQUIRED)</span>
+After<span class="w"> </span>the<span class="w"> </span>JSON<span class="w"> </span>object,<span class="w"> </span>output<span class="w"> </span>EXACTLY<span class="w"> </span>ONE<span class="w"> </span>final<span class="w"> </span>line<span class="w"> </span>on<span class="w"> </span>its<span class="w"> </span>own<span class="w"> </span>—<span class="w"> </span>it<span class="w"> </span>confirms<span class="w"> </span>the
+review<span class="w"> </span>finished:
+<span class="o">===</span>MRA-REVIEW-COMPLETE:<span class="w"> </span><span class="nv">APPROVED</span><span class="o">===</span><span class="w">           </span><span class="o">(</span>status<span class="w"> </span>APPROVED<span class="o">)</span>
+<span class="o">===</span>MRA-REVIEW-COMPLETE:<span class="w"> </span><span class="nv">CHANGES_REQUESTED</span><span class="o">===</span><span class="w">   </span><span class="o">(</span>status<span class="w"> </span>CHANGES_REQUESTED<span class="o">)</span>
+Omitting<span class="w"> </span>this<span class="w"> </span>line<span class="w"> </span>marks<span class="w"> </span>the<span class="w"> </span>review<span class="w"> </span>INCOMPLETE<span class="w"> </span><span class="o">(</span>it<span class="w"> </span>will<span class="w"> </span>not<span class="w"> </span>be<span class="w"> </span>treated<span class="w"> </span>as<span class="w"> </span>an<span class="w"> </span>approval<span class="o">)</span>.<span class="err">&#39;</span>
+</code></pre></div>
+
+<p>(Only the inline branch — leave the <code>else</code> / terminal <code>output_instructions</code> untouched.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_prompt_sentinel.sh</code>
+Expected: PASS. Also <code>bash -n lib/review-prompt.sh</code> clean.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-prompt.sh<span class="w"> </span>tests/test_review_prompt_sentinel.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(review): inline single-pass prompt requires the completion sentinel (#8)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="task-4-gate-the-inline-single-pass-path-on-the-sentinel">Task 4: Gate the inline single-pass path on the sentinel</h3>
+<p><strong>Files:</strong>
+- Modify: <code>lib/review.sh</code> (add <code>_review_singlepass_body</code>; rewrite the inline branch ~505–526)
+- Test: <code>tests/test_review_singlepass_gate.sh</code> (create)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>review_verdict_of</code>, <code>review_incomplete_json</code> (Task 1), <code>extract_json</code> (existing, <code>lib/review.sh</code>).
+- Produces: <code>_review_singlepass_body &lt;raw&gt;</code> → prints ONE valid JSON object: the extracted+validated review JSON when the raw output carries a sentinel AND parses; otherwise <code>review_incomplete_json</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong> — create <code>tests/test_review_singlepass_gate.sh</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="c1"># _review_singlepass_body: sentinel + validity gate for single-pass inline review.</span>
+<span class="nb">set</span><span class="w"> </span>-uo<span class="w"> </span>pipefail
+<span class="nv">MRA_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/colors.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review-verdict.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/project-path.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review.sh&quot;</span>
+
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span><span class="nv">pass</span><span class="o">=</span><span class="m">0</span>
+ok<span class="o">(){</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">pass</span><span class="o">=</span><span class="k">$((</span><span class="nv">pass</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+fail<span class="o">(){</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+status_of<span class="o">(){</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.status<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+<span class="nv">GOOD</span><span class="o">=</span><span class="s1">&#39;{&quot;status&quot;:&quot;APPROVED&quot;,&quot;summary&quot;:&quot;ok&quot;,&quot;comments&quot;:[]}&#39;</span>
+
+<span class="c1"># valid JSON WITH sentinel -&gt; returned as-is (extracted)</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>_review_singlepass_body<span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GOOD</span><span class="s2">&quot;</span><span class="w"> </span><span class="s1">&#39;===MRA-REVIEW-COMPLETE: APPROVED===&#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>status_of<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;APPROVED&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;sentinel+valid -&gt; APPROVED body&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;sentinel+valid: got [</span><span class="nv">$out</span><span class="s2">]&quot;</span>
+
+<span class="c1"># valid JSON WITHOUT sentinel -&gt; REVIEW_INCOMPLETE (never APPROVED)</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>_review_singlepass_body<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GOOD</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>status_of<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;COMMENT&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;no sentinel -&gt; COMMENT&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;no sentinel: got [</span><span class="nv">$out</span><span class="s2">]&quot;</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.summary<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*REVIEW_INCOMPLETE*<span class="o">)</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;no sentinel -&gt; REVIEW_INCOMPLETE&quot;</span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;no sentinel summary: [</span><span class="nv">$out</span><span class="s2">]&quot;</span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+<span class="c1"># empty -&gt; REVIEW_INCOMPLETE</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>_review_singlepass_body<span class="w"> </span><span class="s2">&quot;&quot;</span><span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>status_of<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;COMMENT&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;empty -&gt; COMMENT&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;empty: got [</span><span class="nv">$out</span><span class="s2">]&quot;</span>
+
+<span class="c1"># sentinel present but unparseable body -&gt; REVIEW_INCOMPLETE</span>
+<span class="nv">out</span><span class="o">=</span><span class="k">$(</span>_review_singlepass_body<span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n%s&#39;</span><span class="w"> </span><span class="s1">&#39;not json at all&#39;</span><span class="w"> </span><span class="s1">&#39;===MRA-REVIEW-COMPLETE: APPROVED===&#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>status_of<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;COMMENT&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;sentinel+garbage -&gt; COMMENT&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;sentinel+garbage: got [</span><span class="nv">$out</span><span class="s2">]&quot;</span>
+
+<span class="c1"># always emits exactly one valid JSON object</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>.<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;always valid json&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;not valid json: [</span><span class="nv">$out</span><span class="s2">]&quot;</span>
+
+<span class="c1"># wiring: review.sh actually calls the helper on the inline path</span>
+grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;_review_singlepass_body&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review.sh&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ok<span class="w"> </span><span class="s2">&quot;inline path uses _review_singlepass_body&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;review.sh does not call _review_singlepass_body&quot;</span>
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;---&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Passed: </span><span class="nv">$pass</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Failed: </span><span class="nv">$errors</span><span class="s2">&quot;</span>
+<span class="nb">exit</span><span class="w"> </span><span class="k">$((</span><span class="nv">errors</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="m">0</span><span class="w"> </span>?<span class="w"> </span><span class="m">1</span><span class="w"> </span>:<span class="w"> </span><span class="m">0</span><span class="k">))</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_singlepass_gate.sh</code>
+Expected: FAIL — <code>_review_singlepass_body</code> undefined.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Add the helper</strong> — in <code>lib/review.sh</code>, immediately ABOVE <code>extract_json()</code> (currently line 639), add:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1"># Resolve a single-pass raw review response into the JSON to post. A missing</span>
+<span class="c1"># completion sentinel (#8), an empty response, or unparseable JSON all mean the</span>
+<span class="c1"># review did not cleanly complete → the neutral REVIEW_INCOMPLETE verdict (never</span>
+<span class="c1"># APPROVE). Otherwise the extracted, validated review JSON. Always prints ONE</span>
+<span class="c1"># valid JSON object.</span>
+_review_singlepass_body<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">raw</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$raw</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>review_verdict_of<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$raw</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;NONE&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>review_incomplete_json<span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>j<span class="p">;</span><span class="w"> </span><span class="nv">j</span><span class="o">=</span><span class="k">$(</span>extract_json<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$raw</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$j</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>.<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$j</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span>review_incomplete_json
+<span class="w">  </span><span class="k">fi</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Rewrite the inline branch</strong> — in <code>lib/review.sh</code>, replace the inline block (from <code>local review_json</code> down through the <code>post_inline_review</code> call, currently ~509–526):</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="c1"># Inline mode: get JSON, parse, post to GitHub. `|| true` keeps a total</span>
+<span class="w">    </span><span class="c1"># claude failure from aborting under `set -e` — we handle empty below.</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span>review_json
+<span class="w">    </span><span class="nv">review_json</span><span class="o">=</span><span class="k">$(</span>claude_invoke<span class="w"> </span>review<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">claude_args</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_json</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_error<span class="w"> </span><span class="s2">&quot;Claude returned empty response&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">    </span><span class="k">fi</span>
+
+<span class="w">    </span><span class="c1"># Try to extract JSON from response (Claude might wrap it in markdown)</span>
+<span class="w">    </span><span class="nv">review_json</span><span class="o">=</span><span class="k">$(</span>extract_json<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_json</span><span class="s2">&quot;</span><span class="k">)</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_json</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>.<span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_error<span class="w"> </span><span class="s2">&quot;Claude did not return valid JSON. Raw output:&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span>
+<span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_json</span><span class="s2">&quot;</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">    </span><span class="k">fi</span>
+
+<span class="w">    </span>post_inline_review<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pr_number</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_json</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>with:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="c1"># Inline mode: get JSON, gate on the completion sentinel, post to GitHub.</span>
+<span class="w">    </span><span class="c1"># `|| true` keeps a total claude failure from aborting under `set -e`.</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span>review_json<span class="w"> </span>raw_review
+<span class="w">    </span><span class="nv">raw_review</span><span class="o">=</span><span class="k">$(</span>claude_invoke<span class="w"> </span>review<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">claude_args</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<span class="w">    </span><span class="c1"># Missing sentinel / empty / unparseable =&gt; neutral REVIEW_INCOMPLETE (#8),</span>
+<span class="w">    </span><span class="c1"># never a false APPROVE. _review_singlepass_body always yields valid JSON.</span>
+<span class="w">    </span><span class="nv">review_json</span><span class="o">=</span><span class="k">$(</span>_review_singlepass_body<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$raw_review</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">    </span><span class="c1"># The inline schema only permits APPROVED/CHANGES_REQUESTED, so a COMMENT</span>
+<span class="w">    </span><span class="c1"># status can ONLY be the neutral REVIEW_INCOMPLETE verdict — log it.</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_json</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.status<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;COMMENT&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_warn<span class="w"> </span><span class="s2">&quot;single-pass review incomplete (no completion sentinel / empty / unparseable) — posting REVIEW_INCOMPLETE&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">    </span>post_inline_review<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pr_number</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_json</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>Note: <code>review_json</code> stays assigned for the trailing <code>_review_pkb_auto_update "$project" … "${review_json:-}" &amp;</code> call (unchanged) — a REVIEW_INCOMPLETE body simply gives the PKB updater nothing actionable.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_singlepass_gate.sh</code>
+Expected: PASS. Also <code>bash -n lib/review.sh</code> clean.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>bash test.sh 2&gt;&amp;1 | grep -E "shell tests:|mcp-server :"</code>
+Expected: <code>shell tests: N passed, 0 failed</code>, <code>mcp-server : ok</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 7: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review.sh<span class="w"> </span>tests/test_review_singlepass_gate.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(review): gate inline single-pass on the completion sentinel (#8)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="task-5-verify-end-to-end-shellcheck">Task 5: Verify end-to-end + shellcheck</h3>
+<p><strong>Files:</strong> none (verification only)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: shellcheck the new/changed files (CI parity, <code>-S error</code>)</strong></li>
+</ul>
+<p>Run: <code>shellcheck -S error lib/review-verdict.sh lib/review.sh lib/review-debate.sh lib/review-prompt.sh tests/test_review_verdict.sh tests/test_review_prompt_sentinel.sh tests/test_review_singlepass_gate.sh</code>
+Expected: no output (clean). Fix any <code>SC</code> error inline; re-run.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Integration smoke — sentinel-less single-pass posts REVIEW_INCOMPLETE, not APPROVE</strong></li>
+</ul>
+<p>Run:</p>
+<div class="highlight"><pre><span></span><code>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;</span>
+<span class="s1">set -euo pipefail</span>
+<span class="s1">source lib/colors.sh; source lib/review-verdict.sh; source lib/project-path.sh; source lib/review.sh</span>
+<span class="s1"># even with the approve policy ON, a sentinel-less APPROVED must not approve</span>
+<span class="s1">export MRA_REVIEW_APPROVE_IF_NO_HIGH=1 MRA_REVIEW_ALLOW_APPROVE=1</span>
+<span class="s1">body=$(_review_singlepass_body &quot;{\&quot;status\&quot;:\&quot;APPROVED\&quot;,\&quot;summary\&quot;:\&quot;lgtm\&quot;,\&quot;comments\&quot;:[]}&quot;)</span>
+<span class="s1">eff=$(_review_effective_status &quot;$(echo &quot;$body&quot; | jq -r .status)&quot; &quot;$body&quot;)</span>
+<span class="s1">echo &quot;posted status=$(echo &quot;$body&quot; | jq -r .status)  effective=$eff&quot;</span>
+<span class="s1">[[ &quot;$eff&quot; != &quot;APPROVED&quot; ]] &amp;&amp; echo &quot;PASS: sentinel-less body never approves&quot; || { echo &quot;FAIL: approved a sentinel-less review&quot;; exit 1; }</span>
+<span class="s1">&#39;</span>
+</code></pre></div>
+
+<p>Expected: <code>posted status=COMMENT  effective=COMMENT</code> then <code>PASS: sentinel-less body never approves</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Full suite green</strong></li>
+</ul>
+<p>Run: <code>bash test.sh 2&gt;&amp;1 | tail -4</code>
+Expected: <code>shell tests: N passed, 0 failed</code>, <code>mcp-server : ok</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Push the branch</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nv">GH_TOKEN</span><span class="o">=</span><span class="k">$(</span>gh<span class="w"> </span>auth<span class="w"> </span>token<span class="w"> </span>--user<span class="w"> </span>hanfour<span class="k">)</span><span class="w"> </span>git<span class="w"> </span>push<span class="w"> </span>-u<span class="w"> </span>origin<span class="w"> </span>feat/single-pass-completeness-sentinel
+</code></pre></div>
+  </main>
+</div>
+</body>
+</html>

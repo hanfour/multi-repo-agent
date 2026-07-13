@@ -6,6 +6,7 @@ MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Source all libs
 source "$MRA_DIR/lib/colors.sh"
 source "$MRA_DIR/lib/claude-invoke.sh"
+source "$MRA_DIR/lib/review-verdict.sh"
 source "$MRA_DIR/lib/args.sh"
 source "$MRA_DIR/lib/security-log.sh"
 source "$MRA_DIR/lib/project-path.sh"
@@ -53,7 +54,10 @@ source "$MRA_DIR/lib/notify.sh"
 source "$MRA_DIR/lib/lint.sh"
 source "$MRA_DIR/lib/review-diff.sh"
 source "$MRA_DIR/lib/review-prompt.sh"
+source "$MRA_DIR/lib/review-context.sh"
+source "$MRA_DIR/lib/review-provider.sh"
 source "$MRA_DIR/lib/review.sh"
+source "$MRA_DIR/lib/review-protocol.sh"
 source "$MRA_DIR/lib/review-debate.sh"
 source "$MRA_DIR/lib/personas.sh"
 source "$MRA_DIR/lib/review-personas.sh"
@@ -112,7 +116,8 @@ Commands:
   branch switch <name>          Switch repos that have <name> to it
   branch pr [--base <ref>] [--dry-run] [repos...]  Push feature branches and open PRs across repos (deps first; repos... = subset)
   branch merge [--strategy S] [--dry-run] [--delete-branch] [--wait-ci] [--ci-timeout <sec>] [repos...]  Merge open PRs across repos (deps first; mergeable+CI gated; --wait-ci polls CI; repos... = subset)
-  review <project> [--pr N] [--working] [--range A..B] [--head <ref>] [--no-debate]  Code review
+  review <project> [--pr N] [--provider claude|codex|fallback|dual] [--working] [--range A..B] [--head <ref>] [--no-debate]  Code review
+  integration describe|doctor|review  Versioned machine integration protocol
   plan <project> "<task>" [--model M] [--dual]  Multi-expert plan; --dual = claude+codex council
   prd [projects…] [--no-sync]      Interactive cross-repo PRD/spec planner (writes .collab/, opens no issues)
   prd-issues --req <ID> [--confirm] [--dry-run]   Apply: open the planned issues (operator-run, TTY-gated)
@@ -171,6 +176,39 @@ main() {
   fi
 
   case "$command" in
+    integration)
+      shift
+      local subcommand="${1:-}"; [[ -n "$subcommand" ]] && shift
+      case "$subcommand" in
+        describe)
+          [[ "${1:-}" == "--json" || $# -eq 0 ]] || { log_error "usage: mra integration describe --json" "integration"; exit 2; }
+          review_protocol_describe
+          ;;
+        doctor)
+          local request_file=""
+          while [[ $# -gt 0 ]]; do
+            case "$1" in --request) request_file="${2:-}"; shift 2 ;; --json) shift ;; *) log_error "unknown integration doctor option: $1" "integration"; exit 2 ;; esac
+          done
+          [[ -n "$request_file" ]] || { log_error "usage: mra integration doctor --request FILE --json" "integration"; exit 2; }
+          review_protocol_doctor "$request_file"
+          ;;
+        review)
+          local request_file="" result_file="" events_file=""
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              --request) request_file="${2:-}"; shift 2 ;;
+              --result) result_file="${2:-}"; shift 2 ;;
+              --events) events_file="${2:-}"; shift 2 ;;
+              *) log_error "unknown integration review option: $1" "integration"; exit 2 ;;
+            esac
+          done
+          [[ -n "$request_file" && -n "$result_file" ]] || { log_error "usage: mra integration review --request FILE --result FILE [--events FILE]" "integration"; exit 2; }
+          review_protocol_review "$request_file" "$result_file" "$events_file"
+          ;;
+        *) log_error "usage: mra integration describe|doctor|review" "integration"; exit 2 ;;
+      esac
+      ;;
+
     init)
       shift
       local path="" git_org=""
@@ -801,7 +839,7 @@ main() {
       for a in "${review_args[@]}"; do
         if [[ "$skip_next" == "true" ]]; then skip_next=false; continue; fi
         case "$a" in
-          --pr|--base|--model|--strategy|--range|--head) skip_next=true ;;
+          --pr|--base|--model|--strategy|--range|--head|--provider) skip_next=true ;;
           --no-debate|--working) ;;
           -*) ;;
           *) has_project=true; break ;;

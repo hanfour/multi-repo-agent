@@ -107,10 +107,35 @@ Three review strategies auto-selected by diff size:
 | **Debate** | Large diffs or API changes | 2 analysts + voting + synthesis (~3min) |
 
 ```bash
-mra review my-api              # Terminal output (auto-selects strategy)
+mra review my-api              # Terminal output (Codex by default)
 mra review my-api --pr 123     # Post inline comments on GitHub PR
-mra review my-api --strategy debate  # Force thorough review
+mra review my-api --provider claude --strategy debate  # Force Claude debate review
 ```
+
+Review provider defaults to **Codex**. Admins can switch the active provider with
+`mra config review.providerMode claude|codex|fallback|dual`. `fallback` tries
+the primary provider first, then the secondary provider; `dual` runs both and
+merges their standard single-pass findings. Direct
+`--provider` overrides are blocked unless `review.allowUserOverride` is enabled
+or `MRA_REVIEW_ADMIN_OVERRIDE=1` is set. In this phase Codex runs single-pass
+review; debate and personas remain Claude-only until the providerized debate
+phase lands.
+
+Machine integrations use an analysis-only protocol and never pass GitHub
+credentials or approval intent to the model process:
+
+```bash
+mra integration describe --json
+mra integration doctor --request request.json --json
+mra integration review --request request.json --result result.json --events events.jsonl
+```
+
+Protocol results are bound to the exact base/head SHA and request digest. Legacy
+unversioned configs preserve their previous Claude behavior; the shipped v2
+config defaults new installations to Codex.
+Protocol v1 approval evidence is intentionally Codex-only because only that
+path enforces the sanitized, commit-bound snapshot. Claude, fallback, and dual
+remain available for normal review, but cannot authorize an external approval.
 
 **Debate mode** uses adversarial multi-agent review:
 
@@ -492,7 +517,7 @@ Generate templates: `mra template`
 
 | Command | Description |
 |---------|-------------|
-| `mra review <project> [--pr N] [--strategy S] [--base ref] [--personas]` | Code review (add --personas for 5 named experts) |
+| `mra review <project> [--pr N] [--provider P] [--strategy S] [--base ref] [--personas]` | Code review (Codex default; add --personas for 5 named experts) |
 | `mra plan <project> "<task>" [--model M] [--dual]` | Multi-expert plan (`--dual`: claude + codex council) |
 | `mra test-audit <project> [--model M]` | Kent Beck 11-principles test audit |
 | `mra analyze <project> [--model M]` | Generate PKB |
@@ -567,17 +592,23 @@ All review agents are **read-only** (write tools disabled).
 
 #### Resilience & tuning
 
-Review claude calls run through a hardened wrapper (`claude_invoke`) that
-retries transient API failures (overloaded / 5xx / dropped connection / empty
-response) and surfaces the underlying stderr on final failure instead of
-swallowing it — so an API blip no longer masquerades as `REVIEW_INCOMPLETE`.
-The turn budgets and retry policy are tunable:
+Review defaults to Codex via `codex exec --sandbox read-only`. Codex runs from an
+MRA-owned trusted cwd with a read-only snapshot that removes native repository
+instruction surfaces. Claude calls still
+run through a hardened wrapper (`claude_invoke`) that retries transient API
+failures (overloaded / 5xx / dropped connection / empty response) and surfaces
+the underlying stderr on final failure instead of swallowing it — so an API blip
+no longer masquerades as `REVIEW_INCOMPLETE`. The turn budgets and retry policy
+are tunable:
 
 | Variable | Default | Effect |
 |---|---|---|
 | `MRA_CLAUDE_MAX_RETRIES` | `2` | Extra attempts after the first when a claude call fails transiently or returns empty. |
 | `MRA_CLAUDE_RETRY_DELAY` | `3` | Initial backoff seconds between retries (doubles each attempt). |
 | `MRA_CLAUDE_BIN` | `claude` | Binary invoked by the wrapper (override / test-mock seam). |
+| `MRA_CODEX_BIN` | `codex` | Binary invoked for Codex review (override / test-mock seam). |
+| `MRA_REVIEW_PROVIDER` | config `review.providerMode` | Admin/CI provider override (`codex`, `claude`, `fallback`, `dual`). |
+| `MRA_REVIEW_ADMIN_OVERRIDE` | unset | Set `1` to allow a one-shot CLI `--provider` override even when config blocks user overrides. |
 | `MRA_REVIEW_STANDARD_MAX_TURNS` | `6` | Turn budget for the single-pass **standard** strategy (raised from 3 — too low cuts the agent off mid-analysis). |
 | `MRA_REVIEW_LIGHT_MAX_TURNS` | `2` | Turn budget for the **light** strategy. |
 | `MRA_REVIEW_AGENT_MAX_TURNS` | `20` | Turn budget for each **debate** agent (Impact Analyst / Quality Auditor / verifier). |
@@ -727,12 +758,13 @@ Global config: `~/multi-repo-agent/config.json`
 
 ### Project memory
 
-`mra config project-memory on|off` (default **on**) controls whether each loaded
-project's native **CLAUDE.md**, **AGENTS.md**, and **.claude/rules/** load into
-the `claude` session mra launches. It does **not** affect Agent Skills
-(`.claude/skills/`, already auto-loaded via `--add-dir`) or `settings.local.json`.
-The interactive orchestrator uses `--setting-sources user,project`, so a repo's
-gitignored `CLAUDE.local.md` is never pulled into the shared cross-repo context.
+`mra config project-memory on|off` (default **on**) controls whether Claude's
+native project memory loading is enabled for Claude sessions MRA launches.
+Review additionally builds provider-neutral, explicitly untrusted context from
+**AGENTS.md**, **CLAUDE.md**, **.claude/rules/**, and a summary of
+**.claude/skills/** so Codex and Claude can understand the same project guidance
+without granting those repository-controlled files native instruction authority.
+`settings.local.json` is not loaded into review context by default.
 
 ### Issue creation accounts
 
