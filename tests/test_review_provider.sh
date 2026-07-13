@@ -105,6 +105,7 @@ model_provider = "Corp"
 name = "Corp"
 base_url = "https://codex.example.test:2880"
 wire_api = "responses"
+requires_openai_auth = true
 [projects."/untrusted"]
 trust_level = "trusted"
 TOML
@@ -117,7 +118,7 @@ rec=$(cat "$REC")
 case "$rec" in *"exec --sandbox read-only --cd "*"mra-review-trusted."*" --skip-git-repo-check --ephemeral "*"--add-dir "*"mra-review-snapshot."*) pass "codex uses trusted cwd and sanitized snapshot" ;; *) fail "codex args missing trusted sandbox: $rec" ;; esac
 case "$rec" in *"--ignore-user-config --ignore-rules --output-last-message "*" -c shell_environment_policy.inherit=none"*) pass "codex model shell inherits no credential environment and captures final message" ;; *) fail "codex missing shell environment isolation/final capture: $rec" ;; esac
 case "$rec" in *"shell_environment_policy.set.PATH="*"/usr/bin:/bin"* ) pass "codex receives deterministic tool PATH" ;; *) fail "codex missing deterministic tool PATH: $rec" ;; esac
-case "$rec" in *'model_provider="Corp"'*'model_providers.Corp.base_url="https://codex.example.test:2880"'*'model_providers.Corp.wire_api="responses"'*) pass "codex receives only validated provider transport overrides" ;; *) fail "codex missing sanitized provider config: $rec" ;; esac
+case "$rec" in *'model_provider="Corp"'*'model_providers.Corp.base_url="https://codex.example.test:2880"'*'model_providers.Corp.wire_api="responses"'*'model_providers.Corp.requires_openai_auth=true'*) pass "codex receives only validated provider transport overrides" ;; *) fail "codex missing sanitized provider config: $rec" ;; esac
 case "$rec" in *"env_key="*) fail "codex received env_key credential config: $rec" ;; *) pass "codex does not receive credential env_key config" ;; esac
 case "$rec" in *"/untrusted"*) fail "codex inherited project trust config" ;; *) pass "codex does not inherit project trust config" ;; esac
 case "$rec" in *"proxy-token=unset"*) pass "codex parent does not receive proxy token env" ;; *) fail "codex parent received proxy token env: $rec" ;; esac
