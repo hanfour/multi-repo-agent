@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collapse the 5 scanners into a single Python walker — Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
+    <div class="toc-title">Collapse the 5 scanners into a single Python walker — Design</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#profiling-result-the-gono-go-evidence-1-required">Profiling result (the go/no-go evidence #1 required)</a></li>
+<li><a href="#design">Design</a><ul>
+<li><a href="#scannerswalkpy-a-single-python-walker">scanners/walk.py — a single Python walker</a></li>
+<li><a href="#run_all_scanners-change-libscansh">run_all_scanners change (lib/scan.sh)</a></li>
+<li><a href="#built-in-sh-disposition">Built-in .sh disposition</a></li>
+<li><a href="#python3-dependency">python3 dependency</a></li>
+</ul>
+</li>
+<li><a href="#equivalence-guarantee-the-acceptance-core">Equivalence guarantee (the acceptance core)</a></li>
+<li><a href="#performance-acceptance">Performance acceptance</a></li>
+<li><a href="#files-touched">Files touched</a></li>
+<li><a href="#non-goals-yagni">Non-goals (YAGNI)</a></li>
+<li><a href="#acceptance">Acceptance</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">技術詳規格</div>
+      <h1>Collapse the 5 scanners into a single Python walker — Design</h1>
+      <div class="meta"></div>
+    </div>
+    <p><strong>Date:</strong> 2026-07-14
+<strong>Issue:</strong> hanfour/multi-repo-agent#1 — <code>scan: collapse the 5 scanners/*.sh into a single jq/walker pipeline</code>
+<strong>Status:</strong> Approved (brainstorming)</p>
+<h2 id="profiling-result-the-gono-go-evidence-1-required">Profiling result (the go/no-go evidence #1 required)</h2>
+<p>Profiled <code>mra scan</code> on <code>~/OneAD</code> (36 projects, 351 records). Per-scanner best-of-3:</p>
+<table>
+<thead>
+<tr>
+<th>scanner</th>
+<th>time</th>
+<th>records</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>shared-db</td>
+<td><strong>5.65s</strong></td>
+<td>2</td>
+</tr>
+<tr>
+<td>shared-packages</td>
+<td>1.54s</td>
+<td>320</td>
+</tr>
+<tr>
+<td>api-calls</td>
+<td>0.49s</td>
+<td>7</td>
+</tr>
+<tr>
+<td>gateway-routes</td>
+<td>0.43s</td>
+<td>2</td>
+</tr>
+<tr>
+<td>docker-compose</td>
+<td>0.17s</td>
+<td>20</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The dominant cost is not "5× subshell startup"</strong> — it is that <strong>no scanner prunes <code>node_modules</code></strong>. <code>shared-db</code>'s <code>find -maxdepth 3</code> descends into 20 <code>node_modules</code> trees. Pruning them made the same <code>find</code> go 3.04s → <strong>0.28s (~10×) with identical results</strong>. So the walker's speedup comes from <strong>(1) pruning node_modules and (2) walking each tree once</strong> (<code>.env*</code> is currently read by 3 scanners). Both are captured by the design below.</p>
+<h2 id="design">Design</h2>
+<h3 id="scannerswalkpy-a-single-python-walker"><code>scanners/walk.py</code> — a single Python walker</h3>
+<p>The issue explicitly sanctions "a small Python helper." Python is chosen over jq because the rules need associative maps (<code>PORT_TO_SERVICE</code>, <code>HOST_TO_SERVICE</code>), regex, and cross-project correlation (<code>shared-db</code> groups by db name across projects; <code>shared-packages</code> matches against the known-project list) — awkward in jq, natural in Python.</p>
+<div class="highlight"><pre><span></span><code>python3 scanners/walk.py &lt;workspace&gt;:
+  1. Enumerate projects (workspace/*/ , skip hidden + known infra-only dirs).
+  2. For each project, ONE os.walk that PRUNES node_modules/.git/vendor and
+     collects the needed files, each at its ORIGINAL max depth (to preserve
+     equivalence exactly):
+       .env* / env.example        depth &lt;= 2   (api-calls, shared-db, gateway-routes)
+       database*.yml              depth &lt;= 3   (shared-db)
+       docker-compose*.yml        depth &lt;= 3   (docker-compose)
+       Gemfile / package.json     depth &lt;= 1   (shared-packages)
+       nginx*.conf                depth &lt;= 4   (gateway-routes)
+       apisix*.yml/.yaml, routes*.yml  depth &lt;= 4  (gateway-routes)
+  3. Apply 5 rule functions — one per original scanner, reproducing its logic
+     byte-equivalently (same maps, regex, confidence, type, skip-rules) — to the
+     collected files. A file read once feeds every rule that consumes it.
+  4. Print JSONL to stdout — the SAME record shape:
+     {&quot;source&quot;,&quot;target&quot;,&quot;type&quot;,&quot;confidence&quot;,&quot;scanner&quot;}, scanner tag preserved
+     (&quot;docker-compose&quot;/&quot;shared-db&quot;/&quot;api-calls&quot;/&quot;shared-packages&quot;/&quot;gateway-routes&quot;).
+</code></pre></div>
+
+<p>Record types/confidence preserved exactly: docker-compose→infra/high, shared-db→infra/high (target "mysql"), shared-packages→package/high, api-calls→api/low, gateway-routes→api/(medium|high per its rules).</p>
+<p>Single file to start; rule functions cleanly separated. If it exceeds ~800 lines, split into <code>scanners/walk.py</code> + a <code>scanners/rules/</code> package — but not preemptively.</p>
+<h3 id="run_all_scanners-change-libscansh"><code>run_all_scanners</code> change (<code>lib/scan.sh</code>)</h3>
+<p>Replace the built-in <code>for scanner in scanners/*.sh</code> glob with one call:
+<code>python3 "$MRA_DIR/scanners/walk.py" "$workspace" &gt;&gt; "$results_file"</code>. <strong>Keep the
+custom-scanner subprocess loop unchanged</strong> — <code>$workspace/.collab/scanners/*.sh</code> still
+run as subprocesses and append their JSONL. The walker replaces only the 5 built-ins.</p>
+<h3 id="built-in-sh-disposition">Built-in <code>.sh</code> disposition</h3>
+<p>Delete the 5 built-in <code>scanners/*.sh</code> from the repo (git history preserves them as
+reference). They must leave the auto-run path or they'd double-run with <code>walk.py</code>.
+Add <code>scanners/README.md</code> documenting the <strong>custom-scanner contract</strong> (a <code>.sh</code> under
+<code>.collab/scanners/</code> that takes <code>&lt;workspace&gt;</code> and emits the JSONL record shape) with a
+minimal example — this satisfies the issue's "document writing a custom scanner"
+acceptance item.</p>
+<h3 id="python3-dependency">python3 dependency</h3>
+<p><code>mra scan</code> now requires <code>python3</code> (the issue sanctions the Python helper). The repo
+already uses python3 (<code>docs/superpowers/render-html.py</code>, <code>mra prd</code>). Document the
+requirement in <code>README.md</code> and add a <code>python3</code> presence check to the scan path with a
+clear error if missing.</p>
+<h2 id="equivalence-guarantee-the-acceptance-core">Equivalence guarantee (the acceptance core)</h2>
+<p><code>walk.py</code>'s output must equal the current 5 scanners' output as an <strong>order-independent
+record set</strong>. Two layers:</p>
+<ol>
+<li><strong>Committed test</strong> — reuse the bundled <code>tests/fixtures/sample-workspace</code>. Rewrite
+   <code>tests/test_scanners.sh</code> to run <code>walk.py</code> against the fixture and assert the exact
+   expected record set (the fixture already exercises each rule). Add a direct
+   equivalence assertion: <code>walk.py</code> output set == the union the 5 old scanners
+   produced on the fixture (captured as a golden set during development, before the
+   <code>.sh</code> are deleted).</li>
+<li><strong>Dev-time real-world cross-check</strong> — during implementation, run both the old 5
+   scanners and <code>walk.py</code> on <code>~/OneAD</code> (36 projects, 351 records) and diff the record
+   sets; they must match. This is a development gate, documented in the plan, not a
+   committed test (it depends on external data).</li>
+</ol>
+<p>Any record-set difference = a rule-expressivity regression → do not land (per #1's
+acceptance). node_modules pruning must not change the set (already verified for the
+dominant <code>find</code>).</p>
+<h2 id="performance-acceptance">Performance acceptance</h2>
+<p>Benchmark <code>walk.py</code> vs the old scanners on <code>~/OneAD</code>. Target: the full scan (walk +
+merge) is <strong>≥2× faster</strong> (expected ~8.3s → ~1–2s). If it is not ≥2×, do not land the
+rewrite (fall back to the minimal node_modules-prune fix on the existing scanners).</p>
+<h2 id="files-touched">Files touched</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scanners/walk.py</code></td>
+<td>new — the single walker + 5 rule functions</td>
+</tr>
+<tr>
+<td><code>scanners/README.md</code></td>
+<td>new — custom-scanner contract + example</td>
+</tr>
+<tr>
+<td><code>scanners/docker-compose.sh</code>, <code>api-calls.sh</code>, <code>gateway-routes.sh</code>, <code>shared-db.sh</code>, <code>shared-packages.sh</code></td>
+<td>delete (git history preserves)</td>
+</tr>
+<tr>
+<td><code>lib/scan.sh</code></td>
+<td><code>run_all_scanners</code> calls <code>walk.py</code>; keep custom-scanner loop; python3 check</td>
+</tr>
+<tr>
+<td><code>tests/test_scanners.sh</code></td>
+<td>rewrite to test <code>walk.py</code> + record-set equivalence on the fixture</td>
+</tr>
+<tr>
+<td><code>README.md</code></td>
+<td>note python3 requirement for <code>mra scan</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="non-goals-yagni">Non-goals (YAGNI)</h2>
+<ul>
+<li>No change to the JSONL contract or <code>merge_scan_results</code> (PR #4's single-pass jq stays).</li>
+<li>No change to custom-scanner behavior (still subprocess <code>.sh</code>).</li>
+<li>No new rule types or detection logic — exact behavior parity only.</li>
+<li>No split of <code>walk.py</code> into a package unless it exceeds ~800 lines.</li>
+</ul>
+<h2 id="acceptance">Acceptance</h2>
+<ul>
+<li><code>walk.py</code> reproduces the current 5 scanners' record set exactly (fixture test +
+  ~/OneAD dev cross-check).</li>
+<li>Full scan is ≥2× faster on ~/OneAD; else do not land.</li>
+<li>Custom <code>.collab/scanners/*.sh</code> still run and contribute records.</li>
+<li><code>scanners/README.md</code> documents the custom-scanner contract.</li>
+<li><code>./test.sh</code> green; python3 requirement documented + checked.</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>
