@@ -273,3 +273,42 @@ list_contracts() {
   fi
   echo ""
 }
+
+# federation command handler (extracted from bin/mra.sh dispatch, #16)
+cmd_federation() {
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      local subcmd="${1:-list}"; shift 2>/dev/null || true
+      case "$subcmd" in
+        publish)
+          [[ -z "${1:-}" ]] && { log_error "usage: mra federation publish <project>" "federation"; exit 1; }
+          publish_contract "$workspace" "$1"
+          ;;
+        subscribe)
+          [[ -z "${1:-}" ]] && { log_error "usage: mra federation subscribe <url-or-path>" "federation"; exit 1; }
+          subscribe_contract "$workspace" "$1"
+          ;;
+        verify)
+          verify_contracts "$workspace"
+          ;;
+        list)
+          list_contracts "$workspace"
+          ;;
+        fetch)
+          # Re-fetch all subscriptions
+          local subs_file; subs_file="$(get_contracts_dir "$workspace")/subscriptions.json"
+          if [[ -f "$subs_file" ]]; then
+            while IFS= read -r url; do
+              [[ -z "$url" ]] && continue
+              fetch_subscription "$workspace" "$url"
+            done < <(jq -r '.[].url' "$subs_file")
+          else
+            log_info "no subscriptions" "federation"
+          fi
+          ;;
+        *)
+          log_error "unknown federation command: $subcmd (use: publish, subscribe, verify, list, fetch)" "federation"
+          exit 1
+          ;;
+      esac
+}
