@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Split the Review Subsystem's Large Files Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
+    <div class="toc-title">Split the Review Subsystem's Large Files Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#global-constraints">Global Constraints</a></li>
+<li><a href="#shared-mechanism-used-by-every-task">Shared mechanism (used by every task)</a></li>
+<li><a href="#task-1-extract-libreview-jsonsh">Task 1: Extract lib/review-json.sh</a></li>
+<li><a href="#task-2-extract-libreview-strategysh">Task 2: Extract lib/review-strategy.sh</a></li>
+<li><a href="#task-3-extract-libreview-pr-discussionsh">Task 3: Extract lib/review-pr-discussion.sh</a></li>
+<li><a href="#task-4-extract-libreview-postsh">Task 4: Extract lib/review-post.sh</a></li>
+<li><a href="#task-5-extract-libreview-debate-agentssh">Task 5: Extract lib/review-debate-agents.sh</a></li>
+<li><a href="#self-review">Self-Review</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>Split the Review Subsystem's Large Files Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Shrink <code>lib/review.sh</code> (1205) and <code>lib/review-debate.sh</code> (912) to ~400-line orchestrators by relocating cohesive function groups into new focused modules, with zero behavior change.</p>
+<p><strong>Architecture:</strong> Pure verbatim relocation. Each task moves a set of whole functions from a big file into a new <code>lib/review-*.sh</code> module, wires the new module into <code>bin/mra.sh</code>'s source list and into every test that sources the parent file, and verifies the full suite stays green. No logic, signature, or prompt edits.</p>
+<p><strong>Tech Stack:</strong> Bash, <code>awk</code> (BSD/macOS-compatible), <code>shellcheck</code>, the project's <code>./test.sh</code> harness.</p>
+<h2 id="global-constraints">Global Constraints</h2>
+<ul>
+<li><strong>Behavior-preserving only:</strong> functions move byte-for-byte. No logic/signature/prompt change. Guarded by <code>tests/test_review_*.sh</code> + <code>shellcheck -S error</code>.</li>
+<li><strong>Extraction is safe by structure:</strong> every top-level function spans <code>^&lt;name&gt;() {</code> to the next <code>^}$</code>; the files have an exact 1:1 function-to-<code>^}$</code> count (26/26 and 14/14), so no nested column-0 <code>}</code> exists inside any function.</li>
+<li><strong>Sourcing order is irrelevant:</strong> <code>bin/mra.sh</code> sources all <code>lib/*.sh</code> before <code>main()</code> (dispatch at line 178); Bash resolves calls at call-time. New modules only need a <code>source</code> line added.</li>
+<li><strong>Every moved function must exist in exactly one file afterward:</strong> <code>grep -c '^&lt;fn&gt;() {'</code> == 1 in the new module, == 0 in the old file.</li>
+<li><strong>Final state:</strong> <code>lib/review.sh</code> keeps exactly <code>review_project</code> and <code>_review_pkb_auto_update</code> (2 functions); <code>lib/review-debate.sh</code> keeps the 8 non-agent functions. <code>./test.sh</code> green with unchanged counts throughout.</li>
+<li>New module naming (collision-checked): <code>review-strategy.sh</code> (not <code>review-select</code>), <code>review-pr-discussion.sh</code> (not <code>review-context</code>).</li>
+</ul>
+<hr />
+<h2 id="shared-mechanism-used-by-every-task">Shared mechanism (used by every task)</h2>
+<p>Each task moves a list of functions <code>FNS</code> from <code>$SRC</code> into a new <code>$NEW</code>. Use this exact recipe (BSD-awk compatible):</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># 1) Create the new module with a header.</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;#!/usr/bin/env bash\n# &lt;one-line responsibility&gt;\n\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NEW</span><span class="s2">&quot;</span>
+
+<span class="c1"># 2) Append each function verbatim, in the given order.</span>
+<span class="k">for</span><span class="w"> </span>fn<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">FNS</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>awk<span class="w"> </span>-v<span class="w"> </span><span class="nv">fn</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$fn</span><span class="s2">&quot;</span><span class="w"> </span><span class="s1">&#39;$0 ~ (&quot;^&quot;fn&quot;\\(\\) \\{&quot;){f=1} f{print} f&amp;&amp;$0==&quot;}&quot;{f=0}&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SRC</span><span class="s2">&quot;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NEW</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;\n&#39;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NEW</span><span class="s2">&quot;</span>
+<span class="k">done</span>
+
+<span class="c1"># 3) Remove each function from the source file.</span>
+<span class="k">for</span><span class="w"> </span>fn<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">FNS</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>awk<span class="w"> </span>-v<span class="w"> </span><span class="nv">fn</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$fn</span><span class="s2">&quot;</span><span class="w"> </span><span class="s1">&#39;skip==0 &amp;&amp; $0 ~ (&quot;^&quot;fn&quot;\\(\\) \\{&quot;){skip=1} skip==1{ if($0==&quot;}&quot;){skip=0} ; next } {print}&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SRC</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SRC</span><span class="s2">.tmp&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>mv<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SRC</span><span class="s2">.tmp&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SRC</span><span class="s2">&quot;</span>
+<span class="k">done</span>
+</code></pre></div>
+
+<p>The <code>awk</code> extract prints from a function's opening line through its closing <code>^}$</code>; the remove skips that same block. Leading comment blocks that directly precede a moved function are NOT captured by name — after step 3, scan <code>$SRC</code> for any comment/section-header that described a moved function and delete it (or move it above the function in <code>$NEW</code> if substantive). This is a small manual cleanup, verified visually.</p>
+<p><strong>Wiring the new module into <code>bin/mra.sh</code>:</strong> add one <code>source</code> line in the review block (the existing block is lines ~55–61: <code>review-diff.sh</code>, <code>review-prompt.sh</code>, <code>review-context.sh</code>, <code>review-provider.sh</code>, <code>review.sh</code>, <code>review-protocol.sh</code>, <code>review-debate.sh</code>). Place the new module's source line adjacent to the parent's.</p>
+<p><strong>Wiring the new module into tests:</strong> for a module extracted from <code>lib/review.sh</code>, run <code>grep -l 'lib/review\.sh' tests/*.sh</code>; in each hit, add a <code>source ".../lib/&lt;newmodule&gt;.sh"</code> line immediately after the existing <code>lib/review.sh</code> source line, mirroring that line's path-variable style. For <code>review-debate-agents.sh</code>, use <code>grep -l 'lib/review-debate\.sh' tests/*.sh</code>. Adding the source is idempotent (function defs), and <code>./test.sh</code> verifies nothing was missed.</p>
+<p><strong>Per-task verification (run all):</strong></p>
+<div class="highlight"><pre><span></span><code>bash<span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NEW</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>bash<span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SRC</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># syntax</span>
+shellcheck<span class="w"> </span>-S<span class="w"> </span>error<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NEW</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SRC</span><span class="s2">&quot;</span><span class="w"> </span>bin/mra.sh<span class="w">     </span><span class="c1"># lint (clean)</span>
+<span class="k">for</span><span class="w"> </span>fn<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">FNS</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="o">[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>grep<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;^</span><span class="si">${</span><span class="nv">fn</span><span class="si">}</span><span class="s2">() {&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NEW</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;MISSING in NEW: </span><span class="nv">$fn</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="o">[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>grep<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;^</span><span class="si">${</span><span class="nv">fn</span><span class="si">}</span><span class="s2">() {&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SRC</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;STILL in SRC: </span><span class="nv">$fn</span><span class="s2">&quot;</span>
+<span class="k">done</span>
+bash<span class="w"> </span>tests/&lt;guard-tests&gt;.sh<span class="w">                       </span><span class="c1"># the task&#39;s guard tests</span>
+./test.sh<span class="w">                                          </span><span class="c1"># full suite, unchanged counts</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-1-extract-libreview-jsonsh">Task 1: Extract <code>lib/review-json.sh</code></h2>
+<p><strong>Files:</strong>
+- Create: <code>lib/review-json.sh</code>
+- Modify: <code>lib/review.sh</code> (remove 7 functions), <code>bin/mra.sh</code> (+1 source), affected <code>tests/*.sh</code> (+1 source each)
+- Guard tests: <code>tests/test_review_verdict.sh</code>, <code>tests/test_review_approve_gate.sh</code>, <code>tests/test_review_json_repair.sh</code>, <code>tests/test_review_singlepass_gate.sh</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>lib/review-json.sh</code> defining <code>_review_redact_secrets_json</code>, <code>_validate_review_json</code>, <code>_review_event_for_status</code>, <code>_review_effective_status</code>, <code>_review_singlepass_body</code>, <code>extract_json</code>, <code>_repair_review_json</code> — same signatures, unchanged.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Move the functions</strong></li>
+</ul>
+<p>Run the shared mechanism with:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">SRC</span><span class="o">=</span>lib/review.sh
+<span class="nv">NEW</span><span class="o">=</span>lib/review-json.sh
+<span class="nv">FNS</span><span class="o">=(</span>_review_redact_secrets_json<span class="w"> </span>_validate_review_json<span class="w"> </span>_review_event_for_status<span class="w"> </span>_review_effective_status<span class="w"> </span>_review_singlepass_body<span class="w"> </span>extract_json<span class="w"> </span>_repair_review_json<span class="o">)</span>
+</code></pre></div>
+
+<p>Header comment for <code>$NEW</code>: <code># Review JSON lifecycle: validate, extract, repair, redact, and status mapping.</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Wire into bin/mra.sh</strong></li>
+</ul>
+<p>Add after the <code>source "$MRA_DIR/lib/review-provider.sh"</code> line:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review-json.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Wire into tests</strong></li>
+</ul>
+<p><code>grep -l 'lib/review\.sh' tests/*.sh</code>; in each, add after the <code>lib/review.sh</code> source line a matching <code>source ".../lib/review-json.sh"</code> (mirror the file's own path-variable, e.g. <code>$SCRIPT_DIR</code>).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Verify</strong></li>
+</ul>
+<p>Run the per-task verification block. Guard tests: <code>test_review_verdict.sh</code>, <code>test_review_approve_gate.sh</code>, <code>test_review_json_repair.sh</code>, <code>test_review_singlepass_gate.sh</code>. Expected: all grep checks silent (no MISSING/STILL lines), shellcheck clean, guard tests pass, <code>./test.sh</code> shows the same shell+mcp counts as before (77 shell / 0 failed + mcp ok).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-json.sh<span class="w"> </span>lib/review.sh<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;refactor(review): extract review-json.sh from review.sh (#12)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-2-extract-libreview-strategysh">Task 2: Extract <code>lib/review-strategy.sh</code></h2>
+<p><strong>Files:</strong>
+- Create: <code>lib/review-strategy.sh</code>
+- Modify: <code>lib/review.sh</code> (remove 3 functions), <code>bin/mra.sh</code> (+1 source), affected <code>tests/*.sh</code>
+- Guard tests: <code>tests/test_review_safety.sh</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>lib/review-strategy.sh</code> defining <code>select_review_strategy</code>, <code>_review_strategy_turns</code>, <code>build_focused_context</code> — unchanged.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Move the functions</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nv">SRC</span><span class="o">=</span>lib/review.sh
+<span class="nv">NEW</span><span class="o">=</span>lib/review-strategy.sh
+<span class="nv">FNS</span><span class="o">=(</span>select_review_strategy<span class="w"> </span>_review_strategy_turns<span class="w"> </span>build_focused_context<span class="o">)</span>
+</code></pre></div>
+
+<p>Header: <code># Review strategy selection (light/standard/debate), turn budgets, and focused context.</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Wire into bin/mra.sh</strong></li>
+</ul>
+<p>Add after the <code>source "$MRA_DIR/lib/review-json.sh"</code> line:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review-strategy.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Wire into tests</strong></li>
+</ul>
+<p><code>grep -l 'lib/review\.sh' tests/*.sh</code>; add <code>source ".../lib/review-strategy.sh"</code> after the <code>lib/review.sh</code> source line in each.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Verify</strong></li>
+</ul>
+<p>Per-task verification. Guard: <code>test_review_safety.sh</code>. Expected: grep checks silent, shellcheck clean, guard passes, <code>./test.sh</code> counts unchanged.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-strategy.sh<span class="w"> </span>lib/review.sh<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;refactor(review): extract review-strategy.sh from review.sh (#12)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-3-extract-libreview-pr-discussionsh">Task 3: Extract <code>lib/review-pr-discussion.sh</code></h2>
+<p><strong>Files:</strong>
+- Create: <code>lib/review-pr-discussion.sh</code>
+- Modify: <code>lib/review.sh</code> (remove 5 functions), <code>bin/mra.sh</code> (+1 source), affected <code>tests/*.sh</code>
+- Guard tests: <code>tests/test_review_pr_context.sh</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>lib/review-pr-discussion.sh</code> defining <code>_review_format_pr_discussion</code>, <code>_review_format_pr_scope</code>, <code>_review_pr_discussion_prompt</code>, <code>_review_prompt_with_pr_discussion</code>, <code>_review_fetch_pr_discussion</code> — unchanged.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Move the functions</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nv">SRC</span><span class="o">=</span>lib/review.sh
+<span class="nv">NEW</span><span class="o">=</span>lib/review-pr-discussion.sh
+<span class="nv">FNS</span><span class="o">=(</span>_review_format_pr_discussion<span class="w"> </span>_review_format_pr_scope<span class="w"> </span>_review_pr_discussion_prompt<span class="w"> </span>_review_prompt_with_pr_discussion<span class="w"> </span>_review_fetch_pr_discussion<span class="o">)</span>
+</code></pre></div>
+
+<p>Header: <code># PR discussion / scope context: fetch and format an open PR's comments for the review prompt.</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Wire into bin/mra.sh</strong></li>
+</ul>
+<p>Add after the <code>source "$MRA_DIR/lib/review-strategy.sh"</code> line:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review-pr-discussion.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Wire into tests</strong></li>
+</ul>
+<p><code>grep -l 'lib/review\.sh' tests/*.sh</code>; add <code>source ".../lib/review-pr-discussion.sh"</code> after the <code>lib/review.sh</code> source line in each.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Verify</strong></li>
+</ul>
+<p>Per-task verification. Guard: <code>test_review_pr_context.sh</code>. Expected: grep checks silent, shellcheck clean, guard passes, <code>./test.sh</code> counts unchanged.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-pr-discussion.sh<span class="w"> </span>lib/review.sh<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;refactor(review): extract review-pr-discussion.sh from review.sh (#12)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-4-extract-libreview-postsh">Task 4: Extract <code>lib/review-post.sh</code></h2>
+<p><strong>Files:</strong>
+- Create: <code>lib/review-post.sh</code>
+- Modify: <code>lib/review.sh</code> (remove 9 functions), <code>bin/mra.sh</code> (+1 source), affected <code>tests/*.sh</code>
+- Guard tests: <code>tests/test_review_approve_gate.sh</code> (uses <code>_review_emit_verdict</code>/status), plus full suite</p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>lib/review-post.sh</code> defining <code>_review_validate_expected_head</code>, <code>_render_review_json</code>, <code>_review_emit_verdict</code>, <code>_review_status_for_notify</code>, <code>_review_notify_complete</code>, <code>_review_issues_display</code>, <code>resolve_pr_base</code>, <code>post_inline_review</code>, <code>post_fallback_comment</code> — unchanged.
+- After this task <code>lib/review.sh</code> contains exactly <code>review_project</code> and <code>_review_pkb_auto_update</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Move the functions</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nv">SRC</span><span class="o">=</span>lib/review.sh
+<span class="nv">NEW</span><span class="o">=</span>lib/review-post.sh
+<span class="nv">FNS</span><span class="o">=(</span>_review_validate_expected_head<span class="w"> </span>_render_review_json<span class="w"> </span>_review_emit_verdict<span class="w"> </span>_review_status_for_notify<span class="w"> </span>_review_notify_complete<span class="w"> </span>_review_issues_display<span class="w"> </span>resolve_pr_base<span class="w"> </span>post_inline_review<span class="w"> </span>post_fallback_comment<span class="o">)</span>
+</code></pre></div>
+
+<p>Header: <code># Review result rendering + GitHub posting: emit verdict, notify, post inline / fallback review.</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Wire into bin/mra.sh</strong></li>
+</ul>
+<p>Add after the <code>source "$MRA_DIR/lib/review-pr-discussion.sh"</code> line:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review-post.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Wire into tests</strong></li>
+</ul>
+<p><code>grep -l 'lib/review\.sh' tests/*.sh</code>; add <code>source ".../lib/review-post.sh"</code> after the <code>lib/review.sh</code> source line in each.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Verify</strong></li>
+</ul>
+<p>Per-task verification. Additionally assert the final review.sh shape:</p>
+<div class="highlight"><pre><span></span><code><span class="o">[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>grep<span class="w"> </span>-cE<span class="w"> </span><span class="s1">&#39;^[a-zA-Z_][a-zA-Z0-9_]*\(\) \{&#39;</span><span class="w"> </span>lib/review.sh<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;review.sh has 2 functions (OK)&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;review.sh function count wrong&quot;</span>
+grep<span class="w"> </span>-nE<span class="w"> </span><span class="s1">&#39;^[a-zA-Z_][a-zA-Z0-9_]*\(\) \{&#39;</span><span class="w"> </span>lib/review.sh<span class="w">   </span><span class="c1"># expect: review_project, _review_pkb_auto_update</span>
+</code></pre></div>
+
+<p>Guard: <code>test_review_approve_gate.sh</code> + <code>./test.sh</code> counts unchanged.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-post.sh<span class="w"> </span>lib/review.sh<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;refactor(review): extract review-post.sh from review.sh (#12)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-5-extract-libreview-debate-agentssh">Task 5: Extract <code>lib/review-debate-agents.sh</code></h2>
+<p><strong>Files:</strong>
+- Create: <code>lib/review-debate-agents.sh</code>
+- Modify: <code>lib/review-debate.sh</code> (remove 6 functions), <code>bin/mra.sh</code> (+1 source), affected <code>tests/*.sh</code>
+- Guard tests: <code>tests/test_review_debate.sh</code>, <code>tests/test_review_debate_codex.sh</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>lib/review-debate-agents.sh</code> defining <code>run_agent_a</code>, <code>run_agent_verify</code>, <code>run_agent_b</code>, <code>run_critique_and_refine</code>, <code>run_vote</code>, <code>run_synthesize</code> — unchanged.
+- After this task <code>lib/review-debate.sh</code> keeps the 8 non-agent functions (<code>_debate_verdict_of</code>, <code>_debate_assess</code>, <code>_debate_verify_gate</code>, <code>_debate_count_findings</code>, <code>_run_codex_debate</code>, <code>run_debate_review</code>, <code>_build_findings_pool</code>, <code>_tally_votes</code>).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Move the functions</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nv">SRC</span><span class="o">=</span>lib/review-debate.sh
+<span class="nv">NEW</span><span class="o">=</span>lib/review-debate-agents.sh
+<span class="nv">FNS</span><span class="o">=(</span>run_agent_a<span class="w"> </span>run_agent_verify<span class="w"> </span>run_agent_b<span class="w"> </span>run_critique_and_refine<span class="w"> </span>run_vote<span class="w"> </span>run_synthesize<span class="o">)</span>
+</code></pre></div>
+
+<p>Header: <code># Debate agent runners (Impact Analyst, Quality Auditor, adversarial verifier, critique-refine, vote, synthesize) with their prompts.</code></p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Wire into bin/mra.sh</strong></li>
+</ul>
+<p>Add after the <code>source "$MRA_DIR/lib/review-debate.sh"</code> line:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/lib/review-debate-agents.sh&quot;</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Wire into tests</strong></li>
+</ul>
+<p><code>grep -l 'lib/review-debate\.sh' tests/*.sh</code>; add <code>source ".../lib/review-debate-agents.sh"</code> after the <code>lib/review-debate.sh</code> source line in each.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Verify</strong></li>
+</ul>
+<p>Per-task verification (with <code>SRC=lib/review-debate.sh</code>). Additionally:</p>
+<div class="highlight"><pre><span></span><code><span class="o">[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>grep<span class="w"> </span>-cE<span class="w"> </span><span class="s1">&#39;^[a-zA-Z_][a-zA-Z0-9_]*\(\) \{&#39;</span><span class="w"> </span>lib/review-debate.sh<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;review-debate.sh has 8 functions (OK)&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;review-debate.sh function count wrong&quot;</span>
+</code></pre></div>
+
+<p>Note: <code>_debate_verdict_of</code> is a one-line function (<code>^_debate_verdict_of() { ...; }</code>) — it stays; confirm it's still present. Guard: <code>test_review_debate.sh</code>, <code>test_review_debate_codex.sh</code> + <code>./test.sh</code> counts unchanged.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-debate-agents.sh<span class="w"> </span>lib/review-debate.sh<span class="w"> </span>bin/mra.sh<span class="w"> </span>tests
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;refactor(review): extract review-debate-agents.sh from review-debate.sh (#12)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="self-review">Self-Review</h2>
+<p><strong>Spec coverage:</strong>
+- <code>review.sh</code> → 4 modules (json/strategy/pr-discussion/post) → Tasks 1–4. ✅
+- <code>review-debate.sh</code> → <code>review-debate-agents.sh</code> → Task 5. ✅
+- Behavior-preserving relocation, tests as guards → shared mechanism + per-task verification. ✅
+- Naming collisions resolved → <code>review-strategy.sh</code>, <code>review-pr-discussion.sh</code>. ✅
+- bin/mra.sh sourcing → Step 2 of each task. ✅
+- Test-file sourcing → Step 3 of each task. ✅</p>
+<p><strong>Function accounting (no loss/duplication):</strong> review.sh 26 = 7 (T1) + 3 (T2) + 5 (T3) + 9 (T4) + 2 (stay). review-debate.sh 14 = 6 (T5) + 8 (stay). Every function is moved exactly once or explicitly stays. ✅</p>
+<p><strong>Placeholder scan:</strong> the shared mechanism gives the exact <code>awk</code> recipe and verification commands; per-task steps give exact function lists, exact source lines, and exact grep assertions. The one judgment step (orphaned-comment cleanup) is bounded and defined. No TBD/TODO.</p>
+<p><strong>Consistency:</strong> module names match between spec, tasks, <code>bin/mra.sh</code> source lines, and test-wiring greps. The <code>SRC</code>/<code>NEW</code>/<code>FNS</code> variables are consistent with the shared mechanism in every task.</p>
+  </main>
+</div>
+</body>
+</html>
