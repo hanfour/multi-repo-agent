@@ -117,9 +117,9 @@ Review provider defaults to **Codex**. Admins can switch the active provider wit
 the primary provider first, then the secondary provider; `dual` runs both and
 merges their standard single-pass findings. Direct
 `--provider` overrides are blocked unless `review.allowUserOverride` is enabled
-or `MRA_REVIEW_ADMIN_OVERRIDE=1` is set. In this phase Codex runs single-pass
-review; debate and personas remain Claude-only until the providerized debate
-phase lands.
+or `MRA_REVIEW_ADMIN_OVERRIDE=1` is set. Codex supports single-pass review, debate (a two-pass analysis→adversarial-verify
+pipeline), and personas. Claude runs its multi-turn agentic debate; the two
+providers each use the debate shape that fits their execution model.
 
 Machine integrations use an analysis-only protocol and never pass GitHub
 credentials or approval intent to the model process:

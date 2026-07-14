@@ -130,5 +130,18 @@ merged=$(run_debate)
   || fail "truncated pass was not gated: $merged"
 case "$(printf '%s' "$merged" | jq -r .summary)" in *REVIEW_INCOMPLETE*) pass "truncated codex debate reports REVIEW_INCOMPLETE" ;; *) fail "missing REVIEW_INCOMPLETE: $merged" ;; esac
 
+# --- Guards removed: review.sh no longer hard-blocks codex debate/personas ---
+guard_src="$SCRIPT_DIR/lib/review.sh"
+if grep -q 'strategy debate currently supports only --provider claude' "$guard_src"; then
+  fail "debate claude-only guard still present in review.sh"
+else
+  pass "debate claude-only guard removed"
+fi
+if grep -q 'personas currently supports only --provider claude' "$guard_src"; then
+  fail "personas claude-only guard still present in review.sh"
+else
+  pass "personas claude-only guard removed"
+fi
+
 chmod -R u+w "$TMP" 2>/dev/null || true; rm -rf "$TMP"
 [[ "$errors" -eq 0 ]] && echo "All codex-debate tests passed" || { echo "$errors failures"; exit 1; }
