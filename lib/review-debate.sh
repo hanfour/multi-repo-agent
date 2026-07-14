@@ -68,6 +68,33 @@ _debate_count_findings() {
   printf '%s' "$n"
 }
 
+# Codex-native debate: Codex cannot run Claude's multi-turn agentic debate, so we
+# approximate its find→verify spirit with two single-pass Codex analyses and keep
+# only the findings that survive the adversarial second pass (intersection merge).
+# A truncated/garbled pass (no sentinel) gates to REVIEW_INCOMPLETE via the shared
+# dual-merge logic — never a false-green APPROVE.
+#   _run_codex_debate <tag> <base_prompt> <model> <project_dir> <add_dirs> <max_turns>
+_run_codex_debate() {
+  local tag="$1" base_prompt="$2" model="$3" project_dir="$4" add_dirs="$5" max_turns="${6:-6}"
+  local raw1 raw2 pass1_json findings adversarial_prompt
+
+  raw1=$(review_call_model "$tag" codex "$base_prompt" "$model" "$project_dir" "$add_dirs" "$max_turns" "") || raw1=""
+  pass1_json=$(_review_provider_singlepass_json "$raw1" codex)
+  findings=$(printf '%s' "$pass1_json" | jq -r '
+    .comments[]? | "- [\(.severity // "?")] \(.path // "?"):\(.line // "?") — \(.body // "")"' 2>/dev/null || true)
+
+  adversarial_prompt=$(printf '%s\n\n%s\n\n%s\n' \
+    "$base_prompt" \
+    "## Adversarial verification
+A prior reviewer reported the findings below. For EACH: try hard to REFUTE it — is it wrong, out-of-scope, or not substantiated by the actual diff? Keep ONLY findings you can substantiate against the diff; drop the rest. Do not introduce unrelated new issues." \
+    "${findings:-(prior reviewer reported no findings)}")
+
+  raw2=$(review_call_model "$tag" codex "$adversarial_prompt" "$model" "$project_dir" "$add_dirs" "$max_turns" "") || raw2=""
+
+  # Intersection: a finding survives only if raised in pass 1 AND re-affirmed in pass 2.
+  _review_provider_merge_dual_json codex "$raw1" codex "$raw2" intersection
+}
+
 # Run the full debate review pipeline
 # NOTE: All log_* calls use >&2 because this function runs inside $()
 # and stdout must contain only the final JSON result
@@ -89,6 +116,7 @@ run_debate_review() {
   local pkb_context="${13:-}"
   local mode="${14:-range}"
   local range_expr="${15:-}"
+  local review_provider="${16:-claude}"
 
   local mra_dir
   mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -99,6 +127,19 @@ run_debate_review() {
   [[ -z "$diff" ]] && diff="(diff unavailable)"
   local changed_files
   changed_files=$(review_diff_files "$project_dir" "$mode" "$range_expr")
+
+  # Codex cannot run the multi-turn agentic debate below; delegate to the
+  # Codex-native 2-pass adversarial pipeline. Claude keeps the flow that follows.
+  if [[ "$review_provider" == "codex" ]]; then
+    local base_prompt
+    base_prompt=$(build_review_prompt \
+      "$project" "$project_dir" "$_graph_file" "$_base_ref" \
+      "$project_type" "$consumers" "$_deps" "$has_api_change" \
+      "$output_language" "inline" "$mode" "$range_expr")
+    _run_codex_debate "debate" "$base_prompt" "$model" "$project_dir" \
+      "$claude_add_dirs" "${MRA_REVIEW_AGENT_MAX_TURNS:-20}"
+    return
+  fi
 
   local lang_directive=""
   [[ -n "$output_language" ]] && lang_directive="Use ${output_language} for all output."
