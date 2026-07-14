@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Split `bin/mra.sh` Dispatch — Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
+    <div class="toc-title">Split `bin/mra.sh` Dispatch — Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#global-constraints">Global Constraints</a></li>
+<li><a href="#task-1-dispatch-smoke-test-net-committed-golden">Task 1: Dispatch smoke-test net + committed golden</a></li>
+<li><a href="#shared-extraction-mechanism-tasks-24">Shared extraction mechanism (Tasks 2–4)</a></li>
+<li><a href="#task-2-extract-cmd_branch-135-lines-the-giant">Task 2: Extract cmd_branch (135 lines — the giant)</a></li>
+<li><a href="#task-3-extract-cmd_sync-78-lines">Task 3: Extract cmd_sync (78 lines)</a></li>
+<li><a href="#task-4-extract-the-4-medium-branches-federation-db-integration-test-audit">Task 4: Extract the 4 medium branches (federation, db, integration, test-audit)</a></li>
+<li><a href="#self-review">Self-Review</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>Split `bin/mra.sh` Dispatch — Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Build a dispatch smoke-test safety net, then move the 6 biggest inline command bodies out of <code>bin/mra.sh</code>'s giant <code>case</code> into <code>cmd_&lt;name&gt;()</code> functions in their domain libs — zero behaviour change.</p>
+<p><strong>Architecture:</strong> Task 1 captures the current end-to-end behaviour of every command as a committed golden and a test that regenerates + diffs it (the dispatch has almost no e2e coverage today — 3/63 tests invoke the binary). Tasks 2+ extract command bodies verbatim; the smoke net guards each against routing/arg-parse/exit-code regressions. <code>main()</code> doesn't shift before the <code>case</code> and every big branch exits (never returns), so extraction is <code>cmd_&lt;name&gt;()</code> = the branch body verbatim (incl. leading <code>shift</code>) and the branch becomes <code>&lt;name&gt;) cmd_&lt;name&gt; "$@" ;;</code>.</p>
+<p><strong>Tech Stack:</strong> Bash, <code>perl</code> (portable alarm timeout), <code>shellcheck</code>, <code>./test.sh</code>.</p>
+<h2 id="global-constraints">Global Constraints</h2>
+<ul>
+<li><strong>Behaviour-preserving only.</strong> Command bodies move verbatim; no logic/arg-parse change. Guarded by the smoke golden (exit code + normalized output per command) + existing domain tests + <code>shellcheck -S error</code>.</li>
+<li><strong>Extraction contract (verified):</strong> <code>main()</code> runs <code>local command="${1:-}"; case "$command"</code> with NO shift, so a branch's <code>$@</code> includes the command name and its first line <code>shift</code> removes it. Every target branch terminates via <code>exit</code> (zero <code>return</code>). So: move the body verbatim (incl. leading <code>shift</code>) into <code>cmd_&lt;name&gt;()</code>; replace the branch with <code>&lt;name&gt;) cmd_&lt;name&gt; "$@" ;;</code>. No exit-code glue needed.</li>
+<li><strong>The smoke golden must be captured from the PRE-refactor binary</strong> (Task 1, before any extraction) and stay byte-unchanged through every later task.</li>
+<li><strong>Do not touch thin-router branches</strong> (scan/review/deps/plan/analyze/dev/prd*/status/…) — they already call a lib function.</li>
+<li><strong>Exclude interactive/long-running commands</strong> (<code>dashboard</code>, <code>watch</code>) from the smoke net — they are TUIs with live clocks (non-deterministic). Documented in the test.</li>
+<li><code>./test.sh</code> green with unchanged counts throughout.</li>
+</ul>
+<hr />
+<h2 id="task-1-dispatch-smoke-test-net-committed-golden">Task 1: Dispatch smoke-test net + committed golden</h2>
+<p><strong>Files:</strong> Create <code>tests/test_dispatch_smoke.sh</code>, <code>tests/fixtures/dispatch-smoke.golden</code>.</p>
+<p><strong>Interfaces:</strong> Produces the safety net every later task relies on. The test runs each command with <code>--help</code> in an isolated temp workspace with external tools stubbed, normalizes output, and diffs against the committed golden.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the smoke runner test</strong></li>
+</ul>
+<p>Create <code>tests/test_dispatch_smoke.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="c1"># Dispatch smoke net: exercises every top-level command&#39;s entry (routing + first</span>
+<span class="c1"># arg-parse + exit code) end-to-end through bin/mra.sh, with external tools stubbed</span>
+<span class="c1"># and in an empty workspace so nothing does real work or hangs. Asserts the</span>
+<span class="c1"># normalized (exit + first 3 lines, ANSI/paths stripped) output matches the</span>
+<span class="c1"># committed golden — catching any routing/arg-parse/exit-code regression from the</span>
+<span class="c1"># dispatch-extraction refactor (#16).</span>
+<span class="nb">set</span><span class="w"> </span>-uo<span class="w"> </span>pipefail
+<span class="nv">MRA_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nv">GOLDEN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/tests/fixtures/dispatch-smoke.golden&quot;</span>
+
+<span class="c1"># All top-level commands EXCEPT interactive/long-running TUIs (dashboard, watch).</span>
+<span class="nv">CMDS</span><span class="o">=</span><span class="s2">&quot;alias analyze ask branch ci clean config cost db deps dev diff doctor</span>
+<span class="s2">eval-review export federation graph init integration lint log notify open plan</span>
+<span class="s2">prd prd-issues prd-render prd-scaffold review rollback scan setup snapshot</span>
+<span class="s2">snapshots status sync template test test-audit trust&quot;</span>
+
+run_all<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>ws<span class="p">;</span><span class="w"> </span><span class="nv">ws</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+<span class="w">  </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">/.collab&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">/stub/bin&quot;</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;projects&quot;:{},&quot;gitOrg&quot;:&quot;acme&quot;}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">/.collab/dep-graph.json&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>t
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>t<span class="w"> </span><span class="k">in</span><span class="w"> </span>claude<span class="w"> </span>codex<span class="w"> </span>docker<span class="w"> </span>gh<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;#!/usr/bin/env bash\necho &quot;[stub:%s] $*&quot;\nexit 0\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$t</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">/stub/bin/</span><span class="nv">$t</span><span class="s2">&quot;</span>
+<span class="w">    </span>chmod<span class="w"> </span>+x<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">/stub/bin/</span><span class="nv">$t</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>c<span class="w"> </span>out<span class="w"> </span>ec
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>c<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="nv">$CMDS</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="nv">out</span><span class="o">=</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">PATH</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">/stub/bin:</span><span class="nv">$PATH</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">MRA_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">          </span><span class="nv">MRA_CLAUDE_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">/stub/bin/claude&quot;</span><span class="w"> </span><span class="nv">MRA_CODEX_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">/stub/bin/codex&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">          </span>perl<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;alarm 15; exec @ARGV&#39;</span><span class="w"> </span>bash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_DIR</span><span class="s2">/bin/mra.sh&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$c</span><span class="s2">&quot;</span><span class="w"> </span>--help<span class="w"> </span>&lt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="k">)</span>
+<span class="w">    </span><span class="nv">ec</span><span class="o">=</span><span class="nv">$?</span>
+<span class="w">    </span><span class="c1"># normalize: strip ANSI, replace dir/ws with placeholders, first 3 lines</span>
+<span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;=== %s (exit=%s) ===\n%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$c</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ec</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$out</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sed<span class="w"> </span>-E<span class="w"> </span><span class="s1">$&#39;s/\x1b\\[[0-9;]*m//g&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sed<span class="w"> </span><span class="s2">&quot;s|</span><span class="nv">$MRA_DIR</span><span class="s2">|&lt;DIR&gt;|g; s|</span><span class="nv">$ws</span><span class="s2">|&lt;WS&gt;|g&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-3<span class="k">)</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span>chmod<span class="w"> </span>-R<span class="w"> </span>u+w<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span>true<span class="p">;</span><span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ws</span><span class="s2">&quot;</span>
+<span class="o">}</span>
+
+<span class="nv">live</span><span class="o">=</span><span class="k">$(</span>run_all<span class="k">)</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">1</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;--regen&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$live</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GOLDEN</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;regenerated </span><span class="nv">$GOLDEN</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">0</span>
+<span class="k">fi</span>
+<span class="k">if</span><span class="w"> </span>diff<span class="w"> </span>&lt;<span class="o">(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$live</span><span class="s2">&quot;</span><span class="o">)</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GOLDEN</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: dispatch smoke net matches golden (</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CMDS</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-w<span class="w"> </span><span class="p">|</span><span class="w"> </span>tr<span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39; &#39;</span><span class="k">)</span><span class="s2"> commands)&quot;</span>
+<span class="k">else</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: dispatch behaviour changed vs golden:&quot;</span><span class="p">;</span><span class="w"> </span>diff<span class="w"> </span>&lt;<span class="o">(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$live</span><span class="s2">&quot;</span><span class="o">)</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GOLDEN</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Capture the golden from the current (pre-refactor) binary</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_dispatch_smoke.sh --regen</code>
+Then run <code>bash tests/test_dispatch_smoke.sh</code> → must print <code>PASS</code>. Inspect
+<code>tests/fixtures/dispatch-smoke.golden</code> — it should have one <code>=== &lt;cmd&gt; (exit=N) ===</code>
+block per command with deterministic content (usage/errors/empty-workspace output).
+Confirm the 6 extraction targets (<code>branch</code>, <code>sync</code>, <code>federation</code>, <code>db</code>,
+<code>integration</code>, <code>test-audit</code>) each have a stable block.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Verify determinism</strong></li>
+</ul>
+<p>Run <code>bash tests/test_dispatch_smoke.sh</code> twice more — both <code>PASS</code> (no flaky
+timestamp/path leakage). If any command's block differs run-to-run, add it to an
+exclusion list in <code>CMDS</code> with a comment (like dashboard/watch) and re-regen.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Full suite</strong></li>
+</ul>
+<p>Run: <code>./test.sh</code> — green; <code>test_dispatch_smoke.sh</code> auto-discovered and passing.
+<code>shellcheck -S error tests/test_dispatch_smoke.sh</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>tests/test_dispatch_smoke.sh<span class="w"> </span>tests/fixtures/dispatch-smoke.golden
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;test(cli): dispatch smoke net + golden baseline before extraction (#16)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="shared-extraction-mechanism-tasks-24">Shared extraction mechanism (Tasks 2–4)</h2>
+<p>For each target command <code>&lt;name&gt;</code> with domain lib <code>lib/&lt;domain&gt;.sh</code>:</p>
+<ol>
+<li>In <code>bin/mra.sh</code>, find the branch: <code>grep -nE "^    &lt;name&gt;\)" bin/mra.sh</code>; its body
+   runs from that line to its closing <code>;;</code>.</li>
+<li><strong>Move the body verbatim</strong> (from the line AFTER <code>&lt;name&gt;)</code> through the line BEFORE
+   <code>;;</code>, i.e. the <code>shift</code> + everything down to the last <code>exit</code>) into a new function
+   at the end of <code>lib/&lt;domain&gt;.sh</code>:
+   <code>bash
+   # &lt;name&gt; command handler (extracted from bin/mra.sh dispatch, #16)
+   cmd_&lt;name&gt;() {
+     &lt;verbatim body&gt;
+   }</code></li>
+<li><strong>Replace the branch</strong> in <code>bin/mra.sh</code> with exactly:
+   <code>bash
+       &lt;name&gt;)
+         cmd_&lt;name&gt; "$@"
+         ;;</code></li>
+<li><strong>Verify</strong> (run all):
+   <code>bash
+   bash -n bin/mra.sh &amp;&amp; bash -n lib/&lt;domain&gt;.sh
+   shellcheck -S error bin/mra.sh lib/&lt;domain&gt;.sh
+   bash tests/test_dispatch_smoke.sh          # golden UNCHANGED — the key gate
+   bash tests/&lt;domain guard test&gt;.sh           # e.g. test_sync.sh, test_branch*.sh
+   ./test.sh</code>
+   The smoke golden must still <code>PASS</code> byte-identically (behaviour preserved). If it
+   fails, the extraction changed behaviour — STOP.</li>
+<li><strong>Commit:</strong> <code>git commit -m "refactor(cli): extract cmd_&lt;name&gt; to lib/&lt;domain&gt;.sh (#16)"</code></li>
+</ol>
+<p>Note: <code>cmd_&lt;name&gt;</code> is defined in a lib sourced by <code>bin/mra.sh</code> before <code>main()</code>, so
+it resolves at call-time. The body is byte-identical, incl. its leading <code>shift</code>
+(which now shifts the function's <code>$@</code>, = the args <code>cmd_&lt;name&gt; "$@"</code> received =
+the same <code>$@</code> the branch had). All target bodies <code>exit</code>, so no return-code glue.</p>
+<hr />
+<h2 id="task-2-extract-cmd_branch-135-lines-the-giant">Task 2: Extract <code>cmd_branch</code> (135 lines — the giant)</h2>
+<p><strong>Files:</strong> Modify <code>bin/mra.sh</code> (branch @ ~699), <code>lib/branch.sh</code> (+<code>cmd_branch</code>).
+Guard: <code>tests/test_branch.sh</code>, <code>tests/test_branch_ops.sh</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1:</strong> Apply the shared extraction mechanism for <code>&lt;name&gt;=branch</code>, <code>&lt;domain&gt;=branch</code>.</li>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2:</strong> Verify — smoke golden's <code>=== branch (exit=…) ===</code> block byte-unchanged; <code>bash -n</code>/shellcheck clean; <code>test_branch.sh</code> + <code>test_branch_ops.sh</code> pass; <code>./test.sh</code> counts unchanged.</li>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3:</strong> Commit <code>refactor(cli): extract cmd_branch to lib/branch.sh (#16)</code>.</li>
+</ul>
+<h2 id="task-3-extract-cmd_sync-78-lines">Task 3: Extract <code>cmd_sync</code> (78 lines)</h2>
+<p><strong>Files:</strong> Modify <code>bin/mra.sh</code> (sync @ ~620), <code>lib/sync.sh</code> (+<code>cmd_sync</code>).
+Guard: <code>tests/test_sync.sh</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1:</strong> Apply the shared mechanism for <code>&lt;name&gt;=sync</code>, <code>&lt;domain&gt;=sync</code>.</li>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2:</strong> Verify — smoke golden <code>=== sync ===</code> block unchanged; shellcheck/bash -n clean; <code>test_sync.sh</code> passes; <code>./test.sh</code> unchanged.</li>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3:</strong> Commit <code>refactor(cli): extract cmd_sync to lib/sync.sh (#16)</code>.</li>
+</ul>
+<h2 id="task-4-extract-the-4-medium-branches-federation-db-integration-test-audit">Task 4: Extract the 4 medium branches (<code>federation</code>, <code>db</code>, <code>integration</code>, <code>test-audit</code>)</h2>
+<p><strong>Files:</strong> Modify <code>bin/mra.sh</code>; add <code>cmd_federation</code>→<code>lib/federation.sh</code>, <code>cmd_db</code>→<code>lib/db.sh</code>, <code>cmd_integration</code>→<code>lib/integration-test.sh</code>, <code>cmd_test_audit</code>→<code>lib/test-audit.sh</code>.
+Guard: <code>tests/test_federation.sh</code>, <code>tests/test_doctor_security.sh</code> (federation), <code>tests/test_protocol*</code>/<code>test_integration*</code> (integration), plus the smoke net for all.</p>
+<p>Apply the shared mechanism once per command (do them in sequence, committing each, so a regression is isolated):</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1:</strong> <code>cmd_federation</code> → <code>lib/federation.sh</code>; verify (smoke <code>=== federation ===</code> unchanged + <code>test_federation.sh</code>); commit <code>refactor(cli): extract cmd_federation (#16)</code>.</li>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2:</strong> <code>cmd_db</code> → <code>lib/db.sh</code>; verify (smoke <code>=== db ===</code> unchanged + any db test); commit <code>refactor(cli): extract cmd_db (#16)</code>.</li>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3:</strong> <code>cmd_integration</code> → <code>lib/integration-test.sh</code>; verify (smoke <code>=== integration ===</code> unchanged + integration/protocol tests); commit <code>refactor(cli): extract cmd_integration (#16)</code>.</li>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4:</strong> <code>cmd_test_audit</code> → <code>lib/test-audit.sh</code>; verify (smoke <code>=== test-audit ===</code> unchanged); commit <code>refactor(cli): extract cmd_test_audit (#16)</code>.</li>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5:</strong> Final <code>./test.sh</code> green; <code>bin/mra.sh</code> reduced by ~340 lines total. Report the new <code>wc -l bin/mra.sh</code>.</li>
+</ul>
+<p>Note the function name for <code>test-audit</code> is <code>cmd_test_audit</code> (hyphen → underscore, since a hyphen is illegal in a Bash function name); the dispatch branch stays <code>test-audit) cmd_test_audit "$@" ;;</code>.</p>
+<hr />
+<h2 id="self-review">Self-Review</h2>
+<p><strong>Spec coverage:</strong> smoke net (Task 1) → the missing e2e safety net; 6 extractions (Tasks 2–4) → the biggest inline branches to domain libs; thin routers untouched. ✅</p>
+<p><strong>Placeholder scan:</strong> Task 1 gives the full, prototype-validated runner script; the shared mechanism gives exact grep/move/replace steps + the exact dispatch replacement; each target names its domain lib + guard tests. No vague steps.</p>
+<p><strong>Contract consistency:</strong> every extraction uses the same verbatim-body + <code>&lt;name&gt;) cmd_&lt;name&gt; "$@" ;;</code> replacement; the exit-only/no-shift facts (verified in the spec) mean no exit-code glue; the smoke golden is the cross-cutting behaviour gate for all of them. <code>cmd_test_audit</code> underscore-vs-hyphen naming is called out.</p>
+<p><strong>Risk:</strong> entry-point refactor — mitigated by (a) the smoke golden capturing pre-refactor behaviour of all ~40 commands and gating every extraction, (b) verbatim body moves (no logic edits), (c) one commit per command so any regression is isolated and revertable.</p>
+  </main>
+</div>
+</body>
+</html>
