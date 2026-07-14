@@ -6,13 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-07-14
+
 ### Changed
+- `mra scan` is rewritten as a single Python walker (`scanners/walk.py`): one pruned `os.walk` per project replaces the five separate `find`-based scanners, ~38× faster on a 36-project workspace (~9.5s → ~0.25s) while emitting the identical relationship records. Intentional divergences from the old scanners (all documented in `scanners/README.md`): `node_modules`/`vendor` are pruned (dependency-internal config is noise), host matching is deterministic longest-match (the old bash used nondeterministic hash order), and hidden dirs are excluded from known-project matching. Custom `.collab/scanners/*.sh` still run as subprocesses.
+- Review subsystem and PKB internals split into focused modules for maintainability (behaviour-preserving): `lib/review.sh` (1205→413) → `review-json/strategy/pr-discussion/post`; `lib/review-debate.sh` (912→473) → `review-debate-agents`; `lib/pkb.sh` (1133→249) → `pkb-cache/query/prompts`.
 - `mra prd-scaffold` now adopts a pre-existing planned repo after a per-repo `[y/N]` confirm (clone + register, seed only if empty) instead of aborting. An existing repo never reaches `gh repo create`.
 
 ### Breaking
 - **BREAKING** lint profile `oneAD` renamed to `ts-strict`; update any `.collab/lint-profile.json` using `{"profile":"oneAD"}` to `{"profile":"ts-strict"}`.
+- **BREAKING** `mra scan` now requires `python3` (the built-in scanners run via `scanners/walk.py`). `python3` was already used by the previous `shared-packages` scanner; scan now fails fast with a clear error if it is missing.
 
 ### Added
+- Codex review provider now supports **debate** and **personas**, closing the capability gap with Claude (Codex was previously single-pass only). Codex debate is a two-pass analysis→adversarial-verify pipeline (pass 2 adjudicates; a finding survives only if raised in pass 1 and re-affirmed in pass 2); a pass with no completion sentinel gates to `REVIEW_INCOMPLETE`, never a false-green approve. Codex personas run each persona as one Codex pass.
+- Codex review protocol provider: `mra review` defaults to Codex (analysis-only, SHA-bound, sanitized snapshot, transient auth, secret redaction) while Claude remains available as an explicit provider or fallback.
+- Single-pass review completeness sentinel: `light`/`standard` reviews must end with the `===MRA-REVIEW-COMPLETE: <verdict>===` sentinel; a missing/empty/unparseable response is reported as `REVIEW_INCOMPLETE` and never posted as an approval (closing a false-green surface under the approve-if-no-high policy).
+- `scanners/README.md` documents the custom-scanner contract (a `.sh` under `<workspace>/.collab/scanners/` taking `<workspace>` as `$1` and emitting JSONL relationship records).
+- `scripts/stats.sh` prints the current CLI-command and test-suite counts so the README badge line can be regenerated instead of hand-maintained.
 - `mra prd --new <name>` — greenfield interactive planner: brainstorms a brand-new project's architecture from scratch, proposes a repo split + stack, and writes a PRD + specs + task plan + a scaffold plan. Creates nothing.
 - `mra prd-scaffold --req <ID> [--confirm]` — operator-run, **TTY-gated** apply that `gh repo create`s the planned repos (per-repo `GH_TOKEN` via `ghAccounts`, immutable ledger, atomic additive dep-graph registration — never `mra scan`), seeds each with an empty commit, and registers them into the workspace. A planned repo that already exists on GitHub triggers a per-repo `[y/N]` confirm — **y** adopts it (clone + register, seed only if empty); **N** aborts loud.
 - `mra prd <projects…>` — interactive cross-repo PRD/spec planner (FE/BE/data brainstorm → HTML PRD + per-repo specs + task plan under `.collab/`); the upstream of `mra dev`. It opens **no** issues.
