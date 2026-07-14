@@ -4,6 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/lib/colors.sh"
 source "$SCRIPT_DIR/lib/config.sh"
 source "$SCRIPT_DIR/lib/pkb.sh"
+source "$SCRIPT_DIR/lib/pkb-cache.sh"
 
 errors=0
 fail() { echo "FAIL: $1"; errors=$((errors+1)); }
