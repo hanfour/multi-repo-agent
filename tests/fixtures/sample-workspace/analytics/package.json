@@ -1,0 +1,5 @@
+{
+  "name": "analytics",
+  "dependencies": { "@acme/erp": "1.0.0", "billing": "^2.0.0" },
+  "devDependencies": { "lodash": "^4.0.0" }
+}
