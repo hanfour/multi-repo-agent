@@ -287,6 +287,91 @@ def rule_gateway_routes(files, projects):
                         emit(proj, target, "api", "medium", "gateway-routes")
 
 
+# ---------- shared-packages (Gemfile + package.json at project root) ----------
+def rule_shared_packages(files, projects):
+    proj_set = set(projects)
+    root_files = {}  # project -> {"Gemfile": f, "package.json": f}
+    for f in files:
+        proj = project_of(f)
+        if proj is None or proj not in proj_set:
+            continue
+        if depth_from_project(f) != 1:
+            continue
+        if f["name"] in ("Gemfile", "package.json"):
+            root_files.setdefault(proj, {})[f["name"]] = f
+
+    for project in projects:
+        entry = root_files.get(project)
+        if not entry:
+            continue
+
+        gemfile = entry.get("Gemfile")
+        if gemfile:
+            for line in read_lines(gemfile["abspath"]):
+                if re.match(r"^\s*#", line):
+                    continue
+                for known in projects:
+                    if known == project:
+                        continue
+                    known_gem = known.replace("_", "-")  # known//_/-
+                    pattern = r"gem\s+[\"'](%s|%s)[\"'](,|\s|$)" % (
+                        re.escape(known_gem), re.escape(known))
+                    if re.search(pattern, line):
+                        emit(project, known, "package", "high", "shared-packages")
+                m = re.search(r"gem\s+[\"']([a-zA-Z0-9_-]+)[\"'].*git", line)
+                if m:
+                    gem_name = m.group(1)
+                    for known in projects:
+                        if known == project:
+                            continue
+                        known_gem = known.replace("-", "_")  # known//-/_
+                        gem_normalized = gem_name.replace("-", "_")
+                        if gem_normalized == known_gem or gem_name == known:
+                            emit(project, known, "package", "high", "shared-packages")
+
+        package_json = entry.get("package.json")
+        if package_json:
+            try:
+                with open(package_json["abspath"], "r", errors="replace") as fh:
+                    d = json.load(fh)
+            except (OSError, ValueError):
+                d = None
+            if isinstance(d, dict):
+                deps = {}
+                for key in ("dependencies", "devDependencies", "peerDependencies"):
+                    v = d.get(key)
+                    if isinstance(v, dict):
+                        deps.update(v)
+                ws = d.get("workspaces", [])
+                if isinstance(ws, dict):
+                    ws = ws.get("packages", [])
+                if not isinstance(ws, list):
+                    ws = []
+                dep_names = list(deps.keys()) + list(ws)
+                for dep_name in dep_names:
+                    if not dep_name:
+                        continue
+                    m = re.match(r"^@[^/]+/(.+)$", dep_name)
+                    if m:
+                        pkg_name = m.group(1)
+                        for known in projects:
+                            if known == project:
+                                continue
+                            known_normalized = known.replace("-", "_")
+                            pkg_normalized = pkg_name.replace("-", "_")
+                            if pkg_normalized == known_normalized or pkg_name == known:
+                                emit(project, known, "package", "high", "shared-packages")
+                        # even without a project match, emit the raw package reference
+                        emit(project, dep_name, "package", "high", "shared-packages")
+                        continue
+
+                    for known in projects:
+                        if known == project:
+                            continue
+                        if dep_name == known:
+                            emit(project, known, "package", "high", "shared-packages")
+
+
 def main():
     if len(sys.argv) < 2:
         sys.stderr.write("usage: walk.py <workspace>\n")
@@ -297,7 +382,7 @@ def main():
     rule_shared_db(files, projects)
     rule_api_calls(files, projects)
     rule_gateway_routes(files, projects)
-    # shared-packages added in a later task
+    rule_shared_packages(files, projects)
 
 
 if __name__ == "__main__":
