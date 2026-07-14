@@ -150,3 +150,37 @@ cleanup_test_network() {
   docker network rm "$MRA_NETWORK" 2>/dev/null && \
     log_success "removed test network: $MRA_NETWORK" "test" || true
 }
+
+# integration command handler (extracted from bin/mra.sh dispatch, #16)
+cmd_integration() {
+      shift
+      local subcommand="${1:-}"; [[ -n "$subcommand" ]] && shift
+      case "$subcommand" in
+        describe)
+          [[ "${1:-}" == "--json" || $# -eq 0 ]] || { log_error "usage: mra integration describe --json" "integration"; exit 2; }
+          review_protocol_describe
+          ;;
+        doctor)
+          local request_file=""
+          while [[ $# -gt 0 ]]; do
+            case "$1" in --request) request_file="${2:-}"; shift 2 ;; --json) shift ;; *) log_error "unknown integration doctor option: $1" "integration"; exit 2 ;; esac
+          done
+          [[ -n "$request_file" ]] || { log_error "usage: mra integration doctor --request FILE --json" "integration"; exit 2; }
+          review_protocol_doctor "$request_file"
+          ;;
+        review)
+          local request_file="" result_file="" events_file=""
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              --request) request_file="${2:-}"; shift 2 ;;
+              --result) result_file="${2:-}"; shift 2 ;;
+              --events) events_file="${2:-}"; shift 2 ;;
+              *) log_error "unknown integration review option: $1" "integration"; exit 2 ;;
+            esac
+          done
+          [[ -n "$request_file" && -n "$result_file" ]] || { log_error "usage: mra integration review --request FILE --result FILE [--events FILE]" "integration"; exit 2; }
+          review_protocol_review "$request_file" "$result_file" "$events_file"
+          ;;
+        *) log_error "usage: mra integration describe|doctor|review" "integration"; exit 2 ;;
+      esac
+}
