@@ -28,6 +28,7 @@ run_all() {
   for c in $CMDS; do
     out=$(cd "$ws" && PATH="$ws/stub/bin:$PATH" MRA_WORKSPACE="$ws" \
           MRA_CLAUDE_BIN="$ws/stub/bin/claude" MRA_CODEX_BIN="$ws/stub/bin/codex" \
+          LC_ALL=C LANG=C \
           perl -e 'alarm 15; exec @ARGV' bash "$MRA_DIR/bin/mra.sh" "$c" --help </dev/null 2>&1)
     ec=$?
     # normalize: strip ANSI, replace dir/ws with placeholders, first 3 lines
