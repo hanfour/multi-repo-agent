@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Providerize Review Debate & Personas (Codex) Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
+    <div class="toc-title">Providerize Review Debate & Personas (Codex) Implementation Plan</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#global-constraints">Global Constraints</a></li>
+<li><a href="#file-structure">File Structure</a></li>
+<li><a href="#task-1-codex-native-debate-pipeline">Task 1: Codex-native debate pipeline</a></li>
+<li><a href="#task-2-codex-personas">Task 2: Codex personas</a></li>
+<li><a href="#task-3-wire-dispatch-drop-guards-update-docs">Task 3: Wire dispatch, drop guards, update docs</a></li>
+<li><a href="#self-review">Self-Review</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">實作計畫</div>
+      <h1>Providerize Review Debate & Personas (Codex) Implementation Plan</h1>
+      <div class="meta">**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.</div>
+    </div>
+    <blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Give the default Codex review provider access to debate and personas, so advanced review no longer requires switching back to Claude.</p>
+<p><strong>Architecture:</strong> Two independent tracks both route through the existing <code>review_call_model</code> provider abstraction. Codex uses shapes that fit its single-pass, sanitized-snapshot execution model: debate becomes a 2-pass analysis→adversarial-verify pipeline merged with intersection semantics; personas become N parallel Codex passes. Claude's existing multi-turn agentic debate and personas are untouched.</p>
+<p><strong>Tech Stack:</strong> Bash, jq, the mra review provider layer (<code>lib/review-provider.sh</code>, <code>lib/review-verdict.sh</code>), Codex CLI (<code>codex exec</code>), test doubles via <code>MRA_CODEX_BIN</code>.</p>
+<h2 id="global-constraints">Global Constraints</h2>
+<ul>
+<li>No false-green: a Codex debate pass with a missing completion sentinel / empty / unparseable output MUST resolve to the neutral <code>REVIEW_INCOMPLETE</code> verdict, never an APPROVE. Reuse <code>lib/review-verdict.sh</code> primitives.</li>
+<li>Claude's existing debate (<code>run_debate_review</code> 5-stage flow) and persona invocation behavior MUST NOT change. Verify by keeping <code>tests/test_review_debate.sh</code> and existing persona tests green.</li>
+<li>No new config switches, env flags, or <code>dual + debate</code> combination (YAGNI).</li>
+<li>Provider values are exactly <code>claude</code> | <code>codex</code> at invocation; validate via existing <code>_review_provider_validate_backend</code> where a check is needed.</li>
+<li>Sentinel token is <code>MRA-REVIEW-COMPLETE</code> via <code>$MRA_REVIEW_SENTINEL_TOKEN</code>; do not hardcode.</li>
+<li>Follow existing test-harness pattern: Codex doubles via <code>MRA_CODEX_BIN</code>, unsandboxed test path via <code>MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1</code>, auth double under <code>$HOME/.codex/auth.json</code>, <code>MRA_CODEX_AUTH_FILE_TTL_SECONDS=0</code>.</li>
+</ul>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/review-provider.sh</code></td>
+<td>Add optional merge-policy override arg to <code>_review_provider_merge_dual_json</code> (additive, back-compatible).</td>
+</tr>
+<tr>
+<td><code>lib/review-debate.sh</code></td>
+<td>Add <code>_run_codex_debate</code> (2-pass adversarial pipeline) + a provider branch in <code>run_debate_review</code> that delegates to it for Codex; Claude path unchanged.</td>
+</tr>
+<tr>
+<td><code>lib/review-personas.sh</code></td>
+<td>Add a <code>provider</code> parameter to <code>run_persona_review</code>; route the inner invocation through <code>review_call_model</code> instead of calling <code>claude_invoke</code> directly.</td>
+</tr>
+<tr>
+<td><code>lib/review.sh</code></td>
+<td>Remove the two Claude-only guards (personas + debate); thread <code>$review_provider</code> into both dispatch calls.</td>
+</tr>
+<tr>
+<td><code>agents/personas/*.md</code></td>
+<td>Compatibility scan; neutralize any Claude-only tool directives.</td>
+</tr>
+<tr>
+<td><code>tests/test_review_debate_codex.sh</code></td>
+<td>New. Unit-tests <code>_run_codex_debate</code> behavior with a Codex double.</td>
+</tr>
+<tr>
+<td><code>tests/test_review_personas_codex.sh</code></td>
+<td>New. Unit-tests Codex persona routing with a Codex double.</td>
+</tr>
+<tr>
+<td><code>README.md</code></td>
+<td>Update the "debate/personas remain Claude-only" self-stated limitation.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="task-1-codex-native-debate-pipeline">Task 1: Codex-native debate pipeline</h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/review-provider.sh</code> (<code>_review_provider_merge_dual_json</code>, the <code>policy=</code> line ~488)
+- Modify: <code>lib/review-debate.sh</code> (add <code>_run_codex_debate</code>; add provider branch in <code>run_debate_review</code> after diff/changed_files are computed, ~line 105)
+- Test: <code>tests/test_review_debate_codex.sh</code> (new)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>review_call_model [--stream] &lt;tag&gt; &lt;provider&gt; &lt;prompt&gt; &lt;model&gt; &lt;project_dir&gt; &lt;add_dirs&gt; &lt;max_turns&gt; &lt;system_prompt_file&gt;</code> (returns raw provider output incl. sentinel); <code>_review_provider_singlepass_json &lt;raw&gt; &lt;provider&gt;</code> (extracts JSON body); <code>_review_provider_merge_dual_json &lt;primary&gt; &lt;primary_raw&gt; &lt;secondary&gt; &lt;secondary_raw&gt; [policy_override]</code> (returns merged review JSON, gates either-incomplete → COMMENT); <code>$MRA_REVIEW_SENTINEL_TOKEN</code>.
+- Produces: <code>_run_codex_debate &lt;tag&gt; &lt;base_prompt&gt; &lt;model&gt; &lt;project_dir&gt; &lt;add_dirs&gt; &lt;max_turns&gt;</code> → prints a validated review JSON object <code>{status,summary,comments,blockerLedger}</code> to stdout. <code>run_debate_review</code> accepts <code>$16 = review_provider</code> (default <code>claude</code>).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Create <code>tests/test_review_debate_codex.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+
+<span class="nv">SCRIPT_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nv">TMP</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">MRA_CONFIG</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/config.json&quot;</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;configVersion&quot;:2}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_CONFIG</span><span class="s2">&quot;</span>
+
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/colors.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review-verdict.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/config.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/args.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/claude-invoke.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review-provider.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review-debate.sh&quot;</span>
+
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span>
+pass<span class="o">(){</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+fail<span class="o">(){</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+<span class="c1"># --- Codex double harness (mirrors tests/test_review_provider.sh) ---</span>
+<span class="nv">BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/bin&quot;</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BIN</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span>init<span class="w"> </span>-q
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>test@example.com
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>Test
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;source\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project/app.txt&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span>add<span class="w"> </span>.
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span>commit<span class="w"> </span>-qm<span class="w"> </span>init
+<span class="nv">REC</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/rec&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">export</span><span class="w"> </span>REC
+<span class="nb">export</span><span class="w"> </span><span class="nv">COUNT_FILE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/count&quot;</span>
+
+<span class="c1"># Two-call stub: call 1 = analysis (real + noise), call 2 = adversarial (drops noise).</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BIN</span><span class="s2">/codex&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;STUB&#39;</span>
+<span class="s">#!/usr/bin/env bash</span>
+<span class="s">n=$(cat &quot;$COUNT_FILE&quot; 2&gt;/dev/null || echo 0); n=$((n+1)); echo &quot;$n&quot; &gt; &quot;$COUNT_FILE&quot;</span>
+<span class="s">echo &quot;call=$n args=$*&quot; &gt;&gt; &quot;$REC&quot;</span>
+<span class="s">if [[ &quot;$n&quot; == &quot;1&quot; ]]; then</span>
+<span class="s">cat &lt;&lt;&#39;OUT&#39;</span>
+<span class="s">{&quot;status&quot;:&quot;CHANGES_REQUESTED&quot;,&quot;summary&quot;:&quot;pass1&quot;,&quot;comments&quot;:[{&quot;path&quot;:&quot;a.sh&quot;,&quot;line&quot;:1,&quot;severity&quot;:&quot;HIGH&quot;,&quot;body&quot;:&quot;REAL-BUG&quot;},{&quot;path&quot;:&quot;b.sh&quot;,&quot;line&quot;:2,&quot;severity&quot;:&quot;LOW&quot;,&quot;body&quot;:&quot;REFUTED-NOISE&quot;}]}</span>
+<span class="s">===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===</span>
+<span class="s">OUT</span>
+<span class="s">else</span>
+<span class="s">cat &lt;&lt;&#39;OUT&#39;</span>
+<span class="s">{&quot;status&quot;:&quot;CHANGES_REQUESTED&quot;,&quot;summary&quot;:&quot;pass2 verified&quot;,&quot;comments&quot;:[{&quot;path&quot;:&quot;a.sh&quot;,&quot;line&quot;:1,&quot;severity&quot;:&quot;HIGH&quot;,&quot;body&quot;:&quot;REAL-BUG&quot;}]}</span>
+<span class="s">===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===</span>
+<span class="s">OUT</span>
+<span class="s">fi</span>
+<span class="s">STUB</span>
+chmod<span class="w"> </span>+x<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BIN</span><span class="s2">/codex&quot;</span>
+
+mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/home/.codex&quot;</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/home/.codex/config.toml&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;TOML&#39;</span>
+<span class="s">model_provider = &quot;OpenAI&quot;</span>
+<span class="s">[model_providers.OpenAI]</span>
+<span class="s">name = &quot;OpenAI&quot;</span>
+<span class="s">base_url = &quot;https://api.openai.com/v1&quot;</span>
+<span class="s">wire_api = &quot;responses&quot;</span>
+<span class="s">requires_openai_auth = true</span>
+<span class="s">TOML</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;{&quot;auth_mode&quot;:&quot;api_key&quot;,&quot;OPENAI_API_KEY&quot;:&quot;test-only-key&quot;}\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/home/.codex/auth.json&quot;</span>
+
+run_debate<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nv">HOME</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/home&quot;</span><span class="w"> </span><span class="nv">ORIGINAL_HOME_FOR_STUB</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/home&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">MRA_REVIEW_MODEL_HOME</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/model-home&quot;</span><span class="w"> </span><span class="nv">MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">MRA_CODEX_AUTH_FILE_TTL_SECONDS</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="nv">MRA_CODEX_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$BIN</span><span class="s2">/codex&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>_run_codex_debate<span class="w"> </span>debate<span class="w"> </span><span class="s2">&quot;REVIEW THIS DIFF&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="m">6</span>
+<span class="o">}</span>
+
+<span class="c1"># --- Scenario A: adversarial verify with intersection semantics ---</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$REC</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$COUNT_FILE</span><span class="s2">&quot;</span>
+<span class="nv">merged</span><span class="o">=</span><span class="k">$(</span>run_debate<span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$merged</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.status<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;CHANGES_REQUESTED&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="o">&amp;&amp;</span><span class="w"> </span>pass<span class="w"> </span><span class="s2">&quot;codex debate escalates to CHANGES_REQUESTED on a real blocker&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;codex debate status wrong: </span><span class="nv">$merged</span><span class="s2">&quot;</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$merged</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.comments | length&#39;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="o">&amp;&amp;</span><span class="w"> </span>pass<span class="w"> </span><span class="s2">&quot;codex debate keeps only the re-verified finding&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;codex debate comment count wrong: </span><span class="nv">$merged</span><span class="s2">&quot;</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$merged</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*REAL-BUG*<span class="o">)</span><span class="w"> </span>pass<span class="w"> </span><span class="s2">&quot;codex debate retains the substantiated finding&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;missing REAL-BUG: </span><span class="nv">$merged</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$merged</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*REFUTED-NOISE*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;codex debate kept a refuted finding: </span><span class="nv">$merged</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>pass<span class="w"> </span><span class="s2">&quot;codex debate drops the refuted finding&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="c1"># adversarial wiring: pass2 prompt embeds pass1&#39;s finding text</span>
+<span class="nv">rec</span><span class="o">=</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$REC</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;call=2&quot;</span>*<span class="s2">&quot;REAL-BUG&quot;</span>*<span class="o">)</span><span class="w"> </span>pass<span class="w"> </span><span class="s2">&quot;adversarial pass2 receives pass1 findings&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;pass2 did not receive pass1 findings: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+<span class="c1"># --- Scenario B: no false-green when a pass is truncated ---</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BIN</span><span class="s2">/codex&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;STUB&#39;</span>
+<span class="s">#!/usr/bin/env bash</span>
+<span class="s">n=$(cat &quot;$COUNT_FILE&quot; 2&gt;/dev/null || echo 0); n=$((n+1)); echo &quot;$n&quot; &gt; &quot;$COUNT_FILE&quot;</span>
+<span class="s">if [[ &quot;$n&quot; == &quot;1&quot; ]]; then</span>
+<span class="s">cat &lt;&lt;&#39;OUT&#39;</span>
+<span class="s">{&quot;status&quot;:&quot;APPROVED&quot;,&quot;summary&quot;:&quot;pass1 clean&quot;,&quot;comments&quot;:[]}</span>
+<span class="s">===MRA-REVIEW-COMPLETE: APPROVED===</span>
+<span class="s">OUT</span>
+<span class="s">else</span>
+<span class="s"># truncated: valid JSON but NO sentinel</span>
+<span class="s">echo &#39;{&quot;status&quot;:&quot;APPROVED&quot;,&quot;summary&quot;:&quot;cut off mid-analysis&quot;,&quot;comments&quot;:[]}&#39;</span>
+<span class="s">fi</span>
+<span class="s">STUB</span>
+chmod<span class="w"> </span>+x<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BIN</span><span class="s2">/codex&quot;</span>
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$REC</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$COUNT_FILE</span><span class="s2">&quot;</span>
+<span class="nv">merged</span><span class="o">=</span><span class="k">$(</span>run_debate<span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$merged</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.status<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;COMMENT&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="o">&amp;&amp;</span><span class="w"> </span>pass<span class="w"> </span><span class="s2">&quot;truncated codex pass gates to non-approving COMMENT&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;truncated pass was not gated: </span><span class="nv">$merged</span><span class="s2">&quot;</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$merged</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.summary<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*REVIEW_INCOMPLETE*<span class="o">)</span><span class="w"> </span>pass<span class="w"> </span><span class="s2">&quot;truncated codex debate reports REVIEW_INCOMPLETE&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;missing REVIEW_INCOMPLETE: </span><span class="nv">$merged</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+chmod<span class="w"> </span>-R<span class="w"> </span>u+w<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span>true<span class="p">;</span><span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">&quot;</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$errors</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;All codex-debate tests passed&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$errors</span><span class="s2"> failures&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_debate_codex.sh</code>
+Expected: FAIL — <code>_run_codex_debate: command not found</code> (function does not exist yet).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Add the optional merge-policy override</strong></li>
+</ul>
+<p>In <code>lib/review-provider.sh</code>, inside <code>_review_provider_merge_dual_json</code>, change the policy resolution line:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># before:</span>
+<span class="w">  </span><span class="nv">policy</span><span class="o">=</span><span class="k">$(</span>review_provider_dual_merge_policy<span class="k">)</span>
+<span class="c1"># after:</span>
+<span class="w">  </span><span class="nv">policy</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">5</span><span class="k">:-$(</span>review_provider_dual_merge_policy<span class="k">)</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>(No other change; the 5th arg is optional so all existing callers keep current behavior.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Add <code>_run_codex_debate</code> to <code>lib/review-debate.sh</code></strong></li>
+</ul>
+<p>Add this function near the other helpers (e.g. just above <code>run_debate_review</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Codex-native debate: Codex cannot run Claude&#39;s multi-turn agentic debate, so we</span>
+<span class="c1"># approximate its find→verify spirit with two single-pass Codex analyses and keep</span>
+<span class="c1"># only the findings that survive the adversarial second pass (intersection merge).</span>
+<span class="c1"># A truncated/garbled pass (no sentinel) gates to REVIEW_INCOMPLETE via the shared</span>
+<span class="c1"># dual-merge logic — never a false-green APPROVE.</span>
+<span class="c1">#   _run_codex_debate &lt;tag&gt; &lt;base_prompt&gt; &lt;model&gt; &lt;project_dir&gt; &lt;add_dirs&gt; &lt;max_turns&gt;</span>
+_run_codex_debate<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">tag</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">base_prompt</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">model</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$3</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">project_dir</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$4</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">add_dirs</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$5</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">max_turns</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">6</span><span class="k">:-</span><span class="nv">6</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>raw1<span class="w"> </span>raw2<span class="w"> </span>pass1_json<span class="w"> </span>findings<span class="w"> </span>adversarial_prompt
+
+<span class="w">  </span><span class="nv">raw1</span><span class="o">=</span><span class="k">$(</span>review_call_model<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tag</span><span class="s2">&quot;</span><span class="w"> </span>codex<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$add_dirs</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$max_turns</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">raw1</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="nv">pass1_json</span><span class="o">=</span><span class="k">$(</span>_review_provider_singlepass_json<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$raw1</span><span class="s2">&quot;</span><span class="w"> </span>codex<span class="k">)</span>
+<span class="w">  </span><span class="nv">findings</span><span class="o">=</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pass1_json</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;</span>
+<span class="s1">    .comments[]? | &quot;- [\(.severity // &quot;?&quot;)] \(.path // &quot;?&quot;):\(.line // &quot;?&quot;) — \(.body // &quot;&quot;)&quot;&#39;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span><span class="k">)</span>
+
+<span class="w">  </span><span class="nv">adversarial_prompt</span><span class="o">=</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n\n%s\n\n%s\n&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;</span><span class="nv">$base_prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;## Adversarial verification</span>
+<span class="s2">A prior reviewer reported the findings below. For EACH: try hard to REFUTE it — is it wrong, out-of-scope, or not substantiated by the actual diff? Keep ONLY findings you can substantiate against the diff; drop the rest. Do not introduce unrelated new issues.&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">findings</span><span class="k">:-</span><span class="p">(prior reviewer reported no findings)</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span>
+
+<span class="w">  </span><span class="nv">raw2</span><span class="o">=</span><span class="k">$(</span>review_call_model<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tag</span><span class="s2">&quot;</span><span class="w"> </span>codex<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$adversarial_prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$add_dirs</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$max_turns</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">raw2</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+
+<span class="w">  </span><span class="c1"># Intersection: a finding survives only if raised in pass 1 AND re-affirmed in pass 2.</span>
+<span class="w">  </span>_review_provider_merge_dual_json<span class="w"> </span>codex<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$raw1</span><span class="s2">&quot;</span><span class="w"> </span>codex<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$raw2</span><span class="s2">&quot;</span><span class="w"> </span>intersection
+<span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_debate_codex.sh</code>
+Expected: PASS — <code>All codex-debate tests passed</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Add the provider branch in <code>run_debate_review</code></strong></li>
+</ul>
+<p>In <code>lib/review-debate.sh</code>, add a provider param and an early Codex delegation. First, add near the other positional locals (after <code>local range_expr="${15:-}"</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">review_provider</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">16</span><span class="k">:-</span><span class="nv">claude</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>Then, immediately after <code>changed_files</code> is computed (the block that runs <code>review_diff_files</code>), insert:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1"># Codex cannot run the multi-turn agentic debate below; delegate to the</span>
+<span class="w">  </span><span class="c1"># Codex-native 2-pass adversarial pipeline. Claude keeps the flow that follows.</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_provider</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;codex&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">local</span><span class="w"> </span>base_prompt
+<span class="w">    </span><span class="nv">base_prompt</span><span class="o">=</span><span class="k">$(</span>build_review_prompt<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$project</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$_graph_file</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$_base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$project_type</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$consumers</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$_deps</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$has_api_change</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$output_language</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;inline&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="w">    </span>_run_codex_debate<span class="w"> </span><span class="s2">&quot;debate&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$claude_add_dirs</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">MRA_REVIEW_AGENT_MAX_TURNS</span><span class="k">:-</span><span class="nv">20</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">    </span><span class="k">return</span>
+<span class="w">  </span><span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 7: Verify Claude debate is unregressed</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_debate.sh</code>
+Expected: PASS (all existing assertions — the <code>codex</code> branch is never taken with the default <code>claude</code> provider).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 8: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-provider.sh<span class="w"> </span>lib/review-debate.sh<span class="w"> </span>tests/test_review_debate_codex.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(review): codex-native 2-pass adversarial debate (#13)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-2-codex-personas">Task 2: Codex personas</h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/review-personas.sh</code> (<code>run_persona_review</code>: add provider param at <code>$11</code>; replace the inner <code>claude_invoke</code> subshell body ~line 76)
+- Scan: <code>agents/personas/*.md</code> (neutralize Claude-only tool directives if any)
+- Test: <code>tests/test_review_personas_codex.sh</code> (new)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>review_call_model &lt;tag&gt; &lt;provider&gt; &lt;prompt&gt; &lt;model&gt; &lt;project_dir&gt; &lt;add_dirs&gt; &lt;max_turns&gt; &lt;system_prompt_file&gt;</code>; <code>build_persona_prompt &lt;persona&gt; &lt;diff&gt; &lt;changed_files&gt; &lt;consumers&gt; &lt;pkb_context&gt; &lt;lang_directive&gt;</code>; <code>expand_add_dir_string &lt;arrayname&gt; &lt;str&gt;</code>.
+- Produces: <code>run_persona_review &lt;project&gt; &lt;project_dir&gt; &lt;diff&gt; &lt;changed_files&gt; &lt;personas&gt; &lt;consumers&gt; &lt;lang_directive&gt; &lt;model&gt; &lt;claude_add_dirs&gt; &lt;pkb_context&gt; [provider]</code> — <code>provider</code> defaults to <code>claude</code>; behavior for Claude is unchanged.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test</strong></li>
+</ul>
+<p>Create <code>tests/test_review_personas_codex.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env bash</span>
+<span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+
+<span class="nv">SCRIPT_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">BASH_SOURCE</span><span class="p">[0]</span><span class="si">}</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">/..&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">pwd</span><span class="k">)</span><span class="s2">&quot;</span>
+<span class="nv">TMP</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">MRA_CONFIG</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/config.json&quot;</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;configVersion&quot;:2}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MRA_CONFIG</span><span class="s2">&quot;</span>
+
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/colors.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review-verdict.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/config.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/args.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/claude-invoke.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review-provider.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review.sh&quot;</span>
+<span class="nb">source</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review-personas.sh&quot;</span>
+
+<span class="nv">errors</span><span class="o">=</span><span class="m">0</span>
+pass<span class="o">(){</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;PASS: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+fail<span class="o">(){</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;FAIL: </span><span class="nv">$1</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">errors</span><span class="o">=</span><span class="k">$((</span><span class="nv">errors</span><span class="o">+</span><span class="m">1</span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+
+<span class="nv">BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/bin&quot;</span><span class="p">;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BIN</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span>init<span class="w"> </span>-q
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span>config<span class="w"> </span>user.email<span class="w"> </span>test@example.com
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span>config<span class="w"> </span>user.name<span class="w"> </span>Test
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;source\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project/app.txt&quot;</span>
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span>add<span class="w"> </span>.
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span>commit<span class="w"> </span>-qm<span class="w"> </span>init
+<span class="nv">REC</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/rec&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">export</span><span class="w"> </span>REC
+
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BIN</span><span class="s2">/codex&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;STUB&#39;</span>
+<span class="s">#!/usr/bin/env bash</span>
+<span class="s">echo &quot;codex-persona: $*&quot; &gt;&gt; &quot;$REC&quot;</span>
+<span class="s">cat &lt;&lt;&#39;OUT&#39;</span>
+<span class="s">{&quot;status&quot;:&quot;CHANGES_REQUESTED&quot;,&quot;summary&quot;:&quot;persona found an issue&quot;,&quot;comments&quot;:[{&quot;path&quot;:&quot;app.txt&quot;,&quot;line&quot;:1,&quot;severity&quot;:&quot;MEDIUM&quot;,&quot;body&quot;:&quot;PERSONA-FINDING&quot;}]}</span>
+<span class="s">===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===</span>
+<span class="s">OUT</span>
+<span class="s">STUB</span>
+chmod<span class="w"> </span>+x<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BIN</span><span class="s2">/codex&quot;</span>
+
+mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/home/.codex&quot;</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/home/.codex/config.toml&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;TOML&#39;</span>
+<span class="s">model_provider = &quot;OpenAI&quot;</span>
+<span class="s">[model_providers.OpenAI]</span>
+<span class="s">name = &quot;OpenAI&quot;</span>
+<span class="s">base_url = &quot;https://api.openai.com/v1&quot;</span>
+<span class="s">wire_api = &quot;responses&quot;</span>
+<span class="s">requires_openai_auth = true</span>
+<span class="s">TOML</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;{&quot;auth_mode&quot;:&quot;api_key&quot;,&quot;OPENAI_API_KEY&quot;:&quot;test-only-key&quot;}\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/home/.codex/auth.json&quot;</span>
+
+:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$REC</span><span class="s2">&quot;</span>
+<span class="nv">findings</span><span class="o">=</span><span class="k">$(</span><span class="nv">HOME</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/home&quot;</span><span class="w"> </span><span class="nv">ORIGINAL_HOME_FOR_STUB</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/home&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">MRA_REVIEW_MODEL_HOME</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/model-home&quot;</span><span class="w"> </span><span class="nv">MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">MRA_CODEX_AUTH_FILE_TTL_SECONDS</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="nv">MRA_CODEX_BIN</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$BIN</span><span class="s2">/codex&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>run_persona_review<span class="w"> </span><span class="s2">&quot;proj&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">/project&quot;</span><span class="w"> </span><span class="s2">&quot;DIFF&quot;</span><span class="w"> </span><span class="s2">&quot;app.txt&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;security-auditor test-architect&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span>codex<span class="k">)</span>
+
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$findings</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*PERSONA-FINDING*<span class="o">)</span><span class="w"> </span>pass<span class="w"> </span><span class="s2">&quot;codex personas produce findings&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;no persona findings: </span><span class="nv">$findings</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+<span class="nv">rec</span><span class="o">=</span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$REC</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>grep<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;codex-persona:&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$REC</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;2&quot;</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>pass<span class="w"> </span><span class="s2">&quot;each persona runs a codex pass&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;expected 2 codex persona passes: </span><span class="nv">$rec</span><span class="s2">&quot;</span>
+<span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">&quot;exec --sandbox read-only&quot;</span>*<span class="o">)</span><span class="w"> </span>pass<span class="w"> </span><span class="s2">&quot;personas route through the codex provider path&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span>fail<span class="w"> </span><span class="s2">&quot;personas did not use codex exec: </span><span class="nv">$rec</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
+
+chmod<span class="w"> </span>-R<span class="w"> </span>u+w<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span>true<span class="p">;</span><span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TMP</span><span class="s2">&quot;</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$errors</span><span class="s2">&quot;</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;All codex-persona tests passed&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$errors</span><span class="s2"> failures&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_personas_codex.sh</code>
+Expected: FAIL — the inner call still runs <code>claude_invoke</code>, so <code>$REC</code> has no <code>codex-persona:</code> lines (the codex double is never invoked).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Route personas through <code>review_call_model</code></strong></li>
+</ul>
+<p>In <code>lib/review-personas.sh</code>, add the provider parameter to <code>run_persona_review</code> (after the existing <code>pkb_context</code> local):</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">provider</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">11</span><span class="k">:-</span><span class="nv">claude</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>Then replace the inner invocation subshell body. Change:</p>
+<div class="highlight"><pre><span></span><code><span class="w">      </span>_review_without_github_credentials<span class="w"> </span>claude_invoke<span class="w"> </span><span class="s2">&quot;review-persona&quot;</span><span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">_ad_arr</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--model<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--max-turns<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">MRA_REVIEW_PERSONA_MAX_TURNS</span><span class="k">:-</span><span class="nv">8</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--disallowedTools<span class="w"> </span><span class="s2">&quot;Write,Edit,NotebookEdit&quot;</span>
+</code></pre></div>
+
+<p>to:</p>
+<div class="highlight"><pre><span></span><code><span class="w">      </span>review_call_model<span class="w"> </span><span class="s2">&quot;review-persona&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$provider</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$prompt</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$claude_add_dirs</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">MRA_REVIEW_PERSONA_MAX_TURNS</span><span class="k">:-</span><span class="nv">8</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+</code></pre></div>
+
+<p>(<code>review_call_model</code>'s claude branch already applies <code>--disallowedTools Write,Edit,NotebookEdit</code> and expands <code>$claude_add_dirs</code>, so Claude behavior is preserved. The local <code>_ad_arr</code> expansion just above may now be unused — leave it if other lines reference it, otherwise remove the two <code>expand_add_dir_string</code>/<code>_ad_arr</code> lines.)</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Run test to verify it passes</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_personas_codex.sh</code>
+Expected: PASS — <code>All codex-persona tests passed</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Persona prompt compatibility scan</strong></li>
+</ul>
+<p>Run: <code>grep -rniE 'claude|--append-system-prompt|--max-turns|use the .* tool|you have access to' agents/personas/*.md</code>
+Expected: review each hit. Persona files should describe the review lens only. If any file instructs the model to use a Claude-specific tool or names Claude, edit it to a provider-neutral phrasing (e.g. describe the behavior, not the tool). If there are no hits, no edit is needed — record that in the commit body.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Verify Claude personas are unregressed</strong></li>
+</ul>
+<p>Run: <code>for t in tests/test_review*.sh; do bash "$t" &gt;/dev/null 2&gt;&amp;1 &amp;&amp; echo "OK $t" || echo "FAIL $t"; done</code>
+Expected: every existing review test prints <code>OK</code> (Claude persona path still works via the <code>claude</code> default provider).</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 7: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review-personas.sh<span class="w"> </span>agents/personas<span class="w"> </span>tests/test_review_personas_codex.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(review): providerize personas for codex (#13)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="task-3-wire-dispatch-drop-guards-update-docs">Task 3: Wire dispatch, drop guards, update docs</h2>
+<p><strong>Files:</strong>
+- Modify: <code>lib/review.sh</code> (remove personas guard ~454-456; remove/replace debate guard ~458-465; pass <code>$review_provider</code> into the two dispatch calls ~554 and ~576)
+- Modify: <code>README.md</code> (~120-124, the "debate and personas remain Claude-only" sentence)
+- Test: full suite <code>./test.sh</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>run_debate_review … "$review_provider"</code> (Task 1, <code>$16</code>); <code>run_persona_review … "$review_provider"</code> (Task 2, <code>$11</code>).
+- Produces: <code>mra review &lt;p&gt; --provider codex --strategy debate</code> and <code>--provider codex --personas</code> run under Codex; no guard rejects them.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 1: Write the failing test (guard-removal assertion)</strong></li>
+</ul>
+<p>Append to <code>tests/test_review_debate_codex.sh</code>, before the cleanup line, a guard-absence check that greps the source (fast, no full review run):</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># --- Guards removed: review.sh no longer hard-blocks codex debate/personas ---</span>
+<span class="nv">guard_src</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$SCRIPT_DIR</span><span class="s2">/lib/review.sh&quot;</span>
+<span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;strategy debate currently supports only --provider claude&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$guard_src</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span>fail<span class="w"> </span><span class="s2">&quot;debate claude-only guard still present in review.sh&quot;</span>
+<span class="k">else</span>
+<span class="w">  </span>pass<span class="w"> </span><span class="s2">&quot;debate claude-only guard removed&quot;</span>
+<span class="k">fi</span>
+<span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;personas currently supports only --provider claude&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$guard_src</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span>fail<span class="w"> </span><span class="s2">&quot;personas claude-only guard still present in review.sh&quot;</span>
+<span class="k">else</span>
+<span class="w">  </span>pass<span class="w"> </span><span class="s2">&quot;personas claude-only guard removed&quot;</span>
+<span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_debate_codex.sh</code>
+Expected: FAIL — both guard strings are still present in <code>lib/review.sh</code>.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 3: Remove the personas guard</strong></li>
+</ul>
+<p>In <code>lib/review.sh</code>, delete the block (currently ~454-456):</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_personas_flag</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;true&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_provider</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;claude&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>log_error<span class="w"> </span><span class="s2">&quot;--personas currently supports only --provider claude; Codex persona support is planned for the providerized debate phase&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 4: Remove the debate downgrade guard</strong></li>
+</ul>
+<p>In <code>lib/review.sh</code>, delete the block (currently ~458-465):</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;debate&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_provider</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;claude&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$force_strategy</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">&quot;debate&quot;</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>log_error<span class="w"> </span><span class="s2">&quot;--strategy debate currently supports only --provider claude; use --no-debate for Codex single-pass review&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">    </span>log_warn<span class="w"> </span><span class="s2">&quot;provider </span><span class="nv">$review_provider</span><span class="s2"> uses standard single-pass until debate is providerized&quot;</span><span class="w"> </span><span class="s2">&quot;review&quot;</span>
+<span class="w">    </span><span class="nv">strategy</span><span class="o">=</span><span class="s2">&quot;standard&quot;</span>
+<span class="w">  </span><span class="k">fi</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 5: Thread the provider into both dispatch calls</strong></li>
+</ul>
+<p>In <code>lib/review.sh</code>, in the persona dispatch (~554), add <code>"$review_provider"</code> as the final argument:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="nv">persona_findings</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>run_persona_review<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$project</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$persona_diff</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$persona_changed</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="k">$(</span>default_review_personas<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$consumers</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$persona_lang</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$claude_add_dirs_str</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pkb_context</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_provider</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>In the debate dispatch (~576), add <code>"$review_provider"</code> as the final argument:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="nv">review_json</span><span class="o">=</span><span class="k">$(</span>run_debate_review<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$project</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$project_dir</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$graph_file</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$base_ref</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$project_type</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$consumers</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$deps</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$has_api_change</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$output_language</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$model</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$claude_add_dirs_str</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$claude_focused_dirs_str</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$pkb_context</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$mode</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$range_expr</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$review_provider</span><span class="s2">&quot;</span><span class="k">)</span>
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 6: Run the codex-debate test to verify guards are gone</strong></li>
+</ul>
+<p>Run: <code>bash tests/test_review_debate_codex.sh</code>
+Expected: PASS — including the two new guard-absence assertions.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 7: Update README</strong></li>
+</ul>
+<p>In <code>README.md</code>, replace the sentence (~120-124):</p>
+<div class="highlight"><pre><span></span><code>In this phase Codex runs single-pass
+review; debate and personas remain Claude-only until the providerized debate
+phase lands.
+</code></pre></div>
+
+<p>with:</p>
+<div class="highlight"><pre><span></span><code>Codex supports single-pass review, debate (a two-pass analysis→adversarial-verify
+pipeline), and personas. Claude runs its multi-turn agentic debate; the two
+providers each use the debate shape that fits their execution model.
+</code></pre></div>
+
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 8: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>./test.sh</code>
+Expected: PASS — the existing shell + MCP counts hold and the two new Codex tests are included/green. If <code>test.sh</code> does not auto-discover new <code>tests/test_*.sh</code>, confirm they are picked up (the suite globs <code>tests/test_*.sh</code>); otherwise run them explicitly and note it.</p>
+<ul>
+<li class="checkbox-item"><input type="checkbox" disabled> <strong>Step 9: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>lib/review.sh<span class="w"> </span>README.md<span class="w"> </span>tests/test_review_debate_codex.sh
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;feat(review): allow codex debate/personas; drop claude-only guards, update docs (#13)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="self-review">Self-Review</h2>
+<p><strong>Spec coverage:</strong>
+- Track 1 codex-native debate (pass1 → adversarial pass2 → intersection merge, no false-green) → Task 1. ✅
+- Track 2 codex personas (route through <code>review_call_model</code>, per-persona codex pass, compat scan) → Task 2. ✅
+- Remove 2 claude-only guards + thread provider into dispatch → Task 3. ✅
+- Tests reuse PR #10 fake codex auth + <code>MRA_CODEX_BIN</code> double → Tasks 1 &amp; 2 harness. ✅
+- README self-stated limitation update → Task 3 Step 7. ✅
+- Zero Claude regression → Task 1 Step 7, Task 2 Step 6, Task 3 Step 8. ✅</p>
+<p><strong>Placeholder scan:</strong> No TBD/TODO; every code + test step shows full content. Compat scan (Task 2 Step 5) is a real grep with a defined decision rule, not a vague "handle edge cases."</p>
+<p><strong>Type consistency:</strong> <code>_run_codex_debate</code> args/return match its use in <code>run_debate_review</code> (Task 1 Step 6) and its test (Step 1). <code>run_persona_review</code>'s new <code>$11 = provider</code> matches the dispatch call (Task 3 Step 5). <code>_review_provider_merge_dual_json</code>'s optional <code>$5 = policy_override</code> is consumed by <code>_run_codex_debate</code> with <code>intersection</code>. Sentinel via <code>$MRA_REVIEW_SENTINEL_TOKEN</code> throughout.</p>
+  </main>
+</div>
+</body>
+</html>
