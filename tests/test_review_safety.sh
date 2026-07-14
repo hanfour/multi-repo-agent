@@ -9,6 +9,7 @@ source "$MRA_DIR/lib/project-path.sh"
 # from bin/mra.sh; for unit testing we only need the two helper
 # functions, which the file defines at the top.
 source "$MRA_DIR/lib/review.sh"
+source "$MRA_DIR/lib/review-pr-discussion.sh"
 source "$MRA_DIR/lib/review-strategy.sh"
 source "$MRA_DIR/lib/review-json.sh"
 
