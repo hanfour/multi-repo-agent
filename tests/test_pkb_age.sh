@@ -9,6 +9,7 @@ source "$SCRIPT_DIR/lib/colors.sh"
 source "$SCRIPT_DIR/lib/pkb.sh"
 source "$SCRIPT_DIR/lib/pkb-cache.sh"
 source "$SCRIPT_DIR/lib/pkb-query.sh"
+source "$SCRIPT_DIR/lib/pkb-prompts.sh"
 
 errors=0
 pass=0
