@@ -68,6 +68,64 @@ _debate_count_findings() {
   printf '%s' "$n"
 }
 
+# Codex-native debate: Codex cannot run Claude's multi-turn agentic debate, so we
+# approximate its find→verify spirit with two single-pass Codex analyses. Pass 2 is
+# the adjudicator: a finding survives only if it was raised in pass 1 AND re-affirmed
+# in pass 2 (intersection — pass 2 cannot invent new findings), and the verdict is
+# pass 2's, escalated only by a surviving HIGH/CRITICAL. Pass 1's pre-adversarial
+# status never gates the verdict — that is the whole point of the adversarial pass.
+# A pass with no completion sentinel gates to REVIEW_INCOMPLETE, never a false-green.
+#   _run_codex_debate <tag> <base_prompt> <model> <project_dir> <add_dirs> <max_turns>
+_run_codex_debate() {
+  local tag="$1" base_prompt="$2" model="$3" project_dir="$4" add_dirs="$5" max_turns="${6:-6}"
+  local raw1 raw2 pass1_json pass2_json findings adversarial_prompt
+
+  raw1=$(review_call_model "$tag" codex "$base_prompt" "$model" "$project_dir" "$add_dirs" "$max_turns" "") || raw1=""
+  pass1_json=$(_review_provider_singlepass_json "$raw1" codex)
+  findings=$(printf '%s' "$pass1_json" | jq -r '
+    .comments[]? | "- [\(.severity // "?")] \(.path // "?"):\(.line // "?") — \(.body // "")"' 2>/dev/null || true)
+
+  adversarial_prompt=$(printf '%s\n\n%s\n\n%s\n' \
+    "$base_prompt" \
+    "## Adversarial verification
+A prior reviewer reported the findings below. For EACH: try hard to REFUTE it — is it wrong, out-of-scope, or not substantiated by the actual diff? Keep ONLY findings you can substantiate against the diff; drop the rest. Do not introduce unrelated new issues." \
+    "${findings:-(prior reviewer reported no findings)}")
+
+  raw2=$(review_call_model "$tag" codex "$adversarial_prompt" "$model" "$project_dir" "$add_dirs" "$max_turns" "") || raw2=""
+
+  # Completeness gate: BOTH passes must complete (sentinel + valid body), else a
+  # neutral REVIEW_INCOMPLETE — never a false-green approve.
+  if ! _review_provider_output_complete "$raw1" || ! _review_provider_output_complete "$raw2"; then
+    _review_provider_incomplete_json "codex debate: an analysis pass did not complete (missing completion sentinel). NOT an approval; re-run or review manually."
+    return
+  fi
+
+  pass2_json=$(_review_provider_singlepass_json "$raw2" codex)
+
+  jq -cn \
+    --argjson a "$pass1_json" \
+    --argjson b "$pass2_json" '
+      def comments($x): (($x.comments // []) | map(select(type == "object")));
+      def ckey($c): [($c.path // ""), ($c.line // null), ($c.severity // "")];
+      (comments($a)) as $ac | (comments($b)) as $bc |
+      ([ $ac[] as $x | $bc[] | select(ckey(.) == ckey($x)) | $x ]
+        | unique_by([.path, .line, .severity, .body])) as $survivors |
+      ($survivors | map(select(.severity == "CRITICAL" or .severity == "HIGH"))) as $blockers |
+      {
+        status: (
+          if ($blockers | length) > 0 then "CHANGES_REQUESTED"
+          elif (($b.status // "") == "CHANGES_REQUESTED") then "CHANGES_REQUESTED"
+          elif (($b.status // "") == "APPROVED") then "APPROVED"
+          else "COMMENT" end),
+        summary: (
+          "Codex adversarial debate (analysis then verify): "
+          + ($survivors | length | tostring) + " finding(s) survived verification.\n\n"
+          + "verify pass: " + ($b.summary // "no summary")),
+        comments: $survivors,
+        blockerLedger: $blockers
+      }'
+}
+
 # Run the full debate review pipeline
 # NOTE: All log_* calls use >&2 because this function runs inside $()
 # and stdout must contain only the final JSON result
@@ -89,6 +147,7 @@ run_debate_review() {
   local pkb_context="${13:-}"
   local mode="${14:-range}"
   local range_expr="${15:-}"
+  local review_provider="${16:-claude}"
 
   local mra_dir
   mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -99,6 +158,19 @@ run_debate_review() {
   [[ -z "$diff" ]] && diff="(diff unavailable)"
   local changed_files
   changed_files=$(review_diff_files "$project_dir" "$mode" "$range_expr")
+
+  # Codex cannot run the multi-turn agentic debate below; delegate to the
+  # Codex-native 2-pass adversarial pipeline. Claude keeps the flow that follows.
+  if [[ "$review_provider" == "codex" ]]; then
+    local base_prompt
+    base_prompt=$(build_review_prompt \
+      "$project" "$project_dir" "$_graph_file" "$_base_ref" \
+      "$project_type" "$consumers" "$_deps" "$has_api_change" \
+      "$output_language" "inline" "$mode" "$range_expr")
+    _run_codex_debate "debate" "$base_prompt" "$model" "$project_dir" \
+      "$claude_add_dirs" "${MRA_REVIEW_AGENT_MAX_TURNS:-20}"
+    return
+  fi
 
   local lang_directive=""
   [[ -n "$output_language" ]] && lang_directive="Use ${output_language} for all output."

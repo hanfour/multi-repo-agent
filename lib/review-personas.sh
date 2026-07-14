@@ -56,6 +56,7 @@ run_persona_review() {
   local project="$1" project_dir="$2" diff="$3" changed_files="$4"
   local personas="$5" consumers="$6" lang_directive="$7" model="$8"
   local claude_add_dirs="$9" pkb_context="${10:-}"
+  local provider="${11:-claude}"
 
   log_progress >&2 "[personas] running $(echo "$personas" | wc -w | tr -d ' ') personas in parallel..." "review"
 
@@ -71,13 +72,8 @@ run_persona_review() {
     (
       local prompt
       prompt=$(build_persona_prompt "$p" "$diff" "$changed_files" "$consumers" "$pkb_context" "$lang_directive")
-      local _ad_arr=()
-      expand_add_dir_string _ad_arr "$claude_add_dirs"
-      _review_without_github_credentials claude_invoke "review-persona" -p "$prompt" \
-        "${_ad_arr[@]}" \
-        --model "$model" \
-        --max-turns "${MRA_REVIEW_PERSONA_MAX_TURNS:-8}" \
-        --disallowedTools "Write,Edit,NotebookEdit"
+      review_call_model "review-persona" "$provider" "$prompt" "$model" \
+        "$project_dir" "$claude_add_dirs" "${MRA_REVIEW_PERSONA_MAX_TURNS:-8}" ""
     ) > "$f" 2> "$err" &
     pids+=("$!")
   done

@@ -451,19 +451,6 @@ review_project() {
     strategy=$(select_review_strategy "$diff_for_strategy" "$changed_count" "$has_api_change")
   fi
 
-  if [[ "$review_personas_flag" == "true" && "$review_provider" != "claude" ]]; then
-    log_error "--personas currently supports only --provider claude; Codex persona support is planned for the providerized debate phase" "review"
-    return 1
-  fi
-  if [[ "$strategy" == "debate" && "$review_provider" != "claude" ]]; then
-    if [[ "$force_strategy" == "debate" ]]; then
-      log_error "--strategy debate currently supports only --provider claude; use --no-debate for Codex single-pass review" "review"
-      return 1
-    fi
-    log_warn "provider $review_provider uses standard single-pass until debate is providerized" "review"
-    strategy="standard"
-  fi
-
   # --- Log context ---
   log_progress "reviewing $project (type: $project_type, base: $base_ref, strategy: $strategy, provider: $(review_provider_label "$review_provider" "$model"))" "review"
   [[ "$has_api_change" == "true" ]] && log_warn "API change detected — loading consumer context" "review"
@@ -554,7 +541,7 @@ ${pkb_context}"
     persona_findings="$(run_persona_review \
       "$project" "$project_dir" "$persona_diff" "$persona_changed" \
       "$(default_review_personas)" "$consumers" "$persona_lang" "$model" \
-      "$claude_add_dirs_str" "$pkb_context")"
+      "$claude_add_dirs_str" "$pkb_context" "$review_provider")"
 
     local review_json
     review_json=$(run_synthesize \
@@ -577,7 +564,7 @@ ${pkb_context}"
       "$project" "$project_dir" "$graph_file" "$base_ref" \
       "$project_type" "$consumers" "$deps" "$has_api_change" \
       "$output_language" "$model" "$claude_add_dirs_str" "$claude_focused_dirs_str" \
-      "$pkb_context" "$mode" "$range_expr")
+      "$pkb_context" "$mode" "$range_expr" "$review_provider")
 
     _review_emit_verdict "$review_json" "$project_dir"
     _render_review_json "$review_json" "$output_mode" "$project_dir" "$pr_number" "debate" || return 1
