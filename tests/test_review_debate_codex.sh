@@ -82,6 +82,32 @@ case "$merged" in *REFUTED-NOISE*) fail "codex debate kept a refuted finding: $m
 rec=$(cat "$REC")
 case "$rec" in *"call=2"*"REAL-BUG"*) pass "adversarial pass2 receives pass1 findings" ;; *) fail "pass2 did not receive pass1 findings: $rec" ;; esac
 
+# --- Scenario C: pass 2 fully refutes pass 1 -> verdict downgraded to APPROVED ---
+cat > "$BIN/codex" <<'STUB'
+#!/usr/bin/env bash
+n=$(cat "$COUNT_FILE" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$COUNT_FILE"
+if [[ "$n" == "1" ]]; then
+cat <<'OUT'
+{"status":"CHANGES_REQUESTED","summary":"pass1 flags a maybe","comments":[{"path":"x.sh","line":3,"severity":"MEDIUM","body":"MAYBE-BUG"}]}
+===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===
+OUT
+else
+cat <<'OUT'
+{"status":"APPROVED","summary":"refuted the maybe","comments":[]}
+===MRA-REVIEW-COMPLETE: APPROVED===
+OUT
+fi
+STUB
+chmod +x "$BIN/codex"
+: > "$REC"; rm -f "$COUNT_FILE"
+merged=$(run_debate)
+[[ "$(printf '%s' "$merged" | jq -r .status)" == "APPROVED" ]] \
+  && pass "pass 2 refuting all findings downgrades the verdict to APPROVED" \
+  || fail "adversarial downgrade failed: $merged"
+[[ "$(printf '%s' "$merged" | jq '.comments | length')" == "0" ]] \
+  && pass "refuted findings leave no surviving comments" \
+  || fail "refuted comments not dropped: $merged"
+
 # --- Scenario B: no false-green when a pass is truncated ---
 cat > "$BIN/codex" <<'STUB'
 #!/usr/bin/env bash
