@@ -10,6 +10,7 @@ MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$MRA_DIR/lib/colors.sh"
 source "$MRA_DIR/lib/project-path.sh"
 source "$MRA_DIR/lib/review.sh"
+source "$MRA_DIR/lib/review-pr-discussion.sh"
 source "$MRA_DIR/lib/review-strategy.sh"
 source "$MRA_DIR/lib/review-json.sh"
 
