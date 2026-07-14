@@ -18,6 +18,7 @@ source "$SCRIPT_DIR/lib/review-pr-discussion.sh"
 source "$SCRIPT_DIR/lib/review-strategy.sh"
 source "$SCRIPT_DIR/lib/review-json.sh"
 source "$SCRIPT_DIR/lib/review-debate.sh"
+source "$SCRIPT_DIR/lib/review-debate-agents.sh"
 
 errors=0
 pass(){ echo "PASS: $1"; }
