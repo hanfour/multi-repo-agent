@@ -265,6 +265,7 @@ mra watch my-api                 # Auto-test on file change
 | `git` | Pre-installed on macOS |
 | `docker` | [Docker Desktop](https://docker.com) or [OrbStack](https://orbstack.dev) |
 | `jq` | `brew install jq` |
+| `python3` | Pre-installed on macOS; required by `mra scan` (`scanners/walk.py`) |
 | `gh` | `brew install gh` then `gh auth login` |
 | `claude` | [claude.ai/code](https://claude.ai/code) |
 
@@ -620,10 +621,10 @@ are tunable:
 ## Architecture
 
 ```
-mra CLI (pure shell, zero runtime deps beyond jq/git/docker/gh)
+mra CLI (pure shell, zero runtime deps beyond jq/git/docker/gh/python3)
   |
   +-- Workspace Manager
-  |     Repo sync, dependency scan (5 scanners), database setup
+  |     Repo sync, dependency scan (single-pass walker + custom scanners), database setup
   |
   +-- Project Knowledge Base (PKB)
   |     L0-L3 memory stack, auto-classification tags,
