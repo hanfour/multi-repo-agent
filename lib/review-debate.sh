@@ -69,14 +69,16 @@ _debate_count_findings() {
 }
 
 # Codex-native debate: Codex cannot run Claude's multi-turn agentic debate, so we
-# approximate its find→verify spirit with two single-pass Codex analyses and keep
-# only the findings that survive the adversarial second pass (intersection merge).
-# A truncated/garbled pass (no sentinel) gates to REVIEW_INCOMPLETE via the shared
-# dual-merge logic — never a false-green APPROVE.
+# approximate its find→verify spirit with two single-pass Codex analyses. Pass 2 is
+# the adjudicator: a finding survives only if it was raised in pass 1 AND re-affirmed
+# in pass 2 (intersection — pass 2 cannot invent new findings), and the verdict is
+# pass 2's, escalated only by a surviving HIGH/CRITICAL. Pass 1's pre-adversarial
+# status never gates the verdict — that is the whole point of the adversarial pass.
+# A pass with no completion sentinel gates to REVIEW_INCOMPLETE, never a false-green.
 #   _run_codex_debate <tag> <base_prompt> <model> <project_dir> <add_dirs> <max_turns>
 _run_codex_debate() {
   local tag="$1" base_prompt="$2" model="$3" project_dir="$4" add_dirs="$5" max_turns="${6:-6}"
-  local raw1 raw2 pass1_json findings adversarial_prompt
+  local raw1 raw2 pass1_json pass2_json findings adversarial_prompt
 
   raw1=$(review_call_model "$tag" codex "$base_prompt" "$model" "$project_dir" "$add_dirs" "$max_turns" "") || raw1=""
   pass1_json=$(_review_provider_singlepass_json "$raw1" codex)
@@ -91,8 +93,37 @@ A prior reviewer reported the findings below. For EACH: try hard to REFUTE it �
 
   raw2=$(review_call_model "$tag" codex "$adversarial_prompt" "$model" "$project_dir" "$add_dirs" "$max_turns" "") || raw2=""
 
-  # Intersection: a finding survives only if raised in pass 1 AND re-affirmed in pass 2.
-  _review_provider_merge_dual_json codex "$raw1" codex "$raw2" intersection
+  # Completeness gate: BOTH passes must complete (sentinel + valid body), else a
+  # neutral REVIEW_INCOMPLETE — never a false-green approve.
+  if ! _review_provider_output_complete "$raw1" || ! _review_provider_output_complete "$raw2"; then
+    _review_provider_incomplete_json "codex debate: an analysis pass did not complete (missing completion sentinel). NOT an approval; re-run or review manually."
+    return
+  fi
+
+  pass2_json=$(_review_provider_singlepass_json "$raw2" codex)
+
+  jq -cn \
+    --argjson a "$pass1_json" \
+    --argjson b "$pass2_json" '
+      def comments($x): (($x.comments // []) | map(select(type == "object")));
+      def ckey($c): [($c.path // ""), ($c.line // null), ($c.severity // "")];
+      (comments($a)) as $ac | (comments($b)) as $bc |
+      ([ $ac[] as $x | $bc[] | select(ckey(.) == ckey($x)) | $x ]
+        | unique_by([.path, .line, .severity, .body])) as $survivors |
+      ($survivors | map(select(.severity == "CRITICAL" or .severity == "HIGH"))) as $blockers |
+      {
+        status: (
+          if ($blockers | length) > 0 then "CHANGES_REQUESTED"
+          elif (($b.status // "") == "CHANGES_REQUESTED") then "CHANGES_REQUESTED"
+          elif (($b.status // "") == "APPROVED") then "APPROVED"
+          else "COMMENT" end),
+        summary: (
+          "Codex adversarial debate (analysis then verify): "
+          + ($survivors | length | tostring) + " finding(s) survived verification.\n\n"
+          + "verify pass: " + ($b.summary // "no summary")),
+        comments: $survivors,
+        blockerLedger: $blockers
+      }'
 }
 
 # Run the full debate review pipeline
