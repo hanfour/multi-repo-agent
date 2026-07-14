@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Providerize review debate & personas (Codex support) — Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
+    <div class="toc-title">Providerize review debate & personas (Codex support) — Design</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#problem">Problem</a></li>
+<li><a href="#key-constraint-codex-claude-execution-model">Key constraint: Codex ≠ Claude execution model</a></li>
+<li><a href="#design">Design</a><ul>
+<li><a href="#track-1-codex-native-debate-libreview-debatesh">Track 1 — Codex-native debate (lib/review-debate.sh)</a></li>
+<li><a href="#track-2-codex-personas-libreview-personassh">Track 2 — Codex personas (lib/review-personas.sh)</a></li>
+</ul>
+</li>
+<li><a href="#data-flow">Data flow</a></li>
+<li><a href="#error-handling">Error handling</a></li>
+<li><a href="#testing-reuse-pr-10-fake-codex-auth-mra_codex_bin-double">Testing (reuse PR #10 fake codex auth + MRA_CODEX_BIN double)</a></li>
+<li><a href="#files-touched">Files touched</a></li>
+<li><a href="#non-goals-yagni">Non-goals (YAGNI)</a></li>
+<li><a href="#acceptance">Acceptance</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">技術詳規格</div>
+      <h1>Providerize review debate & personas (Codex support) — Design</h1>
+      <div class="meta"></div>
+    </div>
+    <p><strong>Date:</strong> 2026-07-14
+<strong>Issue:</strong> hanfour/multi-repo-agent#13 — <code>feat(review): providerize debate/personas,消除 codex 預設 provider 的能力落差</code>
+<strong>Status:</strong> Approved (brainstorming)</p>
+<h2 id="problem">Problem</h2>
+<p>Codex is the default review provider (<code>config.json providerMode: "codex"</code>), but the
+two advanced review paths — <strong>debate</strong> and <strong>personas</strong> — still call <code>claude_invoke</code>
+directly and are therefore Claude-only. Two <code>review.sh</code> guards enforce this: a
+<code>--personas</code>-only-claude error and a <code>--strategy debate</code>-only-claude downgrade. The
+result: the default provider can only run single-pass review; to get debate or the
+5 personas the operator must switch back to Claude.</p>
+<p>Single-pass already routes through the <code>review_call_model</code> → <code>_review_call_one_provider</code>
+abstraction (claude/codex branches). Debate and personas bypass it.</p>
+<h2 id="key-constraint-codex-claude-execution-model">Key constraint: Codex ≠ Claude execution model</h2>
+<p>Codex cannot run Claude's multi-turn agentic debate. The Codex provider
+(<code>_review_call_one_provider</code> codex branch) is a <strong>single analysis pass</strong> over a
+<strong>sanitized snapshot</strong> (<code>codex exec --sandbox read-only</code>, <code>--ignore-rules</code>,
+ephemeral auth, protocol v1: analysis-only, SHA-bound). Claude debate is multi-turn
+agentic (max-turns 20) over the <strong>live</strong> repo + add-dirs + PKB, running tools.</p>
+<p>Therefore each provider uses the shape that fits it. Claude keeps its 5-stage
+agentic debate unchanged; Codex gets a native lightweight debate.</p>
+<h2 id="design">Design</h2>
+<p>Two independent providerization tracks, both routing through the existing
+<code>review_call_model</code> abstraction.</p>
+<h3 id="track-1-codex-native-debate-libreview-debatesh">Track 1 — Codex-native debate (<code>lib/review-debate.sh</code>)</h3>
+<p><code>run_debate_review</code> gains a provider branch at its entry:</p>
+<ul>
+<li><strong>provider = claude</strong> → existing 5-stage agentic flow, <strong>completely unchanged</strong>
+  (zero-risk isolation).</li>
+<li><strong>provider = codex</strong> → new thin <code>_run_codex_debate</code>:
+  1. <strong>pass 1</strong> — Codex analysis: find issues (<code>review_call_model … codex</code>).
+  2. <strong>pass 2</strong> — Codex <strong>adversarial-verify</strong>: fed pass 1's findings, instructed to
+     refute / substantiate each. This mirrors Claude debate's agent→verifier spirit
+     and is more faithful than two identical passes.
+  3. <strong>merge</strong> — reuse the existing <code>_review_provider_merge_dual_json</code> + verdict
+     sentinel logic (already used by the <code>dual</code> provider mode).</li>
+</ul>
+<p>Remove the <code>review.sh</code> guard that downgrades <code>debate → standard</code> for non-Claude
+providers; allow Codex debate instead.</p>
+<p><strong>Completeness contract (no false-green):</strong> if either Codex pass returns no
+completion sentinel / empty / unparseable output, the merged result is the neutral
+<code>REVIEW_INCOMPLETE</code> verdict — never an APPROVE. This reuses the shared
+<code>review-verdict.sh</code> primitives (the #8 contract), so debate and single-pass agree.</p>
+<h3 id="track-2-codex-personas-libreview-personassh">Track 2 — Codex personas (<code>lib/review-personas.sh</code>)</h3>
+<p><code>run_persona_review</code> currently spawns N parallel <code>claude_invoke</code> subshells (<code>:76</code>).
+Minimal change:</p>
+<ul>
+<li>Add a <code>provider</code> parameter. The inner subshell replaces the direct <code>claude_invoke</code>
+  with:
+  <code>review_call_model "review-persona" "$provider" "$prompt" "$model" "$project_dir" "$claude_add_dirs" "${MRA_REVIEW_PERSONA_MAX_TURNS:-8}"</code>.</li>
+<li><strong>Codex:</strong> each persona = one Codex pass. Persona identity is already embedded in
+  the <code>build_persona_prompt</code> <code>-p</code> prompt, which <code>_review_provider_codex_prompt</code>
+  carries through correctly — no prompt-structure change needed.</li>
+<li><strong>Compatibility scan:</strong> review <code>agents/personas/*.md</code> (5 files) for Claude-only
+  tool instructions; neutralize if any exist.</li>
+<li>Remove the <code>review.sh</code> personas-only-claude guard.</li>
+</ul>
+<p>Note: <code>_review_call_one_provider</code>'s claude branch already applies
+<code>--disallowedTools Write,Edit,NotebookEdit</code> and takes <code>max_turns</code> as a parameter, so
+routing personas through <code>review_call_model</code> preserves current Claude behavior.</p>
+<h2 id="data-flow">Data flow</h2>
+<div class="highlight"><pre><span></span><code>mra review &lt;project&gt; --provider codex --strategy debate
+  └─ run_debate_review(provider=codex)
+       └─ _run_codex_debate
+            ├─ review_call_model(codex, analysis prompt)      → pass1 JSON
+            ├─ review_call_model(codex, adversarial prompt)   → pass2 JSON
+            └─ _review_provider_merge_dual_json(pass1, pass2) → merged + sentinel
+                 └─ missing sentinel on either → REVIEW_INCOMPLETE
+
+mra review &lt;project&gt; --provider codex --personas
+  └─ run_persona_review(provider=codex)
+       └─ for each persona: review_call_model(codex, persona prompt) [parallel]
+            └─ merge findings (unchanged synthesis)
+</code></pre></div>
+
+<h2 id="error-handling">Error handling</h2>
+<ul>
+<li>Either Codex debate pass incomplete → merged <code>REVIEW_INCOMPLETE</code> (never APPROVE),
+  via shared <code>review-verdict.sh</code> sentinel check.</li>
+<li>A persona pass that fails → logged with its stderr file (existing behavior);
+  surviving personas still merge.</li>
+<li>Provider validation reuses <code>_review_provider_validate_backend</code>.</li>
+</ul>
+<h2 id="testing-reuse-pr-10-fake-codex-auth-mra_codex_bin-double">Testing (reuse PR #10 fake codex auth + <code>MRA_CODEX_BIN</code> double)</h2>
+<ul>
+<li><code>tests/test_review_debate_codex.sh</code>:</li>
+<li>Codex debate produces a merged verdict + completion sentinel.</li>
+<li>One pass incomplete (no sentinel) → <code>REVIEW_INCOMPLETE</code>, never APPROVE.</li>
+<li>pass 2 receives pass 1's findings (adversarial-verify wiring).</li>
+<li><code>tests/test_review_personas_codex.sh</code>:</li>
+<li>Codex personas run in parallel and merge findings.</li>
+<li>Persona prompt reaches the Codex double intact.</li>
+<li>Existing <code>tests/test_review_debate.sh</code> / persona tests stay green (zero Claude
+  regression).</li>
+</ul>
+<h2 id="files-touched">Files touched</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/review-debate.sh</code></td>
+<td>+provider branch in <code>run_debate_review</code>, +<code>_run_codex_debate</code></td>
+</tr>
+<tr>
+<td><code>lib/review-personas.sh</code></td>
+<td>inner call → <code>review_call_model</code>, +provider param</td>
+</tr>
+<tr>
+<td><code>lib/review.sh</code></td>
+<td>remove 2 claude-only guards; thread provider into debate/persona dispatch</td>
+</tr>
+<tr>
+<td><code>agents/personas/*.md</code></td>
+<td>compatibility scan (neutralize if needed)</td>
+</tr>
+<tr>
+<td><code>tests/test_review_debate_codex.sh</code></td>
+<td>new</td>
+</tr>
+<tr>
+<td><code>tests/test_review_personas_codex.sh</code></td>
+<td>new</td>
+</tr>
+<tr>
+<td><code>README.md:120-122</code></td>
+<td>update the "debate/personas Claude-only" self-stated limitation</td>
+</tr>
+</tbody>
+</table>
+<h2 id="non-goals-yagni">Non-goals (YAGNI)</h2>
+<ul>
+<li>No change to Claude's existing debate/persona paths.</li>
+<li>No new config switches or env flags.</li>
+<li>No <code>dual + debate</code> combination.</li>
+<li>No change to the Codex protocol/snapshot machinery itself.</li>
+</ul>
+<h2 id="acceptance">Acceptance</h2>
+<ul>
+<li><code>mra review &lt;p&gt; --provider codex --strategy debate</code> runs a 2-pass adversarial
+  Codex debate and posts a real verdict (or <code>REVIEW_INCOMPLETE</code>), never a
+  false-green APPROVE.</li>
+<li><code>mra review &lt;p&gt; --provider codex --personas</code> runs the 5 personas under Codex.</li>
+<li>The two claude-only guards are gone; README no longer claims the limitation.</li>
+<li>New Codex tests pass; all existing review tests stay green.</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>
