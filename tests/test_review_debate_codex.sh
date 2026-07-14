@@ -13,7 +13,12 @@ source "$SCRIPT_DIR/lib/args.sh"
 source "$SCRIPT_DIR/lib/claude-invoke.sh"
 source "$SCRIPT_DIR/lib/review-provider.sh"
 source "$SCRIPT_DIR/lib/review.sh"
+source "$SCRIPT_DIR/lib/review-post.sh"
+source "$SCRIPT_DIR/lib/review-pr-discussion.sh"
+source "$SCRIPT_DIR/lib/review-strategy.sh"
+source "$SCRIPT_DIR/lib/review-json.sh"
 source "$SCRIPT_DIR/lib/review-debate.sh"
+source "$SCRIPT_DIR/lib/review-debate-agents.sh"
 
 errors=0
 pass(){ echo "PASS: $1"; }
