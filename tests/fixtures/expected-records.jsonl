@@ -1,0 +1,14 @@
+{"confidence":"high","scanner":"docker-compose","source":"billing","target":"mysql","type":"infra"}
+{"confidence":"high","scanner":"docker-compose","source":"erp","target":"mysql","type":"infra"}
+{"confidence":"high","scanner":"docker-compose","source":"erp","target":"redis","type":"infra"}
+{"confidence":"high","scanner":"shared-db","source":"billing","target":"mysql","type":"infra"}
+{"confidence":"high","scanner":"shared-db","source":"erp","target":"mysql","type":"infra"}
+{"confidence":"high","scanner":"shared-packages","source":"analytics","target":"@acme/erp","type":"package"}
+{"confidence":"high","scanner":"shared-packages","source":"analytics","target":"billing","type":"package"}
+{"confidence":"high","scanner":"shared-packages","source":"analytics","target":"erp","type":"package"}
+{"confidence":"high","scanner":"shared-packages","source":"erp","target":"billing","type":"package"}
+{"confidence":"low","scanner":"api-calls","source":"erp","target":"api-gateway","type":"api"}
+{"confidence":"low","scanner":"api-calls","source":"erp","target":"billing","type":"api"}
+{"confidence":"low","scanner":"api-calls","source":"erp","target":"catalog","type":"api"}
+{"confidence":"low","scanner":"api-calls","source":"partner-api-gateway","target":"erp","type":"api"}
+{"confidence":"medium","scanner":"gateway-routes","source":"partner-api-gateway","target":"erp","type":"api"}

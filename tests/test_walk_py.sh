@@ -25,4 +25,14 @@ has partner-api-gateway erp gateway-routes
 has analytics erp shared-packages; has analytics billing shared-packages
 has analytics @acme/erp shared-packages
 
+# Full record-set equivalence against the committed golden set (generated
+# from the now-deleted legacy scanners/*.sh on this fixture; see
+# scanners/README.md for how the golden file is produced).
+GOLD="$MRA_DIR/tests/fixtures/expected-records.jsonl"
+if diff <(python3 "$MRA_DIR/scanners/walk.py" "$FIX" | jq -cS . | sort -u) <(jq -cS . < "$GOLD" | sort -u) >/dev/null; then
+  pass "walk.py matches golden record set exactly"
+else
+  fail "walk.py differs from golden"
+fi
+
 [[ "$errors" -eq 0 ]] && echo "walk.py infra tests passed" || { echo "$errors failures"; exit 1; }

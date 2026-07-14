@@ -133,7 +133,7 @@ def rule_docker_compose(files):
 
 
 # ---------- shared-db (project root, database*.yml maxdepth 3, .env* maxdepth 2) ----------
-def rule_shared_db(files, projects):
+def rule_shared_db(files):
     pairs = []  # (project, db_name)
     for f in files:
         proj = project_of(f)
@@ -159,9 +159,7 @@ def rule_shared_db(files, projects):
                     pairs.append((proj, db))
     by_db = {}
     for proj, db in sorted(set(pairs)):
-        by_db.setdefault(db, [])
-        if proj not in by_db[db]:
-            by_db[db].append(proj)
+        by_db.setdefault(db, []).append(proj)
     for db, projs in by_db.items():
         if len(projs) < 2:
             continue
@@ -379,7 +377,7 @@ def main():
     workspace = sys.argv[1]
     files, projects = collect(workspace)
     rule_docker_compose(files)
-    rule_shared_db(files, projects)
+    rule_shared_db(files)
     rule_api_calls(files, projects)
     rule_gateway_routes(files, projects)
     rule_shared_packages(files, projects)
