@@ -21,5 +21,8 @@ has erp api-gateway api-calls; has erp billing api-calls; has erp catalog api-ca
 has partner-api-gateway erp api-calls
 # gateway-routes (medium)
 has partner-api-gateway erp gateway-routes
+# shared-packages (high)
+has analytics erp shared-packages; has analytics billing shared-packages
+has analytics @acme/erp shared-packages
 
 [[ "$errors" -eq 0 ]] && echo "walk.py infra tests passed" || { echo "$errors failures"; exit 1; }
