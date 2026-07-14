@@ -5,6 +5,7 @@ JSONL relationship records the legacy scanners/*.sh produced.
 
 Contract: one JSON object per line, {"source","target","type","confidence","scanner"}.
 """
+import fnmatch
 import os
 import re
 import sys
@@ -12,6 +13,20 @@ import json
 
 PRUNE = {"node_modules", ".git", "vendor"}
 MAX_DEPTH = 4  # deepest any rule needs (nginx/apisix at project depth 4)
+
+# Known port -> service mappings (from docker-compose conventions)
+PORT_TO_SERVICE = {
+    "4000": "erp", "4001": "billing", "4500": "api-gateway", "5000": "catalog",
+    "3100": "finance-system", "5173": "web-ui", "3030": "oss-ui-v2",
+    "9443": "partner-api-gateway",
+}
+# Known hostname -> service mappings (service name patterns)
+HOST_TO_SERVICE = {
+    "erp": "erp", "billing": "billing", "catalog": "catalog",
+    "api-gateway": "api-gateway", "api_gateway": "api-gateway",
+    "finance-system": "finance-system", "finance_system": "finance-system",
+    "web-ui": "web-ui",
+}
 
 
 def emit(source, target, type_, confidence, scanner):
@@ -132,6 +147,122 @@ def rule_shared_db(files, projects):
             emit(p, "mysql", "infra", "high", "shared-db")
 
 
+def _known_upper(name):
+    # bash: known_upper="${known^^}"; known_upper="${known_upper//-/_}"
+    return name.upper().replace("-", "_")
+
+
+# ---------- api-calls (.env*/env.example, project depth <=2) ----------
+def rule_api_calls(files, projects):
+    proj_set = set(projects)
+    for f in files:
+        proj = project_of(f)
+        if proj is None or proj not in proj_set:
+            continue
+        if not (f["name"].startswith(".env") or f["name"] == "env.example"):
+            continue
+        if depth_from_project(f) > 2:
+            continue
+        for line in read_lines(f["abspath"]):
+            if re.match(r"^\s*#", line):
+                continue
+            m = re.match(r"^([A-Z_]+(?:HOST|URL|API_URL))\s*=\s*['\"]*([^'\"\s]+)", line)
+            if not m:
+                continue
+            var_name, value = m.group(1), m.group(2)
+            # skip self-references and infrastructure (redis, mysql, fluent, etc.)
+            if re.search(r"redis|mysql|postgres|fluent|localhost|127\.0\.0\.1", value):
+                continue
+            if re.match(r"^https?://accounts\.", value):  # keycloak/auth
+                continue
+
+            target = ""
+            # try to extract port from URL value
+            pm = re.search(r":(\d{4,5})", value)
+            if pm and pm.group(1) in PORT_TO_SERVICE:
+                target = PORT_TO_SERVICE[pm.group(1)]
+            # if no port match, try hostname match (first match wins)
+            if not target:
+                for known_host, service in HOST_TO_SERVICE.items():
+                    if re.search(known_host, value):
+                        target = service
+                        break
+            # try to infer from variable name prefix (e.g. CATALOG_HOST -> catalog)
+            if not target:
+                for known in projects:
+                    ku = _known_upper(known)
+                    if var_name in (ku + "_HOST", ku + "_URL", ku + "_API_URL", ku + "_BASE_URL"):
+                        target = known
+                        break
+
+            if target and target != proj:
+                emit(proj, target, "api", "low", "api-calls")
+
+
+# ---------- gateway-routes (gateway/proxy/router projects only) ----------
+_GATEWAY_NAME_PATTERNS = ("*gateway*", "*proxy*", "*router*")
+
+
+def _is_gateway(project):
+    return any(fnmatch.fnmatchcase(project, p) for p in _GATEWAY_NAME_PATTERNS)
+
+
+def rule_gateway_routes(files, projects):
+    gateway_projects = {p for p in projects if _is_gateway(p)}
+    for f in files:
+        proj = project_of(f)
+        if proj is None or proj not in gateway_projects:
+            continue
+        depth = depth_from_project(f)
+
+        if f["name"] in (".env", ".env.example", "env.example") and depth <= 2:
+            for line in read_lines(f["abspath"]):
+                if re.match(r"^\s*#", line):
+                    continue
+                m = re.match(r"^([A-Z_]+_(?:HOST|URL|BASE_URL|API_URL))\s*=\s*['\"]*(.+)$", line)
+                if not m:
+                    continue
+                var_name = m.group(1)
+                value = m.group(2).replace('"', "").replace("'", "")
+
+                pm = re.search(r":(\d{4,5})", value)
+                if pm and pm.group(1) in PORT_TO_SERVICE:
+                    target = PORT_TO_SERVICE[pm.group(1)]
+                    if target != proj:
+                        emit(proj, target, "api", "medium", "gateway-routes")
+
+                for known in projects:
+                    ku = _known_upper(known)
+                    if var_name.startswith(ku + "_") or var_name in (ku + "HOST", ku + "URL"):
+                        if known != proj:
+                            emit(proj, known, "api", "medium", "gateway-routes")
+
+        elif re.match(r"^nginx.*\.conf$", f["name"]) and depth <= 4:
+            for line in read_lines(f["abspath"]):
+                m = re.search(r"proxy_pass\s+http://([a-zA-Z0-9_-]+):(\d+)", line)
+                if not m:
+                    continue
+                host, port = m.group(1), m.group(2)
+                if port in PORT_TO_SERVICE:
+                    target = PORT_TO_SERVICE[port]
+                    if target != proj:
+                        emit(proj, target, "api", "medium", "gateway-routes")
+                for known in projects:
+                    if (host == known or host == known + "-service") and known != proj:
+                        emit(proj, known, "api", "medium", "gateway-routes")
+
+        elif (re.match(r"^apisix.*\.ya?ml$", f["name"]) or re.match(r"^routes.*\.yml$", f["name"])) and depth <= 4:
+            for line in read_lines(f["abspath"]):
+                m = re.search(r"upstream.*:\s*http://([a-zA-Z0-9_-]+):(\d+)", line)
+                if not m:
+                    continue
+                port = m.group(2)
+                if port in PORT_TO_SERVICE:
+                    target = PORT_TO_SERVICE[port]
+                    if target != proj:
+                        emit(proj, target, "api", "medium", "gateway-routes")
+
+
 def main():
     if len(sys.argv) < 2:
         sys.stderr.write("usage: walk.py <workspace>\n")
@@ -140,7 +271,9 @@ def main():
     files, projects = collect(workspace)
     rule_docker_compose(files)
     rule_shared_db(files, projects)
-    # api-calls, gateway-routes, shared-packages added in later tasks
+    rule_api_calls(files, projects)
+    rule_gateway_routes(files, projects)
+    # shared-packages added in a later task
 
 
 if __name__ == "__main__":

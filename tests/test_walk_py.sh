@@ -16,5 +16,10 @@ has(){ echo "$out" | jq -e --arg s "$1" --arg t "$2" --arg sc "$3" 'select(.sour
 has erp mysql docker-compose; has erp redis docker-compose; has billing mysql docker-compose
 # shared-db
 has erp mysql shared-db; has billing mysql shared-db
+# api-calls (low)
+has erp api-gateway api-calls; has erp billing api-calls; has erp catalog api-calls
+has partner-api-gateway erp api-calls
+# gateway-routes (medium)
+has partner-api-gateway erp gateway-routes
 
 [[ "$errors" -eq 0 ]] && echo "walk.py infra tests passed" || { echo "$errors failures"; exit 1; }
