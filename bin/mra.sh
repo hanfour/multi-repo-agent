@@ -717,31 +717,7 @@ main() {
       ;;
 
     test-audit)
-      shift
-      local audit_project="" audit_model="sonnet"
-      while [[ $# -gt 0 ]]; do
-        case "$1" in
-          --model)
-            [[ $# -lt 2 ]] && { log_error "--model requires a value" "test-audit"; exit 1; }
-            audit_model="$2"; shift 2 ;;
-          -*) log_error "unknown option: $1" "test-audit"; exit 1 ;;
-          *) audit_project="$1"; shift ;;
-        esac
-      done
-      if [[ -z "$audit_project" ]]; then
-        log_error "usage: mra test-audit <project> [--model M]" "test-audit"; exit 1
-      fi
-      local workspace; workspace=$(resolve_workspace)
-      local project_dir
-      project_dir=$(resolve_project_dir "$workspace" "$audit_project") || exit 1
-
-      local lang=""
-      lang=$(config_get "outputLanguage" 2>/dev/null); [[ "$lang" == "null" ]] && lang=""
-      local lang_directive=""; [[ -n "$lang" ]] && lang_directive="Use ${lang} for all output."
-
-      local add_dirs
-      add_dirs=$(build_add_dir_string "$project_dir")
-      run_test_audit "$audit_project" "$project_dir" "$audit_model" "$add_dirs" "$lang_directive"
+      cmd_test_audit "$@"
       ;;
 
     *)
