@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Split the review subsystem's large files — Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0F172A;
+  --ink-soft: #475569;
+  --muted: #94A3B8;
+  --border: #E2E8F0;
+  --bg: #FFFFFF;
+  --bg-soft: #F8FAFC;
+  --primary: #1E5BFC;
+  --primary-soft: #E8EFFF;
+  --primary-tint: #F5F8FF;
+  --orange: #F36F3E;
+  --yellow: #ECC94B;
+  --coral: #E85D5D;
+  --emerald: #16A34A;
+  --code-bg: #F1F5F9;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Noto Sans TC", "PingFang TC", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 15.5px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+aside.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2em 1.4em 2em 2em;
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  font-size: 13.5px;
+}
+aside.toc .toc-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 0.8em;
+}
+aside.toc .toc-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 1em;
+  color: var(--ink);
+}
+aside.toc ul { list-style: none; padding-left: 0; margin: 0; }
+aside.toc li { margin: 0.2em 0; }
+aside.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.55em;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+aside.toc a:hover { background: var(--primary-soft); color: var(--primary); }
+aside.toc ul ul { padding-left: 1em; font-size: 12.5px; }
+aside.toc ul ul a { padding: 0.15em 0.55em; }
+main.content {
+  max-width: 880px;
+  padding: 3em 3.5em 6em;
+}
+.doc-header {
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 1.2em;
+  margin-bottom: 2em;
+}
+.doc-header .eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0.3em 0.85em;
+  border-radius: 999px;
+  margin-bottom: 0.7em;
+}
+.doc-header h1 { font-size: 2.1em; margin: 0.1em 0 0.3em; letter-spacing: -0.02em; }
+.doc-header .meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; color: var(--primary); }
+h4 { font-size: 1.05em; }
+p { margin: 0.6em 0; }
+strong { color: var(--ink); }
+em { color: var(--ink-soft); }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5em 0;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1.2em;
+  background: var(--primary-tint);
+  border-left: 4px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink);
+}
+blockquote p { margin: 0.3em 0; }
+ul, ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.94em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  text-align: left;
+  background: var(--primary-tint);
+  padding: 0.6em 0.8em;
+  font-weight: 700;
+  border-bottom: 2px solid var(--primary);
+  color: var(--ink);
+}
+td {
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: var(--bg-soft); }
+code {
+  background: var(--code-bg);
+  padding: 0.12em 0.45em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1em;
+}
+.highlight .err { color: inherit; background: none; }
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kr { color: #1E5BFC; font-weight: 600; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #16A34A; }
+.highlight .c, .highlight .c1, .highlight .cm { color: #94A3B8; font-style: italic; }
+.highlight .n, .highlight .nx { color: var(--ink); }
+.highlight .nb, .highlight .bp { color: #F36F3E; }
+.highlight .mi, .highlight .mf { color: #E85D5D; }
+img { max-width: 100%; height: auto; border-radius: 4px; }
+.checkbox-item input[type="checkbox"] { margin-right: 0.4em; }
+input[type="checkbox"] { accent-color: var(--primary); }
+
+/* Mermaid diagram container */
+.mermaid {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2em 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Pretty up the TOC list rendered by python-markdown */
+.toc-rendered > ul { list-style: none; padding-left: 0; }
+.toc-rendered ul ul { padding-left: 1.2em; }
+
+/* Print: hide sidebar, single column */
+@media print {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { display: none; }
+  main.content { max-width: none; padding: 1.5em; }
+  pre, table { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main.content { padding: 2em 1.5em 4em; }
+}
+</style>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#E8EFFF",
+      primaryTextColor: "#0F172A",
+      primaryBorderColor: "#1E5BFC",
+      lineColor: "#94A3B8",
+      secondaryColor: "#FFEFE6",
+      tertiaryColor: "#F8FAFC",
+      fontFamily: "Noto Sans TC, sans-serif"
+    }
+  });
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-eyebrow">Multi-Repo Agent</div>
+    <div class="toc-title">Split the review subsystem's large files — Design</div>
+    <div class="toc-rendered"><div class="toc">
+<ul>
+<li><a href="#problem">Problem</a></li>
+<li><a href="#principle-behavior-preserving-relocation-only">Principle: behavior-preserving relocation only</a></li>
+<li><a href="#why-order-doesnt-matter-sourcing">Why order doesn't matter (sourcing)</a></li>
+<li><a href="#naming-collision-resolution-checked">Naming-collision resolution (checked)</a></li>
+<li><a href="#design">Design</a><ul>
+<li><a href="#part-a-libreviewsh-1205-orchestrator-4-modules">Part A — lib/review.sh (1205) → orchestrator + 4 modules</a></li>
+<li><a href="#part-b-libreview-debatesh-912-orchestrator-1-module">Part B — lib/review-debate.sh (912) → orchestrator + 1 module</a></li>
+<li><a href="#sourcing-wiring-binmrash">Sourcing wiring (bin/mra.sh)</a></li>
+</ul>
+</li>
+<li><a href="#data-flow">Data flow</a></li>
+<li><a href="#error-handling">Error handling</a></li>
+<li><a href="#testing">Testing</a></li>
+<li><a href="#files-touched">Files touched</a></li>
+<li><a href="#non-goals-yagni">Non-goals (YAGNI)</a></li>
+<li><a href="#acceptance">Acceptance</a></li>
+</ul>
+</div>
+</div>
+  </aside>
+  <main class="content">
+    <div class="doc-header">
+      <div class="eyebrow">技術詳規格</div>
+      <h1>Split the review subsystem's large files — Design</h1>
+      <div class="meta"></div>
+    </div>
+    <p><strong>Date:</strong> 2026-07-14
+<strong>Issue:</strong> hanfour/multi-repo-agent#12 — <code>refactor: 拆分超大檔案</code> (this design covers the <strong>review subsystem</strong> slice; <code>lib/pkb.sh</code> and <code>bin/mra.sh</code> are deferred to a follow-up issue)
+<strong>Status:</strong> Approved (brainstorming)</p>
+<h2 id="problem">Problem</h2>
+<p>Two files in the review subsystem are an order of magnitude larger than the other
+<code>review-*.sh</code> modules and are the complexity hotspots:</p>
+<ul>
+<li><code>lib/review.sh</code> — 1205 lines (dominated by <code>review_project()</code> ~360 lines and
+  <code>post_inline_review()</code> ~260 lines).</li>
+<li><code>lib/review-debate.sh</code> — 912 lines (dominated by six agent runners carrying large
+  inline prompt heredocs).</li>
+</ul>
+<p>The subsystem already has a split precedent — <code>review-provider.sh</code>,
+<code>review-protocol.sh</code>, <code>review-verdict.sh</code>, <code>review-diff.sh</code>, <code>review-context.sh</code>,
+etc. — but the two main files kept growing.</p>
+<h2 id="principle-behavior-preserving-relocation-only">Principle: behavior-preserving relocation only</h2>
+<p>Each extraction moves <strong>whole functions verbatim</strong> into a new module. No logic
+changes, no signature changes, no prompt edits. Correctness is guarded by the
+existing <code>tests/test_review_*.sh</code> suite (run after each extraction) plus
+<code>shellcheck</code>. This keeps every step a pure cut-paste a reviewer can verify by
+diff.</p>
+<h2 id="why-order-doesnt-matter-sourcing">Why order doesn't matter (sourcing)</h2>
+<p><code>bin/mra.sh</code> sources every <code>lib/*.sh</code> (lines 7–67) before <code>main()</code> is ever called
+(dispatch begins at line 178). All these files are function-definition-only, so
+Bash resolves calls at call-time, not source-time. Adding new <code>source</code> lines in
+the review block (near lines 55–63) is sufficient; relative order among the
+function-definition files is irrelevant.</p>
+<h2 id="naming-collision-resolution-checked">Naming-collision resolution (checked)</h2>
+<ul>
+<li><code>review-select.sh</code> holds <code>review_targets()</code> (which repos to auto-review after a
+  sync) — unrelated to <code>select_review_strategy</code> (light/standard/debate). New file
+  is <code>review-strategy.sh</code>; no collision.</li>
+<li><code>review-context.sh</code> holds <code>review_context_*</code> (normalizing AGENTS.md/CLAUDE.md for
+  providers) — unrelated to PR-discussion context. To avoid confusion the new file
+  is named <strong><code>review-pr-discussion.sh</code></strong> (not <code>review-pr-context.sh</code>).</li>
+</ul>
+<h2 id="design">Design</h2>
+<h3 id="part-a-libreviewsh-1205-orchestrator-4-modules">Part A — <code>lib/review.sh</code> (1205) → orchestrator + 4 modules</h3>
+<table>
+<thead>
+<tr>
+<th>New module</th>
+<th>Functions moved (verbatim)</th>
+<th>Guarding tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/review-json.sh</code></td>
+<td><code>_review_redact_secrets_json</code>, <code>_validate_review_json</code>, <code>_review_event_for_status</code>, <code>_review_effective_status</code>, <code>_review_singlepass_body</code>, <code>extract_json</code>, <code>_repair_review_json</code></td>
+<td><code>test_review_verdict.sh</code>, <code>test_review_approve_gate.sh</code>, <code>test_review_json_repair.sh</code>, <code>test_review_singlepass_gate.sh</code></td>
+</tr>
+<tr>
+<td><code>lib/review-strategy.sh</code></td>
+<td><code>select_review_strategy</code>, <code>_review_strategy_turns</code>, <code>build_focused_context</code></td>
+<td><code>test_review_safety.sh</code></td>
+</tr>
+<tr>
+<td><code>lib/review-pr-discussion.sh</code></td>
+<td><code>_review_format_pr_discussion</code>, <code>_review_format_pr_scope</code>, <code>_review_pr_discussion_prompt</code>, <code>_review_prompt_with_pr_discussion</code>, <code>_review_fetch_pr_discussion</code></td>
+<td><code>test_review_pr_context.sh</code></td>
+</tr>
+<tr>
+<td><code>lib/review-post.sh</code></td>
+<td><code>_review_validate_expected_head</code>, <code>_render_review_json</code>, <code>_review_emit_verdict</code>, <code>_review_status_for_notify</code>, <code>_review_notify_complete</code>, <code>_review_issues_display</code>, <code>resolve_pr_base</code>, <code>post_inline_review</code>, <code>post_fallback_comment</code></td>
+<td><code>test_review_approve_gate.sh</code> (emit/effective-status), full suite smoke</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Stays in <code>review.sh</code>:</strong> <code>review_project()</code> (the orchestrator) and
+<code>_review_pkb_auto_update</code>. Target ~420 lines.</p>
+<h3 id="part-b-libreview-debatesh-912-orchestrator-1-module">Part B — <code>lib/review-debate.sh</code> (912) → orchestrator + 1 module</h3>
+<table>
+<thead>
+<tr>
+<th>New module</th>
+<th>Functions moved (verbatim)</th>
+<th>Guarding tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/review-debate-agents.sh</code></td>
+<td><code>run_agent_a</code>, <code>run_agent_b</code>, <code>run_agent_verify</code>, <code>run_critique_and_refine</code>, <code>run_vote</code>, <code>run_synthesize</code></td>
+<td><code>test_review_debate.sh</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Stays in <code>review-debate.sh</code>:</strong> <code>run_debate_review</code> (orchestrator), the <code>_debate_*</code>
+deciders (<code>_debate_verdict_of</code>, <code>_debate_assess</code>, <code>_debate_verify_gate</code>,
+<code>_debate_count_findings</code>), <code>_run_codex_debate</code>, <code>_build_findings_pool</code>,
+<code>_tally_votes</code>. Target ~400 lines.</p>
+<p>We deliberately do NOT further split the debate prompts out of the agent functions
+— that would require rewriting each agent to call a prompt builder (a logic
+change), breaking the behavior-preserving guarantee. Moving whole agent functions
+is a pure relocation.</p>
+<h3 id="sourcing-wiring-binmrash">Sourcing wiring (<code>bin/mra.sh</code>)</h3>
+<p>Add five <code>source</code> lines in the review block (after the existing review sources,
+before <code>main()</code>):</p>
+<div class="highlight"><pre><span></span><code>source &quot;$MRA_DIR/lib/review-json.sh&quot;
+source &quot;$MRA_DIR/lib/review-strategy.sh&quot;
+source &quot;$MRA_DIR/lib/review-pr-discussion.sh&quot;
+source &quot;$MRA_DIR/lib/review-post.sh&quot;
+source &quot;$MRA_DIR/lib/review-debate-agents.sh&quot;
+</code></pre></div>
+
+<p>Any test harness that sources <code>lib/review.sh</code> / <code>lib/review-debate.sh</code> directly
+(e.g. <code>tests/test_review_*.sh</code>) must also source the new modules it needs — the
+plan updates each affected test's source block.</p>
+<h2 id="data-flow">Data flow</h2>
+<p>Unchanged. <code>review_project()</code> still orchestrates collect → strategy → PKB →
+provider/debate/personas → post; it now calls functions that live in sibling
+modules instead of the same file. <code>run_debate_review()</code> still orchestrates the
+rounds; the agent runners it calls now live in <code>review-debate-agents.sh</code>.</p>
+<h2 id="error-handling">Error handling</h2>
+<p>Unchanged — no logic touched. <code>set -euo pipefail</code> behavior is identical because the
+functions are byte-for-byte the same and sourcing order is irrelevant (all
+definitions load before any dispatch).</p>
+<h2 id="testing">Testing</h2>
+<ul>
+<li>After each module extraction: run that module's guarding tests, then the full
+  <code>./test.sh</code> (shell + mcp-server) — must stay green with the same counts.</li>
+<li><code>shellcheck -S error</code> on every new and modified file — clean.</li>
+<li>No new test logic is required (behavior is unchanged); if <code>review-post.sh</code> has no
+  direct unit test today, rely on the existing integration coverage and the full
+  suite, and note the gap rather than inventing tests for un-changed behavior.</li>
+</ul>
+<h2 id="files-touched">Files touched</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/review-json.sh</code></td>
+<td>new (moved fns)</td>
+</tr>
+<tr>
+<td><code>lib/review-strategy.sh</code></td>
+<td>new (moved fns)</td>
+</tr>
+<tr>
+<td><code>lib/review-pr-discussion.sh</code></td>
+<td>new (moved fns)</td>
+</tr>
+<tr>
+<td><code>lib/review-post.sh</code></td>
+<td>new (moved fns)</td>
+</tr>
+<tr>
+<td><code>lib/review-debate-agents.sh</code></td>
+<td>new (moved fns)</td>
+</tr>
+<tr>
+<td><code>lib/review.sh</code></td>
+<td>shrunk to orchestrator</td>
+</tr>
+<tr>
+<td><code>lib/review-debate.sh</code></td>
+<td>shrunk to orchestrator</td>
+</tr>
+<tr>
+<td><code>bin/mra.sh</code></td>
+<td>+5 source lines</td>
+</tr>
+<tr>
+<td><code>tests/test_review_*.sh</code></td>
+<td>add new-module sources where a test sources review.sh/review-debate.sh directly</td>
+</tr>
+</tbody>
+</table>
+<h2 id="non-goals-yagni">Non-goals (YAGNI)</h2>
+<ul>
+<li>No logic, signature, or prompt changes.</li>
+<li>No split of <code>lib/pkb.sh</code> or <code>bin/mra.sh</code> (deferred follow-up issue).</li>
+<li>No further sub-splitting of the debate prompts.</li>
+<li>No new behavior or features.</li>
+</ul>
+<h2 id="acceptance">Acceptance</h2>
+<ul>
+<li><code>lib/review.sh</code> and <code>lib/review-debate.sh</code> each drop to ~400 lines; each new
+  module has one clear responsibility and is &lt; ~300 lines.</li>
+<li><code>./test.sh</code> stays green with unchanged counts; <code>shellcheck -S error</code> clean.</li>
+<li>No function is lost or duplicated (each moved exactly once); <code>bin/mra.sh</code> sources
+  every new module.</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>
