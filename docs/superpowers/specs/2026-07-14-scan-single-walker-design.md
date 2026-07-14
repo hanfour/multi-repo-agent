@@ -87,9 +87,18 @@ record set**. Two layers:
    sets; they must match. This is a development gate, documented in the plan, not a
    committed test (it depends on external data).
 
-Any record-set difference = a rule-expressivity regression → do not land (per #1's
-acceptance). node_modules pruning must not change the set (already verified for the
-dominant `find`).
+Any record-set difference on a **real workspace** = a rule-expressivity regression → do
+not land (per #1's acceptance).
+
+**Prune is an intentional, real-world-equivalent divergence (decided 2026-07-14).** The
+legacy scanners exclude only `.git`; `walk.py` also prunes `node_modules`/`vendor`. A
+config file (`docker-compose.yml`, `database.yml`, …) buried *inside* `node_modules`/
+`vendor` is dependency-internal noise, not the project's real dependency, so excluding
+it is a correctness improvement — but it means byte-parity does NOT hold on a
+pathological tree with real config files under those dirs. The equivalence guarantee is
+therefore **"identical record set on real workspaces"**, enforced by the `~/OneAD`
+cross-check (344 records, empty diff), not by a constructed pathological fixture. This
+divergence is documented as intentional in `scanners/README.md`.
 
 ## Performance acceptance
 

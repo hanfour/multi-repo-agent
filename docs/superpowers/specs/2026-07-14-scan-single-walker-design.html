@@ -370,9 +370,17 @@ record set</strong>. Two layers:</p>
    sets; they must match. This is a development gate, documented in the plan, not a
    committed test (it depends on external data).</li>
 </ol>
-<p>Any record-set difference = a rule-expressivity regression → do not land (per #1's
-acceptance). node_modules pruning must not change the set (already verified for the
-dominant <code>find</code>).</p>
+<p>Any record-set difference on a <strong>real workspace</strong> = a rule-expressivity regression → do
+not land (per #1's acceptance).</p>
+<p><strong>Prune is an intentional, real-world-equivalent divergence (decided 2026-07-14).</strong> The
+legacy scanners exclude only <code>.git</code>; <code>walk.py</code> also prunes <code>node_modules</code>/<code>vendor</code>. A
+config file (<code>docker-compose.yml</code>, <code>database.yml</code>, …) buried <em>inside</em> <code>node_modules</code>/
+<code>vendor</code> is dependency-internal noise, not the project's real dependency, so excluding
+it is a correctness improvement — but it means byte-parity does NOT hold on a
+pathological tree with real config files under those dirs. The equivalence guarantee is
+therefore <strong>"identical record set on real workspaces"</strong>, enforced by the <code>~/OneAD</code>
+cross-check (344 records, empty diff), not by a constructed pathological fixture. This
+divergence is documented as intentional in <code>scanners/README.md</code>.</p>
 <h2 id="performance-acceptance">Performance acceptance</h2>
 <p>Benchmark <code>walk.py</code> vs the old scanners on <code>~/OneAD</code>. Target: the full scan (walk +
 merge) is <strong>≥2× faster</strong> (expected ~8.3s → ~1–2s). If it is not ≥2×, do not land the
