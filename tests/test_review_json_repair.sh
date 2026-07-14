@@ -10,6 +10,10 @@ source "$MRA_DIR/lib/colors.sh"
 source "$MRA_DIR/lib/claude-invoke.sh"
 source "$MRA_DIR/lib/project-path.sh"
 source "$MRA_DIR/lib/review.sh"
+source "$MRA_DIR/lib/review-post.sh"
+source "$MRA_DIR/lib/review-pr-discussion.sh"
+source "$MRA_DIR/lib/review-strategy.sh"
+source "$MRA_DIR/lib/review-json.sh"
 
 errors=0; pass=0
 pass_test() { echo "PASS: $1"; ((pass++)) || true; }

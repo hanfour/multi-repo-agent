@@ -3,6 +3,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source lib/colors.sh 2>/dev/null || true
 source lib/review.sh
+source lib/review-post.sh
+source lib/review-pr-discussion.sh
+source lib/review-strategy.sh
+source lib/review-json.sh
 
 fail=0
 check() { if [[ "$1" == "$2" ]]; then echo "ok: $3"; else echo "FAIL: $3 (got '$1' want '$2')"; fail=1; fi; }

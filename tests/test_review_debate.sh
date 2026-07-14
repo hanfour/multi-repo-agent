@@ -19,6 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/lib/colors.sh"
 source "$SCRIPT_DIR/lib/review-verdict.sh"
 source "$SCRIPT_DIR/lib/review-debate.sh"
+source "$SCRIPT_DIR/lib/review-debate-agents.sh"
 
 errors=0
 ok()   { echo "PASS: $1"; }
