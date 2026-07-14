@@ -4,6 +4,18 @@ node_modules/.git/vendor) and apply all built-in rule sets, emitting the same
 JSONL relationship records the legacy scanners/*.sh produced.
 
 Contract: one JSON object per line, {"source","target","type","confidence","scanner"}.
+
+Two intentional divergences from the legacy bash scanners (both validated
+against real data via the ~/OneAD cross-check, and both affecting only
+pathological inputs, not the fixtures):
+
+1. Host-substring resolution (see HOST_TO_SERVICE below) picks the longest
+   matching key deterministically, instead of bash's first-match-in-hash-
+   order (which is itself nondeterministic across bash builds).
+2. "Known project" matching (variable-name-prefix matching in api-calls, and
+   the shared-packages rule) uses the non-hidden project list produced by
+   collect(). The legacy scripts also treated hidden (`.`-prefixed) top-level
+   dirs as match targets; walk.py intentionally excludes them.
 """
 import fnmatch
 import os
@@ -20,7 +32,17 @@ PORT_TO_SERVICE = {
     "3100": "finance-system", "5173": "web-ui", "3030": "oss-ui-v2",
     "9443": "partner-api-gateway",
 }
-# Known hostname -> service mappings (service name patterns)
+# Known hostname -> service mappings (service name patterns).
+#
+# NOTE on determinism: when a .env value's hostname matches multiple keys as
+# substrings, we deterministically pick the LONGEST matching key (most
+# specific host), tie-broken by key name. The legacy scanners/api-calls.sh
+# iterated a bash associative array and took the first match in iteration
+# order — but bash iterates associative arrays in hash-bucket order, which is
+# nondeterministic and varies across bash builds. That means the legacy
+# behavior on a value matching multiple host keys was never a well-defined
+# target to replicate; longest-match-wins is a principled, deterministic
+# replacement rather than an attempt to mirror bash's arbitrary tie-breaking.
 HOST_TO_SERVICE = {
     "erp": "erp", "billing": "billing", "catalog": "catalog",
     "api-gateway": "api-gateway", "api_gateway": "api-gateway",
@@ -181,12 +203,14 @@ def rule_api_calls(files, projects):
             pm = re.search(r":(\d{4,5})", value)
             if pm and pm.group(1) in PORT_TO_SERVICE:
                 target = PORT_TO_SERVICE[pm.group(1)]
-            # if no port match, try hostname match (first match wins)
+            # if no port match, try hostname match (longest matching key
+            # wins, deterministically; see HOST_TO_SERVICE comment above)
             if not target:
-                for known_host, service in HOST_TO_SERVICE.items():
-                    if re.search(known_host, value):
-                        target = service
-                        break
+                candidates = sorted(
+                    (k for k in HOST_TO_SERVICE if re.search(k, value)),
+                    key=lambda k: (-len(k), k))
+                if candidates:
+                    target = HOST_TO_SERVICE[candidates[0]]
             # try to infer from variable name prefix (e.g. CATALOG_HOST -> catalog)
             if not target:
                 for known in projects:
