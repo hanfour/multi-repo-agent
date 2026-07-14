@@ -219,4 +219,3 @@ ${broken}"
     --disallowedTools "Write,Edit,NotebookEdit" \
     --setting-sources "project" 2>/dev/null || true
 }
-
