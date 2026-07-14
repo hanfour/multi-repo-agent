@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/lib/colors.sh"
 source "$SCRIPT_DIR/lib/review-verdict.sh"
 source "$SCRIPT_DIR/lib/review.sh"
+source "$SCRIPT_DIR/lib/review-json.sh"
 
 errors=0
 ok()   { echo "PASS: $1"; }
