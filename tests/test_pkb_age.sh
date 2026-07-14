@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/lib/colors.sh"
 source "$SCRIPT_DIR/lib/pkb.sh"
 source "$SCRIPT_DIR/lib/pkb-cache.sh"
+source "$SCRIPT_DIR/lib/pkb-query.sh"
 
 errors=0
 pass=0
