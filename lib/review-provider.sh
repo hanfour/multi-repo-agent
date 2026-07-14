@@ -487,7 +487,7 @@ _review_provider_merge_dual_json() {
   local primary_json secondary_json policy
   primary_json=$(_review_provider_singlepass_json "$primary_raw" "$primary")
   secondary_json=$(_review_provider_singlepass_json "$secondary_raw" "$secondary")
-  policy=$(review_provider_dual_merge_policy)
+  policy="${5:-$(review_provider_dual_merge_policy)}"
   jq -cn \
     --arg primary "$primary" \
     --arg secondary "$secondary" \
