@@ -1,5 +1,5 @@
 === alias (exit=1) ===
-<DIR>/lib/alias.sh: 列 5: $2: 未綁定的變數
+<DIR>/lib/alias.sh: line 5: $2: unbound variable
 === analyze (exit=1) ===
 [analyze] unknown option: --help
 === ask (exit=1) ===
@@ -13,7 +13,7 @@
 [clean] removed 1 orphan container(s)
 [clean] no logs directory
 === config (exit=1) ===
-<DIR>/lib/config.sh: 列 53: $2: 未綁定的變數
+<DIR>/lib/config.sh: line 53: $2: unbound variable
 === cost (exit=0) ===
 [cost] no usage data yet
 === db (exit=1) ===
