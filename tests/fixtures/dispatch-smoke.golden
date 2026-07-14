@@ -1,0 +1,96 @@
+=== alias (exit=1) ===
+<DIR>/lib/alias.sh: 列 5: $2: 未綁定的變數
+=== analyze (exit=1) ===
+[analyze] unknown option: --help
+=== ask (exit=1) ===
+[ask] unknown option: --help
+=== branch (exit=1) ===
+[branch] usage: mra branch status|new|switch|pr|merge ...
+=== ci (exit=1) ===
+[ci] unknown option: --help
+=== clean (exit=0) ===
+[clean] cleaning orphan containers
+[clean] removed 1 orphan container(s)
+[clean] no logs directory
+=== config (exit=1) ===
+<DIR>/lib/config.sh: 列 53: $2: 未綁定的變數
+=== cost (exit=0) ===
+[cost] no usage data yet
+=== db (exit=1) ===
+[db] unknown db command: --help (use: setup, status, import)
+=== deps (exit=1) ===
+[deps] 
+=== dev (exit=1) ===
+[dev] unknown option: --help
+=== diff (exit=0) ===
+PROJECT              BRANCH          UNPUSHED   UNCOMMIT   CHANGED FILES
+--------------------------------------------------------------------------------
+[diff] all projects clean
+=== doctor (exit=0) ===
+[doctor] === Basic Checks ===
+[check] git: ok
+[check] docker: ok
+=== eval-review (exit=1) ===
+[eval] unknown option: --help
+=== export (exit=1) ===
+[project-path] project name contains disallowed characters: --help
+[export] --help: refusing unsafe or missing project
+=== federation (exit=1) ===
+[federation] unknown federation command: --help (use: publish, subscribe, verify, list, fetch)
+=== graph (exit=0) ===
+
+Dependency Graph
+================
+=== init (exit=1) ===
+[mra] usage: mra init <path> --git-org <url>
+=== integration (exit=2) ===
+[integration] usage: mra integration describe|doctor|review
+=== lint (exit=1) ===
+[lint] --help: not found
+=== log (exit=0) ===
+[log] no logs found for --help
+=== notify (exit=1) ===
+[notify] usage: mra notify [setup|status|test]
+=== open (exit=1) ===
+[open] no IDE found (install VS Code or Cursor)
+=== plan (exit=1) ===
+[plan] unknown option: --help
+=== prd (exit=1) ===
+[prd] unknown option: --help
+=== prd-issues (exit=1) ===
+[prd] usage: mra prd-issues --req <REQ-ID> [--confirm] [--dry-run]
+=== prd-render (exit=1) ===
+[prd] prd_render_html: refusing source outside .collab: --help
+=== prd-scaffold (exit=1) ===
+[prd] usage: mra prd-scaffold --req <REQ-ID> [--confirm] [--dry-run]
+=== review (exit=1) ===
+[review] usage: mra review <project> [--pr <N>] [--base <ref>] [--working] [--personas] [--strategy S] [--no-debate]
+=== rollback (exit=1) ===
+[project-path] project name contains disallowed characters: --help
+=== scan (exit=1) ===
+[scan] no existing dep-graph, running full scan
+[scan] running walker: walk.py
+[scan] scanners found 0 relationship(s)
+=== setup (exit=1) ===
+[setup] --help: not found
+=== snapshot (exit=0) ===
+[snapshot] creating snapshot: --help
+[snapshot] snapshot '--help' created (0 projects)
+=== snapshots (exit=0) ===
+
+NAME                           TIMESTAMP                 PROJECTS
+--------------------------------------------------------------------------------
+=== status (exit=0) ===
+[status] workspace: null | last scan: never
+
+PROJECT              TYPE         BRANCH          CHANGES  STATUS
+=== sync (exit=1) ===
+[sync] unknown option: --help
+=== template (exit=1) ===
+[template] unknown template: --help (use: repos, db, deps, all)
+=== test (exit=1) ===
+[test] unknown option: --help
+=== test-audit (exit=1) ===
+[test-audit] unknown option: --help
+=== trust (exit=1) ===
+[project-path] project name contains disallowed characters: --help
