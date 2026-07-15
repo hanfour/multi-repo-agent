@@ -185,36 +185,7 @@ main() {
 
   case "$command" in
     integration)
-      shift
-      local subcommand="${1:-}"; [[ -n "$subcommand" ]] && shift
-      case "$subcommand" in
-        describe)
-          [[ "${1:-}" == "--json" || $# -eq 0 ]] || { log_error "usage: mra integration describe --json" "integration"; exit 2; }
-          review_protocol_describe
-          ;;
-        doctor)
-          local request_file=""
-          while [[ $# -gt 0 ]]; do
-            case "$1" in --request) request_file="${2:-}"; shift 2 ;; --json) shift ;; *) log_error "unknown integration doctor option: $1" "integration"; exit 2 ;; esac
-          done
-          [[ -n "$request_file" ]] || { log_error "usage: mra integration doctor --request FILE --json" "integration"; exit 2; }
-          review_protocol_doctor "$request_file"
-          ;;
-        review)
-          local request_file="" result_file="" events_file=""
-          while [[ $# -gt 0 ]]; do
-            case "$1" in
-              --request) request_file="${2:-}"; shift 2 ;;
-              --result) result_file="${2:-}"; shift 2 ;;
-              --events) events_file="${2:-}"; shift 2 ;;
-              *) log_error "unknown integration review option: $1" "integration"; exit 2 ;;
-            esac
-          done
-          [[ -n "$request_file" && -n "$result_file" ]] || { log_error "usage: mra integration review --request FILE --result FILE [--events FILE]" "integration"; exit 2; }
-          review_protocol_review "$request_file" "$result_file" "$events_file"
-          ;;
-        *) log_error "usage: mra integration describe|doctor|review" "integration"; exit 2 ;;
-      esac
+      cmd_integration "$@"
       ;;
 
     init)
@@ -321,38 +292,7 @@ main() {
       ;;
 
     db)
-      shift
-      local workspace
-      workspace=$(resolve_workspace)
-      local subcmd="${1:-status}"
-      shift 2>/dev/null || true
-      case "$subcmd" in
-        setup)
-          if db_json_exists "$workspace"; then
-            setup_all_databases "$workspace"
-          else
-            interactive_db_setup "$workspace"
-            if db_json_exists "$workspace"; then
-              setup_all_databases "$workspace"
-            fi
-          fi
-          ;;
-        status)
-          list_databases "$workspace"
-          ;;
-        import)
-          local db_name="${1:-}"
-          if [[ -z "$db_name" ]]; then
-            log_error "usage: mra db import <db_name>" "db"
-            exit 1
-          fi
-          reimport_database "$workspace" "$db_name"
-          ;;
-        *)
-          log_error "unknown db command: $subcmd (use: setup, status, import)" "db"
-          exit 1
-          ;;
-      esac
+      cmd_db "$@"
       ;;
 
     doctor)
@@ -556,41 +496,7 @@ main() {
       ;;
 
     federation)
-      shift
-      local workspace; workspace=$(resolve_workspace)
-      local subcmd="${1:-list}"; shift 2>/dev/null || true
-      case "$subcmd" in
-        publish)
-          [[ -z "${1:-}" ]] && { log_error "usage: mra federation publish <project>" "federation"; exit 1; }
-          publish_contract "$workspace" "$1"
-          ;;
-        subscribe)
-          [[ -z "${1:-}" ]] && { log_error "usage: mra federation subscribe <url-or-path>" "federation"; exit 1; }
-          subscribe_contract "$workspace" "$1"
-          ;;
-        verify)
-          verify_contracts "$workspace"
-          ;;
-        list)
-          list_contracts "$workspace"
-          ;;
-        fetch)
-          # Re-fetch all subscriptions
-          local subs_file; subs_file="$(get_contracts_dir "$workspace")/subscriptions.json"
-          if [[ -f "$subs_file" ]]; then
-            while IFS= read -r url; do
-              [[ -z "$url" ]] && continue
-              fetch_subscription "$workspace" "$url"
-            done < <(jq -r '.[].url' "$subs_file")
-          else
-            log_info "no subscriptions" "federation"
-          fi
-          ;;
-        *)
-          log_error "unknown federation command: $subcmd (use: publish, subscribe, verify, list, fetch)" "federation"
-          exit 1
-          ;;
-      esac
+      cmd_federation "$@"
       ;;
 
     notify)
@@ -618,218 +524,11 @@ main() {
       ;;
 
     sync)
-      shift
-      local safe=false push=false dry_run=false review=false json=false
-      while [[ $# -gt 0 ]]; do
-        case "$1" in
-          --safe) safe=true; shift ;;
-          --push) push=true; shift ;;
-          --dry-run) dry_run=true; shift ;;
-          --review) review=true; shift ;;
-          --json) json=true; shift ;;
-          *) log_error "unknown option: $1" "sync"; exit 1 ;;
-        esac
-      done
-      # mode flags are mutually exclusive
-      local mode_count=0
-      [[ "$safe" == "true" ]] && mode_count=$((mode_count+1))
-      [[ "$push" == "true" ]] && mode_count=$((mode_count+1))
-      [[ "$review" == "true" ]] && mode_count=$((mode_count+1))
-      if [[ "$mode_count" -gt 1 ]]; then
-        log_error "sync: choose only one of --safe / --push / --review" "sync"; exit 1
-      fi
-      if [[ "$dry_run" == "true" && "$push" != "true" ]]; then
-        log_error "sync: --dry-run only applies to --push" "sync"; exit 1
-      fi
-      if [[ "$json" == "true" && "$review" == "true" ]]; then
-        log_error "sync: --review does not support --json" "sync"; exit 1
-      fi
-      local workspace; workspace=$(resolve_workspace)
-      if [[ "$json" == "true" ]]; then
-        local rf; rf=$(mktemp)
-        export SYNC_RESULT_FILE="$rf"
-        local jrc=0
-        if [[ "$push" == "true" ]]; then
-          push_workspace "$workspace" "$dry_run" 1>&2 || jrc=$?
-        elif [[ "$safe" == "true" ]]; then
-          safe_sync_workspace "$workspace" 1>&2 || jrc=$?
-        else
-          local graph_file git_org
-          graph_file=$(get_dep_graph_path "$workspace")
-          git_org=$(jq -r '.gitOrg' "$graph_file")
-          sync_from_repos_json "$workspace" "$git_org" 1>&2 || jrc=$?
-        fi
-        unset SYNC_RESULT_FILE
-        local json_objs=() repo action okv obj
-        while IFS=$'\t' read -r repo action okv; do
-          [[ -z "$repo" ]] && continue
-          if obj=$(sync_result_json "$repo" "$action" "$okv"); then
-            json_objs+=("$obj")
-          else
-            log_error "sync: skipping malformed result record: $repo $action $okv" "sync" >&2
-          fi
-        done < "$rf"
-        rm -f "$rf"
-        if [[ ${#json_objs[@]} -eq 0 ]]; then
-          printf '[]\n'
-        else
-          printf '%s\n' "${json_objs[@]}" | jq -s '.'
-        fi
-        exit "$jrc"
-      fi
-      if [[ "$review" == "true" ]]; then
-        sync_review_workspace "$workspace"
-        exit $?
-      elif [[ "$push" == "true" ]]; then
-        push_workspace "$workspace" "$dry_run"
-        exit $?
-      elif [[ "$safe" == "true" ]]; then
-        safe_sync_workspace "$workspace"
-        exit $?
-      else
-        # Default: reproduce existing helper behavior as a public command.
-        local graph_file git_org
-        graph_file=$(get_dep_graph_path "$workspace")
-        git_org=$(jq -r '.gitOrg' "$graph_file")
-        sync_from_repos_json "$workspace" "$git_org"
-        exit $?
-      fi
+      cmd_sync "$@"
       ;;
 
     branch)
-      shift
-      local sub="${1:-}"; shift || true
-      case "$sub" in
-        status)
-          local show_all=false do_fetch=false json=false
-          while [[ $# -gt 0 ]]; do
-            case "$1" in
-              --all) show_all=true; shift ;;
-              --fetch) do_fetch=true; shift ;;
-              --json) json=true; shift ;;
-              *) log_error "unknown option: $1" "branch"; exit 1 ;;
-            esac
-          done
-          local workspace; workspace=$(resolve_workspace)
-          local shown=0 failed=0
-          local json_objs=()
-          [[ "$json" == "false" ]] && printf '%-20s %-24s %-5s%-5s%-5s %s\n' "REPO" "BRANCH" "AHEAD" "BEHIND" "DIRTY" "ACTION"
-          for dir in "$workspace"/*/; do
-            [[ ! -d "$dir" ]] && continue
-            local name; name=$(basename "$dir")
-            [[ "$name" == .* ]] && continue
-            should_skip_dir "$dir" && continue
-            if [[ "$do_fetch" == "true" ]]; then
-              if ! git -C "$dir" fetch --quiet 2>/dev/null; then
-                if [[ "$json" == "true" ]]; then
-                  log_error "$name: fetch failed" "branch" >&2
-                else
-                  log_error "$name: fetch failed" "branch"
-                fi
-                failed=$((failed+1))
-              fi
-            fi
-            local state on_default ahead behind dirty needs_attention
-            state=$(get_branch_state "$dir")
-            ahead=$(branch_state_get "$state" ahead)
-            behind=$(branch_state_get "$state" behind)
-            dirty=$(branch_state_get "$state" dirty)
-            if is_on_default_branch "$dir"; then on_default=true; else on_default=false; fi
-            if branch_row_needs_attention "$ahead" "$behind" "$dirty" "$on_default"; then needs_attention=true; else needs_attention=false; fi
-            if [[ "$json" == "true" ]]; then
-              json_objs+=("$(branch_state_json "$state" "$on_default" "$needs_attention")")
-            elif [[ "$show_all" == "true" || "$needs_attention" == "true" ]]; then
-              branch_format_row "$state"; printf '\n'; shown=$((shown+1))
-            fi
-          done
-          if [[ "$json" == "true" ]]; then
-            if [[ ${#json_objs[@]} -eq 0 ]]; then
-              printf '[]\n'
-            else
-              printf '%s\n' "${json_objs[@]}" | jq -s '.'
-            fi
-            [[ "$failed" -gt 0 ]] && exit 1
-            exit 0
-          fi
-          if [[ "$shown" -eq 0 && "$show_all" == "false" ]]; then
-            log_success "all repos clean and up to date" "branch"
-          fi
-          [[ "$failed" -gt 0 ]] && exit 1
-          exit 0
-          ;;
-        new)
-          local bname="${1:-}"; shift || true
-          if [[ -z "$bname" ]]; then log_error "usage: mra branch new <name> [repos...]" "branch"; exit 1; fi
-          local workspace; workspace=$(resolve_workspace)
-          create_branch_workspace "$workspace" "$bname" "$@"
-          exit $?
-          ;;
-        switch)
-          local bname="${1:-}"; shift || true
-          if [[ -z "$bname" ]]; then log_error "usage: mra branch switch <name>" "branch"; exit 1; fi
-          local workspace; workspace=$(resolve_workspace)
-          switch_branch_workspace "$workspace" "$bname"
-          exit $?
-          ;;
-        pr)
-          local base="" dry_run=false repos=()
-          while [[ $# -gt 0 ]]; do
-            case "$1" in
-              --base) if [[ $# -lt 2 ]]; then log_error "--base requires a ref" "branch"; exit 1; fi; base="$2"; shift 2 ;;
-              --dry-run) dry_run=true; shift ;;
-              -*) log_error "unknown option: $1" "branch"; exit 1 ;;
-              *) repos+=("$1"); shift ;;
-            esac
-          done
-          local workspace; workspace=$(resolve_workspace)
-          if [[ ${#repos[@]} -gt 0 ]]; then
-            if ! validate_repo_subset "$workspace" "${repos[@]}"; then exit 1; fi
-          fi
-          if ! check_gh_auth; then
-            log_error "branch pr requires gh authentication (run: gh auth login)" "branch"; exit 1
-          fi
-          pr_workspace "$workspace" "$base" "$dry_run" ${repos[@]+"${repos[@]}"}
-          exit $?
-          ;;
-        merge)
-          local strategy="merge" dry_run=false delete_branch=false wait_ci=false ci_timeout="" repos=()
-          while [[ $# -gt 0 ]]; do
-            case "$1" in
-              --strategy) if [[ $# -lt 2 ]]; then log_error "--strategy requires merge|squash|rebase" "branch"; exit 1; fi; strategy="$2"; shift 2 ;;
-              --dry-run) dry_run=true; shift ;;
-              --delete-branch) delete_branch=true; shift ;;
-              --wait-ci) wait_ci=true; shift ;;
-              --ci-timeout) if [[ $# -lt 2 ]]; then log_error "--ci-timeout requires a positive integer (seconds)" "branch"; exit 1; fi; ci_timeout="$2"; shift 2 ;;
-              -*) log_error "unknown option: $1" "branch"; exit 1 ;;
-              *) repos+=("$1"); shift ;;
-            esac
-          done
-          case "$strategy" in
-            merge|squash|rebase) ;;
-            *) log_error "branch merge: --strategy must be merge|squash|rebase" "branch"; exit 1 ;;
-          esac
-          # Validate CI flags post-parse (order-independent), before any side effect.
-          if [[ -n "$ci_timeout" && "$wait_ci" != "true" ]]; then
-            log_error "--ci-timeout requires --wait-ci" "branch"; exit 1
-          fi
-          if [[ -n "$ci_timeout" && ! "$ci_timeout" =~ ^[1-9][0-9]*$ ]]; then
-            log_error "--ci-timeout must be a positive integer (seconds): '$ci_timeout'" "branch"; exit 1
-          fi
-          local ci_wait_timeout=""
-          if [[ "$wait_ci" == "true" ]]; then ci_wait_timeout="${ci_timeout:-1800}"; fi
-          local workspace; workspace=$(resolve_workspace)
-          if [[ ${#repos[@]} -gt 0 ]]; then
-            if ! validate_repo_subset "$workspace" "${repos[@]}"; then exit 1; fi
-          fi
-          if ! check_gh_auth; then
-            log_error "branch merge requires gh authentication (run: gh auth login)" "branch"; exit 1
-          fi
-          merge_workspace "$workspace" "$strategy" "$dry_run" "$delete_branch" "$ci_wait_timeout" ${repos[@]+"${repos[@]}"}
-          exit $?
-          ;;
-        *)
-          log_error "usage: mra branch status|new|switch|pr|merge ..." "branch"; exit 1 ;;
-      esac
+      cmd_branch "$@"
       ;;
 
     review)
@@ -1018,31 +717,7 @@ main() {
       ;;
 
     test-audit)
-      shift
-      local audit_project="" audit_model="sonnet"
-      while [[ $# -gt 0 ]]; do
-        case "$1" in
-          --model)
-            [[ $# -lt 2 ]] && { log_error "--model requires a value" "test-audit"; exit 1; }
-            audit_model="$2"; shift 2 ;;
-          -*) log_error "unknown option: $1" "test-audit"; exit 1 ;;
-          *) audit_project="$1"; shift ;;
-        esac
-      done
-      if [[ -z "$audit_project" ]]; then
-        log_error "usage: mra test-audit <project> [--model M]" "test-audit"; exit 1
-      fi
-      local workspace; workspace=$(resolve_workspace)
-      local project_dir
-      project_dir=$(resolve_project_dir "$workspace" "$audit_project") || exit 1
-
-      local lang=""
-      lang=$(config_get "outputLanguage" 2>/dev/null); [[ "$lang" == "null" ]] && lang=""
-      local lang_directive=""; [[ -n "$lang" ]] && lang_directive="Use ${lang} for all output."
-
-      local add_dirs
-      add_dirs=$(build_add_dir_string "$project_dir")
-      run_test_audit "$audit_project" "$project_dir" "$audit_model" "$add_dirs" "$lang_directive"
+      cmd_test_audit "$@"
       ;;
 
     *)
