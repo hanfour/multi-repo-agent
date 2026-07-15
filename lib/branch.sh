@@ -107,3 +107,140 @@ branch_state_json() {
     --argjson needs_attention "$needs_attention" \
     '{repo:$repo, branch:$branch, upstream:$upstream, ahead:$ahead, behind:$behind, dirty:$dirty, sync_action:$sync_action, on_default:$on_default, needs_attention:$needs_attention}'
 }
+
+# branch command handler (extracted from bin/mra.sh dispatch, #16)
+cmd_branch() {
+      shift
+      local sub="${1:-}"; shift || true
+      case "$sub" in
+        status)
+          local show_all=false do_fetch=false json=false
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              --all) show_all=true; shift ;;
+              --fetch) do_fetch=true; shift ;;
+              --json) json=true; shift ;;
+              *) log_error "unknown option: $1" "branch"; exit 1 ;;
+            esac
+          done
+          local workspace; workspace=$(resolve_workspace)
+          local shown=0 failed=0
+          local json_objs=()
+          [[ "$json" == "false" ]] && printf '%-20s %-24s %-5s%-5s%-5s %s\n' "REPO" "BRANCH" "AHEAD" "BEHIND" "DIRTY" "ACTION"
+          for dir in "$workspace"/*/; do
+            [[ ! -d "$dir" ]] && continue
+            local name; name=$(basename "$dir")
+            [[ "$name" == .* ]] && continue
+            should_skip_dir "$dir" && continue
+            if [[ "$do_fetch" == "true" ]]; then
+              if ! git -C "$dir" fetch --quiet 2>/dev/null; then
+                if [[ "$json" == "true" ]]; then
+                  log_error "$name: fetch failed" "branch" >&2
+                else
+                  log_error "$name: fetch failed" "branch"
+                fi
+                failed=$((failed+1))
+              fi
+            fi
+            local state on_default ahead behind dirty needs_attention
+            state=$(get_branch_state "$dir")
+            ahead=$(branch_state_get "$state" ahead)
+            behind=$(branch_state_get "$state" behind)
+            dirty=$(branch_state_get "$state" dirty)
+            if is_on_default_branch "$dir"; then on_default=true; else on_default=false; fi
+            if branch_row_needs_attention "$ahead" "$behind" "$dirty" "$on_default"; then needs_attention=true; else needs_attention=false; fi
+            if [[ "$json" == "true" ]]; then
+              json_objs+=("$(branch_state_json "$state" "$on_default" "$needs_attention")")
+            elif [[ "$show_all" == "true" || "$needs_attention" == "true" ]]; then
+              branch_format_row "$state"; printf '\n'; shown=$((shown+1))
+            fi
+          done
+          if [[ "$json" == "true" ]]; then
+            if [[ ${#json_objs[@]} -eq 0 ]]; then
+              printf '[]\n'
+            else
+              printf '%s\n' "${json_objs[@]}" | jq -s '.'
+            fi
+            [[ "$failed" -gt 0 ]] && exit 1
+            exit 0
+          fi
+          if [[ "$shown" -eq 0 && "$show_all" == "false" ]]; then
+            log_success "all repos clean and up to date" "branch"
+          fi
+          [[ "$failed" -gt 0 ]] && exit 1
+          exit 0
+          ;;
+        new)
+          local bname="${1:-}"; shift || true
+          if [[ -z "$bname" ]]; then log_error "usage: mra branch new <name> [repos...]" "branch"; exit 1; fi
+          local workspace; workspace=$(resolve_workspace)
+          create_branch_workspace "$workspace" "$bname" "$@"
+          exit $?
+          ;;
+        switch)
+          local bname="${1:-}"; shift || true
+          if [[ -z "$bname" ]]; then log_error "usage: mra branch switch <name>" "branch"; exit 1; fi
+          local workspace; workspace=$(resolve_workspace)
+          switch_branch_workspace "$workspace" "$bname"
+          exit $?
+          ;;
+        pr)
+          local base="" dry_run=false repos=()
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              --base) if [[ $# -lt 2 ]]; then log_error "--base requires a ref" "branch"; exit 1; fi; base="$2"; shift 2 ;;
+              --dry-run) dry_run=true; shift ;;
+              -*) log_error "unknown option: $1" "branch"; exit 1 ;;
+              *) repos+=("$1"); shift ;;
+            esac
+          done
+          local workspace; workspace=$(resolve_workspace)
+          if [[ ${#repos[@]} -gt 0 ]]; then
+            if ! validate_repo_subset "$workspace" "${repos[@]}"; then exit 1; fi
+          fi
+          if ! check_gh_auth; then
+            log_error "branch pr requires gh authentication (run: gh auth login)" "branch"; exit 1
+          fi
+          pr_workspace "$workspace" "$base" "$dry_run" ${repos[@]+"${repos[@]}"}
+          exit $?
+          ;;
+        merge)
+          local strategy="merge" dry_run=false delete_branch=false wait_ci=false ci_timeout="" repos=()
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              --strategy) if [[ $# -lt 2 ]]; then log_error "--strategy requires merge|squash|rebase" "branch"; exit 1; fi; strategy="$2"; shift 2 ;;
+              --dry-run) dry_run=true; shift ;;
+              --delete-branch) delete_branch=true; shift ;;
+              --wait-ci) wait_ci=true; shift ;;
+              --ci-timeout) if [[ $# -lt 2 ]]; then log_error "--ci-timeout requires a positive integer (seconds)" "branch"; exit 1; fi; ci_timeout="$2"; shift 2 ;;
+              -*) log_error "unknown option: $1" "branch"; exit 1 ;;
+              *) repos+=("$1"); shift ;;
+            esac
+          done
+          case "$strategy" in
+            merge|squash|rebase) ;;
+            *) log_error "branch merge: --strategy must be merge|squash|rebase" "branch"; exit 1 ;;
+          esac
+          # Validate CI flags post-parse (order-independent), before any side effect.
+          if [[ -n "$ci_timeout" && "$wait_ci" != "true" ]]; then
+            log_error "--ci-timeout requires --wait-ci" "branch"; exit 1
+          fi
+          if [[ -n "$ci_timeout" && ! "$ci_timeout" =~ ^[1-9][0-9]*$ ]]; then
+            log_error "--ci-timeout must be a positive integer (seconds): '$ci_timeout'" "branch"; exit 1
+          fi
+          local ci_wait_timeout=""
+          if [[ "$wait_ci" == "true" ]]; then ci_wait_timeout="${ci_timeout:-1800}"; fi
+          local workspace; workspace=$(resolve_workspace)
+          if [[ ${#repos[@]} -gt 0 ]]; then
+            if ! validate_repo_subset "$workspace" "${repos[@]}"; then exit 1; fi
+          fi
+          if ! check_gh_auth; then
+            log_error "branch merge requires gh authentication (run: gh auth login)" "branch"; exit 1
+          fi
+          merge_workspace "$workspace" "$strategy" "$dry_run" "$delete_branch" "$ci_wait_timeout" ${repos[@]+"${repos[@]}"}
+          exit $?
+          ;;
+        *)
+          log_error "usage: mra branch status|new|switch|pr|merge ..." "branch"; exit 1 ;;
+      esac
+}

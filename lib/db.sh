@@ -648,3 +648,39 @@ list_databases() {
 
   printf "\n"
 }
+
+# db command handler (extracted from bin/mra.sh dispatch, #16)
+cmd_db() {
+      shift
+      local workspace
+      workspace=$(resolve_workspace)
+      local subcmd="${1:-status}"
+      shift 2>/dev/null || true
+      case "$subcmd" in
+        setup)
+          if db_json_exists "$workspace"; then
+            setup_all_databases "$workspace"
+          else
+            interactive_db_setup "$workspace"
+            if db_json_exists "$workspace"; then
+              setup_all_databases "$workspace"
+            fi
+          fi
+          ;;
+        status)
+          list_databases "$workspace"
+          ;;
+        import)
+          local db_name="${1:-}"
+          if [[ -z "$db_name" ]]; then
+            log_error "usage: mra db import <db_name>" "db"
+            exit 1
+          fi
+          reimport_database "$workspace" "$db_name"
+          ;;
+        *)
+          log_error "unknown db command: $subcmd (use: setup, status, import)" "db"
+          exit 1
+          ;;
+      esac
+}
