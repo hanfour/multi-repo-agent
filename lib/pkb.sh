@@ -167,7 +167,7 @@ pkb_incremental_update() {
     [[ -z "$file" ]] && continue
     # Extract module name from path (e.g., src/features/chat/... → chat)
     local module_name
-    module_name=$(_pkb_file_to_module "$file")
+    module_name=$(_pkb_file_to_module "$file" "$project_dir")
     [[ -z "$module_name" ]] && continue
     if [[ -z "${seen_modules[$module_name]+x}" ]]; then
       seen_modules["$module_name"]=1
