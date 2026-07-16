@@ -215,7 +215,7 @@ review_project() {
   local pkb_context="" use_pkb=false
   if pkb_exists "$project_dir"; then
     local relevant_modules
-    relevant_modules=$(pkb_modules_from_files "$changed_files_for_strategy")
+    relevant_modules=$(pkb_modules_from_files "$changed_files_for_strategy" "$project_dir")
     # Review uses "standard" tier: sitemap + conventions + architecture + api-surface
     # Module summaries loaded only by debate Agent B (full tier) when needed
     pkb_context=$(pkb_build_context "$project_dir" "$relevant_modules" "standard")

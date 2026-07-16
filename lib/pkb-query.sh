@@ -160,16 +160,17 @@ $(cat "$mod_file")
   echo "$context"
 }
 
-# Determine relevant modules from a list of changed files
+# Determine relevant modules from a list of changed files.
+# project_dir (optional) enables the fact-driven moduleMap lookup (issue #21).
 pkb_modules_from_files() {
-  local changed_files="$1"
+  local changed_files="$1" project_dir="${2:-}"
   local -A seen=()
   local result=""
 
   while IFS= read -r file; do
     [[ -z "$file" ]] && continue
     local mod
-    mod=$(_pkb_file_to_module "$file")
+    mod=$(_pkb_file_to_module "$file" "$project_dir")
     [[ -z "$mod" ]] && continue
     if [[ -z "${seen[$mod]+x}" ]]; then
       seen["$mod"]=1
@@ -182,9 +183,32 @@ pkb_modules_from_files() {
 
 # ---------------------------------------------------------------------------
 # Internal: Map file path → module name
+#
+# Fact-driven lookup first (issue #21): the moduleMap recorded at PKB
+# generation knows each module's ACTUAL directory, so non-standard layouts
+# resolve correctly; the longest matching prefix wins. The legacy path-regex
+# guesses remain as the fallback for map misses and pre-map PKBs.
 # ---------------------------------------------------------------------------
 _pkb_file_to_module() {
-  local file="$1"
+  local file="$1" project_dir="${2:-}"
+
+  if [[ -n "$project_dir" ]]; then
+    local map
+    map=$(jq -c '.moduleMap // {}' "$(pkb_dir "$project_dir")/meta.json" 2>/dev/null || echo '{}')
+    if [[ -n "$map" && "$map" != "{}" ]]; then
+      local best="" best_len=0 mod dir
+      while IFS=$'\t' read -r mod dir; do
+        [[ -n "$mod" && -n "$dir" ]] || continue
+        if [[ "$file" == "$dir"/* && ${#dir} -gt $best_len ]]; then
+          best="$mod"; best_len=${#dir}
+        fi
+      done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$map" 2>/dev/null)
+      if [[ -n "$best" ]]; then
+        echo "$best"
+        return
+      fi
+    fi
+  fi
 
   # Common patterns:
   # src/features/<module>/...  → module
@@ -216,6 +240,15 @@ _pkb_file_to_module() {
 
 _pkb_module_to_dir() {
   local project_dir="$1" module_name="$2"
+
+  # moduleMap first (issue #21): the recorded actual directory wins
+  local mapped
+  mapped=$(jq -r --arg m "$module_name" '.moduleMap[$m] // ""' \
+    "$(pkb_dir "$project_dir")/meta.json" 2>/dev/null || echo "")
+  if [[ -n "$mapped" && -d "$project_dir/$mapped" ]]; then
+    echo "$project_dir/$mapped"
+    return
+  fi
 
   # Try common patterns
   for pattern in \
