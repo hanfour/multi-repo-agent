@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- Codex review invocations are now bounded by a watchdog (`MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS`, default 900s, `0` disables): the child is killed with SIGALRM on timeout and the failure surfaces through the existing `REVIEW_INCOMPLETE`/fallback paths, so a hung or silently dying codex can never block `mra review` forever (#18). Codex also gets `/dev/null` stdin — it no longer blocks reading "additional input" from an inherited pipe that never closes.
 - Codex review auth file now lives for the whole codex invocation instead of being deleted after a fixed 1s TTL: the codex CLI re-reads `auth.json` on stream reconnects, so the early delete turned any transient relay drop into a guaranteed 401 → `REVIEW_INCOMPLETE` (#17). `MRA_CODEX_AUTH_FILE_TTL_SECONDS` is now opt-in for a hard deletion deadline, and the TTL timer is killed (not waited on) when codex exits, so a large TTL can no longer block the review after the child dies.
 
 ## [3.0.0] - 2026-07-14
