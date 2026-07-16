@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Codex review auth file now lives for the whole codex invocation instead of being deleted after a fixed 1s TTL: the codex CLI re-reads `auth.json` on stream reconnects, so the early delete turned any transient relay drop into a guaranteed 401 → `REVIEW_INCOMPLETE` (#17). `MRA_CODEX_AUTH_FILE_TTL_SECONDS` is now opt-in for a hard deletion deadline, and the TTL timer is killed (not waited on) when codex exits, so a large TTL can no longer block the review after the child dies.
+
 ## [3.0.0] - 2026-07-14
 
 ### Changed

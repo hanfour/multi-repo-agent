@@ -190,6 +190,26 @@ _review_without_github_credentials() {
       _review_copy_auth_file "$original_home/.claude/.credentials.json" "$model_home/.claude/.credentials.json"
     fi
     unset GH_TOKEN GITHUB_TOKEN
+    # Auth-file lifetime (issue #17): the codex CLI re-reads auth.json on
+    # stream reconnects, so the copied key must live for the whole invocation
+    # — it is removed right after the child exits (and by the EXIT trap). A
+    # fixed early-delete timer turned every transient relay drop into a
+    # guaranteed 401. MRA_CODEX_AUTH_FILE_TTL_SECONDS is now opt-in: set it to
+    # restore a hard deletion deadline (0 = delete immediately).
+    _codex_start_auth_deleter() {
+      local auth_file="$1"
+      [[ -n "${MRA_CODEX_AUTH_FILE_TTL_SECONDS:-}" ]] || return 0
+      ( sleep "$MRA_CODEX_AUTH_FILE_TTL_SECONDS"; rm -f "$auth_file" ) &
+      codex_auth_deleter=$!
+    }
+    # Kill the deleter instead of waiting it out: waiting on a still-sleeping
+    # TTL timer kept the review blocked long after codex exited (issue #18's
+    # wait-on-sleeper hang). The auth file is already removed by the caller.
+    _codex_stop_auth_deleter() {
+      [[ -n "$codex_auth_deleter" ]] || return 0
+      kill "$codex_auth_deleter" 2>/dev/null || true
+      wait "$codex_auth_deleter" 2>/dev/null || true
+    }
     export HOME="$model_home"
     export XDG_CONFIG_HOME="$model_home/.config"
     export GH_CONFIG_DIR="$model_home/gh"
@@ -199,21 +219,19 @@ _review_without_github_credentials() {
     if [[ "${MRA_REVIEW_AUTH_PROVIDER:-}" == "codex" ]]; then
       if ! command -v sandbox-exec >/dev/null 2>&1; then
         if [[ "${MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX:-}" == "1" ]]; then
-          ( sleep "${MRA_CODEX_AUTH_FILE_TTL_SECONDS:-1}"; rm -f "$codex_auth_file" ) &
-          codex_auth_deleter=$!
+          _codex_start_auth_deleter "$codex_auth_file"
           "$@" || rc=$?
           rm -f "$codex_auth_file"
-          [[ -z "$codex_auth_deleter" ]] || wait "$codex_auth_deleter" 2>/dev/null || true
+          _codex_stop_auth_deleter
           return "$rc"
         fi
         log_error "codex review requires sandbox-exec to block access to local credentials" "review" >&2
         return 1
       fi
-      ( sleep "${MRA_CODEX_AUTH_FILE_TTL_SECONDS:-1}"; rm -f "$codex_auth_file" ) &
-      codex_auth_deleter=$!
+      _codex_start_auth_deleter "$codex_auth_file"
       sandbox-exec -f "$codex_sandbox_profile" "$@" || rc=$?
       rm -f "$codex_auth_file"
-      [[ -z "$codex_auth_deleter" ]] || wait "$codex_auth_deleter" 2>/dev/null || true
+      _codex_stop_auth_deleter
     else
       "$@" || rc=$?
     fi
