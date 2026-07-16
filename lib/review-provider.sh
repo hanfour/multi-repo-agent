@@ -298,6 +298,22 @@ _review_toml_string_value() {
   ' "$file"
 }
 
+# Provider watchdog (issue #18): bound the codex invocation so a child that
+# hangs (stdin wait, wedged transport, silent death of a grandchild) can never
+# block the review forever. The wrapper is `perl -e 'alarm N; exec CMD'` —
+# alarm(2) survives execve, so SIGALRM lands on the final codex process after
+# N seconds and the shell sees rc 142; every existing failure path
+# (REVIEW_INCOMPLETE / fallback provider) then takes over. This helper only
+# validates the timeout value; 0 disables the wrapper entirely.
+_review_codex_watchdog_secs() {
+  local secs="${MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS:-900}"
+  if [[ "$secs" != "0" && ! "$secs" =~ ^[1-9][0-9]*$ ]]; then
+    log_warn "invalid MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS='$secs' — using 900" "review" >&2
+    secs=900
+  fi
+  printf '%s' "$secs"
+}
+
 _review_provider_codex_prompt() {
   local prompt="$1" system_prompt_file="${2:-}"
   if [[ -n "$system_prompt_file" && -f "$system_prompt_file" && ! -L "$system_prompt_file" ]]; then
@@ -362,7 +378,23 @@ _review_call_one_provider() {
       fi
       [[ -n "$model" ]] && args+=(--model "$model")
       args+=("$prompt")
-      MRA_REVIEW_AUTH_PROVIDER=codex _review_without_github_credentials "${MRA_CODEX_BIN:-codex}" "${args[@]}" >"$codex_stdout" || rc=$?
+      local watchdog_secs
+      watchdog_secs=$(_review_codex_watchdog_secs)
+      local -a codex_cmd=("${MRA_CODEX_BIN:-codex}")
+      if [[ "$watchdog_secs" != "0" ]]; then
+        if command -v perl >/dev/null 2>&1; then
+          codex_cmd=(perl -e 'my $t = shift @ARGV; alarm $t; exec { $ARGV[0] } @ARGV or exit 127;' "$watchdog_secs" "${codex_cmd[@]}")
+        else
+          log_warn "perl not found — codex watchdog disabled, invocation is unbounded" "review" >&2
+        fi
+      fi
+      # </dev/null: codex reads "additional input" from an inherited non-tty
+      # stdin and blocks until EOF the caller may never send (issue #18's
+      # observed freeze); the prompt travels as an argument, never stdin.
+      MRA_REVIEW_AUTH_PROVIDER=codex _review_without_github_credentials "${codex_cmd[@]}" "${args[@]}" >"$codex_stdout" </dev/null || rc=$?
+      if [[ "$rc" -eq 142 ]]; then
+        log_error "codex timed out after ${watchdog_secs}s and was killed (tune MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS; 0 disables the watchdog)" "review" >&2
+      fi
       if [[ "$stream" == "true" && -s "$codex_stdout" ]]; then
         cat "$codex_stdout" >&2
       fi
