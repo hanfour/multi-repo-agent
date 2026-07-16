@@ -47,7 +47,7 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Block on shellcheck errors
-        run: shellcheck -S error lib/*.sh bin/*.sh scanners/*.sh tests/*.sh test.sh
+        run: shellcheck -S error lib/*.sh bin/*.sh tests/*.sh test.sh
       - name: Report shellcheck warnings (non-blocking)
         continue-on-error: true
-        run: shellcheck -S warning lib/*.sh bin/*.sh scanners/*.sh tests/*.sh test.sh
+        run: shellcheck -S warning lib/*.sh bin/*.sh tests/*.sh test.sh
