@@ -39,7 +39,7 @@ make_project() {
 PROJ=$(mktemp -d); make_project "$PROJ"
 pkb_record_snapshot "$PROJ" 2>/dev/null
 out=$(pkb_build_context "$PROJ" "" "minimal")
-if echo "$out" | grep -q "PKB STALENESS"; then
+if echo "$out" | grep -q "^⚠️ PKB STALENESS:"; then
   fail "clean tree must have no staleness banner"
 else
   pass "clean tree has no staleness banner"
@@ -48,7 +48,7 @@ fi
 # --- 2. Uncommitted modification: banner names the file ---
 printf 'alpha changed\n' >> "$PROJ/a.txt"
 out=$(pkb_build_context "$PROJ" "" "minimal")
-if echo "$out" | grep -q "PKB STALENESS" && echo "$out" | grep -q "a.txt"; then
+if echo "$out" | grep -q "^⚠️ PKB STALENESS:" && echo "$out" | grep -q "a.txt"; then
   pass "uncommitted modification triggers banner naming a.txt"
 else
   fail "uncommitted modification: banner missing or file not named: $(echo "$out" | head -3)"
@@ -57,7 +57,7 @@ fi
 # --- 3. Committed drift (snapshot commit != HEAD): still stale ---
 git -C "$PROJ" add a.txt && git -C "$PROJ" commit -qm change
 out=$(pkb_build_context "$PROJ" "" "minimal")
-if echo "$out" | grep -q "PKB STALENESS" && echo "$out" | grep -q "a.txt"; then
+if echo "$out" | grep -q "^⚠️ PKB STALENESS:" && echo "$out" | grep -q "a.txt"; then
   pass "committed drift triggers banner naming a.txt"
 else
   fail "committed drift: banner missing or file not named"
@@ -66,7 +66,7 @@ fi
 # --- 4. Re-recording the snapshot (PKB refreshed) clears the banner ---
 pkb_record_snapshot "$PROJ" 2>/dev/null
 out=$(pkb_build_context "$PROJ" "" "minimal")
-if echo "$out" | grep -q "PKB STALENESS"; then
+if echo "$out" | grep -q "^⚠️ PKB STALENESS:"; then
   fail "re-recorded snapshot must clear the banner"
 else
   pass "re-recorded snapshot clears the banner"
@@ -75,7 +75,7 @@ fi
 # --- 5. Deletion is detected ---
 rm "$PROJ/b.txt"
 out=$(pkb_build_context "$PROJ" "" "minimal")
-if echo "$out" | grep -q "PKB STALENESS" && echo "$out" | grep -q "b.txt"; then
+if echo "$out" | grep -q "^⚠️ PKB STALENESS:" && echo "$out" | grep -q "b.txt"; then
   pass "deletion triggers banner naming b.txt"
 else
   fail "deletion: banner missing or file not named"
@@ -86,14 +86,14 @@ git -C "$PROJ" checkout -q -- b.txt
 printf 'gamma dirty\n' > "$PROJ/c.txt"   # untracked+dirty BEFORE snapshot
 pkb_record_snapshot "$PROJ" 2>/dev/null
 out=$(pkb_build_context "$PROJ" "" "minimal")
-if echo "$out" | grep -q "PKB STALENESS"; then
+if echo "$out" | grep -q "^⚠️ PKB STALENESS:"; then
   fail "file dirty at snapshot time but unchanged must not be stale"
 else
   pass "file dirty at snapshot time but unchanged is not stale"
 fi
 printf 'gamma changed again\n' > "$PROJ/c.txt"
 out=$(pkb_build_context "$PROJ" "" "minimal")
-if echo "$out" | grep -q "PKB STALENESS" && echo "$out" | grep -q "c.txt"; then
+if echo "$out" | grep -q "^⚠️ PKB STALENESS:" && echo "$out" | grep -q "c.txt"; then
   pass "dirty-at-snapshot file changed AGAIN is stale"
 else
   fail "dirty-at-snapshot file changed again: banner missing or file not named"
@@ -117,7 +117,7 @@ mkdir -p "$NOGIT/.mra/pkb/modules"
 echo '{"version":2,"lastUpdated":"2026-01-01T00:00:00Z"}' > "$NOGIT/.mra/pkb/meta.json"
 printf '**p** | app | x\n' > "$NOGIT/.mra/pkb/identity.md"
 out=$(pkb_build_context "$NOGIT" "" "minimal" 2>&1)
-if echo "$out" | grep -q "PKB STALENESS"; then
+if echo "$out" | grep -q "^⚠️ PKB STALENESS:"; then
   fail "non-git project must not emit a banner"
 else
   pass "non-git project: no banner, no crash"
