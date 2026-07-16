@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- PKB staleness banner (#20): PKB generation records a git snapshot (`snapshotCommit` + blob hashes of then-dirty files) in `meta.json`; `pkb_build_context` now prepends an explicit `⚠️ PKB STALENESS` banner naming files changed since — committed drift and working-tree edits, deletions included (capped list) — so agents read those files directly instead of silently consuming stale knowledge. Incremental updates gate on the snapshot diff (per-file, all languages) instead of the coarse directory-mtime check; non-git projects keep the mtime fallback.
+
 ### Fixed
 - Codex review invocations are now bounded by a watchdog (`MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS`, default 900s, `0` disables): the child is killed with SIGALRM on timeout and the failure surfaces through the existing `REVIEW_INCOMPLETE`/fallback paths, so a hung or silently dying codex can never block `mra review` forever (#18). Codex also gets `/dev/null` stdin — it no longer blocks reading "additional input" from an inherited pipe that never closes.
 - Codex review auth file now lives for the whole codex invocation instead of being deleted after a fixed 1s TTL: the codex CLI re-reads `auth.json` on stream reconnects, so the early delete turned any transient relay drop into a guaranteed 401 → `REVIEW_INCOMPLETE` (#17). `MRA_CODEX_AUTH_FILE_TTL_SECONDS` is now opt-in for a hard deletion deadline, and the TTL timer is killed (not waited on) when codex exits, so a large TTL can no longer block the review after the child dies.

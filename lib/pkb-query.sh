@@ -32,10 +32,30 @@ pkb_build_context() {
 
   local context=""
 
+  # --- Staleness banner (issue #20): never silently serve a stale PKB ---
+  # Files changed since the snapshot are named explicitly so the agent reads
+  # them directly and keeps trusting the PKB for everything else.
+  local stale_files
+  stale_files=$(pkb_stale_files "$project_dir" 2>/dev/null || true)
+  if [[ -n "$stale_files" ]]; then
+    local stale_count shown
+    stale_count=$(printf '%s\n' "$stale_files" | wc -l | tr -d '[:space:]')
+    shown=$(printf '%s\n' "$stale_files" | head -20)
+    context="⚠️ PKB STALENESS: ${stale_count} file(s) changed since this PKB was generated. Read these files directly instead of trusting PKB claims about them; the PKB is still reliable for everything else:
+${shown}"
+    if [[ "$stale_count" -gt 20 ]]; then
+      context="${context}
+(+$((stale_count - 20)) more)"
+    fi
+    context="${context}
+
+"
+  fi
+
   # --- L0: Identity (always loaded, ~50 tokens) ---
   local identity_file="$pkb/identity.md"
   if [[ -f "$identity_file" ]]; then
-    context="## Project Identity
+    context="${context}## Project Identity
 $(cat "$identity_file")
 "
   fi

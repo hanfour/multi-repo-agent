@@ -121,6 +121,91 @@ pkb_update_meta() {
 }
 
 # ---------------------------------------------------------------------------
+# Staleness snapshot (issue #20) — git blob-hash based
+#
+# At PKB generation/update time we record the HEAD commit plus a
+# path→blob-hash map of files that are dirty at that moment (their content is
+# exactly what the PKB just distilled). Later, pkb_stale_files() reports every
+# file that changed since — committed drift AND working-tree edits, including
+# deletions — so consumers can warn instead of silently serving stale
+# knowledge. Non-git projects keep the mtime fallback.
+# ---------------------------------------------------------------------------
+pkb_record_snapshot() {
+  local project_dir="$1" meta_file
+  meta_file="$(pkb_dir "$project_dir")/meta.json"
+  [[ -f "$meta_file" ]] || return 0
+  git -C "$project_dir" rev-parse HEAD >/dev/null 2>&1 || return 0
+
+  local head dirty_json
+  head=$(git -C "$project_dir" rev-parse HEAD)
+  dirty_json=$(_pkb_dirty_hashes "$project_dir")
+
+  local tmp
+  tmp=$(mktemp)
+  jq --arg c "$head" --argjson d "$dirty_json" \
+     '.snapshotCommit = $c | .snapshotDirty = $d' "$meta_file" > "$tmp" && mv "$tmp" "$meta_file"
+}
+
+# path→blob-hash JSON object for every file git reports as changed right now.
+# A deleted/missing path hashes to "" so a later change is distinguishable.
+_pkb_dirty_hashes() {
+  local project_dir="$1" path hash json="{}"
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if [[ -f "$project_dir/$path" ]]; then
+      hash=$(git -C "$project_dir" hash-object -- "$path" 2>/dev/null || echo "")
+    else
+      hash=""
+    fi
+    json=$(jq --arg k "$path" --arg v "$hash" '. + {($k): $v}' <<<"$json")
+  done < <(_pkb_git_dirty_paths "$project_dir")
+  printf '%s' "$json"
+}
+
+# Paths git currently reports as changed (staged, unstaged, untracked,
+# deleted). Rename entries yield the NEW path; porcelain quoting is stripped.
+_pkb_git_dirty_paths() {
+  local project_dir="$1" line path
+  git -C "$project_dir" status --porcelain 2>/dev/null | while IFS= read -r line; do
+    path="${line:3}"
+    path="${path##* -> }"
+    path="${path%\"}"; path="${path#\"}"
+    printf '%s\n' "$path"
+  done
+}
+
+# List files stale relative to the recorded snapshot: committed drift
+# (snapshotCommit..HEAD) plus current dirty files whose content differs from
+# what was dirty at snapshot time. Empty output = PKB fresh, or no
+# snapshot/no git (callers keep their mtime fallback in that case).
+pkb_stale_files() {
+  local project_dir="$1" meta_file
+  meta_file="$(pkb_dir "$project_dir")/meta.json"
+  [[ -f "$meta_file" ]] || return 0
+  git -C "$project_dir" rev-parse HEAD >/dev/null 2>&1 || return 0
+
+  local snap_commit snap_dirty
+  snap_commit=$(jq -r '.snapshotCommit // ""' "$meta_file" 2>/dev/null)
+  [[ -n "$snap_commit" ]] || return 0
+  snap_dirty=$(jq -c '.snapshotDirty // {}' "$meta_file" 2>/dev/null)
+
+  {
+    git -C "$project_dir" diff --name-only "$snap_commit" HEAD 2>/dev/null || true
+    local path hash recorded
+    while IFS= read -r path; do
+      [[ -z "$path" ]] && continue
+      if [[ -f "$project_dir/$path" ]]; then
+        hash=$(git -C "$project_dir" hash-object -- "$path" 2>/dev/null || echo "")
+      else
+        hash=""
+      fi
+      recorded=$(jq -r --arg k "$path" '.[$k] // "__absent__"' <<<"$snap_dirty")
+      [[ "$hash" == "$recorded" ]] || printf '%s\n' "$path"
+    done < <(_pkb_git_dirty_paths "$project_dir")
+  } | sort -u
+}
+
+# ---------------------------------------------------------------------------
 # Record source file mtimes for incremental change detection
 # Stores mtime of key source dirs in meta.json
 # ---------------------------------------------------------------------------
