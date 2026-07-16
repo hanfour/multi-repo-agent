@@ -101,8 +101,9 @@ pkb_generate() {
   log_progress "[phase 3] generating tunnel links..." "pkb"
   _pkb_generate_tunnels "$pkb"
 
-  # --- Phase 4: Record source file mtimes for incremental updates ---
+  # --- Phase 4: Record change-detection baselines for incremental updates ---
   _pkb_record_mtimes "$project_dir" "$pkb"
+  pkb_record_snapshot "$project_dir"
 
   # Finalize
   pkb_update_meta "$project_dir"
@@ -131,12 +132,23 @@ pkb_incremental_update() {
     return 1
   fi
 
-  # mtime check: skip update if no source files changed
+  # Change gate: prefer the git blob-hash snapshot (precise: per-file, catches
+  # deletions, all languages — issue #20); fall back to the coarse mtime check
+  # for non-git projects or pre-snapshot PKBs.
   local changed_areas
-  changed_areas=$(_pkb_check_mtimes "$project_dir")
-  if [[ -z "$changed_areas" ]]; then
-    log_info "no source changes detected (mtime), skipping PKB update" "pkb"
-    return 0
+  if git -C "$project_dir" rev-parse HEAD >/dev/null 2>&1 && \
+     jq -e '.snapshotCommit' "$pkb/meta.json" >/dev/null 2>&1; then
+    changed_areas=$(pkb_stale_files "$project_dir")
+    if [[ -z "$changed_areas" ]]; then
+      log_info "no source changes detected (snapshot), skipping PKB update" "pkb"
+      return 0
+    fi
+  else
+    changed_areas=$(_pkb_check_mtimes "$project_dir")
+    if [[ -z "$changed_areas" ]]; then
+      log_info "no source changes detected (mtime), skipping PKB update" "pkb"
+      return 0
+    fi
   fi
 
   # If config files changed, regenerate conventions
@@ -206,8 +218,9 @@ pkb_incremental_update() {
   # Regenerate tunnels after module updates
   _pkb_generate_tunnels "$pkb"
 
-  # Record new mtimes
+  # Record new change-detection baselines
   _pkb_record_mtimes "$project_dir" "$pkb"
+  pkb_record_snapshot "$project_dir"
 
   pkb_update_meta "$project_dir"
   log_success "PKB updated for modules:$affected_modules" "pkb"
