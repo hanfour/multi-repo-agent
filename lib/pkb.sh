@@ -240,20 +240,29 @@ pkb_capture_decisions() {
   local conventions_file="$pkb/conventions.md"
   [[ ! -f "$conventions_file" ]] && return
 
+  # Provenance tag (issue #22): every machine-distilled decision records where
+  # it came from, so entries are auditable and safely cleanable later —
+  # mirroring codegraph's provenance/synthesizedBy discipline on heuristic edges.
+  local short_sha source_tag
+  short_sha=$(git -C "$project_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  source_tag="source:review@${short_sha} $(date +%Y-%m-%d)"
+
   # Extract CRITICAL and HIGH findings that reveal project conventions
   local decisions
-  decisions=$(echo "$review_json" | jq -r '
+  decisions=$(echo "$review_json" | jq -r --arg tag "$source_tag" '
     .comments[]? |
     select(.severity == "CRITICAL" or .severity == "HIGH") |
-    "[DECISION] \(.body | split("\n")[0])"
+    "[DECISION \($tag)] \(.body | split("\n")[0])"
   ' 2>/dev/null || true)
 
   if [[ -n "$decisions" && "$decisions" != "null" ]]; then
-    # Append new decisions if not already present
+    # Append new decisions if not already present — dedup compares the BODY
+    # text (never the source tag), so a re-review of the same finding, or a
+    # legacy untagged copy, is not duplicated.
     while IFS= read -r decision; do
       [[ -z "$decision" ]] && continue
-      # Check if this decision already exists
-      if ! grep -qF "$(echo "$decision" | cut -c13-50)" "$conventions_file" 2>/dev/null; then
+      local body="${decision#*\] }"
+      if ! grep -qF "$(echo "$body" | cut -c1-40)" "$conventions_file" 2>/dev/null; then
         echo "$decision" >> "$conventions_file"
       fi
     done <<< "$decisions"

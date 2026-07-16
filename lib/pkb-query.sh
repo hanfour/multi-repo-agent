@@ -65,7 +65,9 @@ $(cat "$identity_file")
   local conventions_file="$pkb/conventions.md"
   if [[ -f "$conventions_file" ]]; then
     local essential
-    essential=$(grep -E '^\[CONVENTION\]|^\[PATTERN\]|^\[DECISION\]|^## |^# ' "$conventions_file" 2>/dev/null || true)
+    # Tag prefixes match with or without a provenance suffix, e.g. both
+    # "[DECISION]" and "[DECISION source:review@abc 2026-07-16]" (issue #22).
+    essential=$(grep -E '^\[CONVENTION[] ]|^\[PATTERN[] ]|^\[DECISION[] ]|^## |^# ' "$conventions_file" 2>/dev/null || true)
     if [[ -n "$essential" ]]; then
       context="${context}
 ## Essential Conventions
