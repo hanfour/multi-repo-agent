@@ -615,6 +615,8 @@ are tunable:
 | `MRA_REVIEW_AGENT_MAX_TURNS` | `20` | Turn budget for each **debate** agent (Impact Analyst / Quality Auditor / verifier). |
 | `MRA_REVIEW_PERSONA_MAX_TURNS` | `8` | Turn budget for each **persona** reviewer. |
 | `MRA_REVIEW_VERIFY_APPROVE` | `1` | When both debate agents approve, an adversarial third reviewer re-checks before approving. Set `0` to skip. |
+| `MRA_CODEX_AUTH_FILE_TTL_SECONDS` | unset | Opt-in hard deletion deadline for the transient Codex auth copy. Unset (default), the copy lives for the invocation (Codex re-reads it on stream reconnects) and is removed as soon as the child exits. |
+| `MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS` | `900` | Watchdog for each Codex invocation: the child is killed (SIGALRM) after this many seconds so a hung provider can never block the review forever. `0` disables. |
 
 ---
 

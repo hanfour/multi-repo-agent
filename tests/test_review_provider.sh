@@ -127,7 +127,7 @@ case "$rec" in *"env_key="*) fail "codex received env_key credential config: $re
 case "$rec" in *"/untrusted"*) fail "codex inherited project trust config" ;; *) pass "codex does not inherit project trust config" ;; esac
 case "$rec" in *"proxy-token=unset"*) pass "codex parent does not receive proxy token env" ;; *) fail "codex parent received proxy token env: $rec" ;; esac
 case "$rec" in *"real-key=unset"*) pass "codex parent does not receive the real API key" ;; *) fail "codex parent received real API key: $rec" ;; esac
-case "$rec" in *"auth=absent"*) pass "codex auth file is deleted before model tool execution" ;; *) fail "codex auth file exposed during model execution: $rec" ;; esac
+case "$rec" in *"auth=absent"*) pass "opt-in TTL deletes codex auth file during model execution" ;; *) fail "opt-in TTL left codex auth file exposed: $rec" ;; esac
 if command -v sandbox-exec >/dev/null 2>&1; then
   case "$rec" in *"orig-auth=blocked"*) pass "codex OS sandbox blocks original auth file" ;; *) fail "codex OS sandbox did not block original auth file: $rec" ;; esac
   case "$rec" in *"proc-env=hidden"*) pass "codex OS sandbox blocks ps environment inspection" ;; *) fail "codex OS sandbox exposed process environment: $rec" ;; esac
