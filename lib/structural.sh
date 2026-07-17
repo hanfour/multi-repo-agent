@@ -17,6 +17,12 @@
 #   config structural.provider      auto | off (default auto)
 
 structural_provider() {
+  # Env seam wins over config — lets the ablation harness (issue #27) and
+  # one-shot debugging toggle the layer without touching config.json.
+  if [[ -n "${MRA_STRUCTURAL_PROVIDER:-}" ]]; then
+    printf '%s' "$MRA_STRUCTURAL_PROVIDER"
+    return 0
+  fi
   local v
   v=$(config_get "structural.provider" 2>/dev/null) || v=""
   [[ "$v" == "null" || -z "$v" ]] && v="auto"

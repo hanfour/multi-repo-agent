@@ -209,16 +209,27 @@ _eval_run_review() {
     "$project_type" "$consumers" "$deps" "$has_api_change" \
     "$output_language" "inline" "range" "${resolved_base}...HEAD")
 
-  # PKB context
+  local changed_files
+  changed_files=$(review_diff_files "$project_dir" range "${resolved_base}...HEAD")
+
+  # PKB context (MRA_EVAL_DISABLE_PKB=1 = the ablation off-arm, issue #27)
   local pkb_ctx=""
-  if pkb_exists "$project_dir"; then
-    local changed_files
-    changed_files=$(review_diff_files "$project_dir" range "${resolved_base}...HEAD")
+  if [[ "${MRA_EVAL_DISABLE_PKB:-}" != "1" ]] && pkb_exists "$project_dir"; then
     local relevant_modules
     relevant_modules=$(pkb_modules_from_files "$changed_files" "$project_dir")
     pkb_ctx=$(pkb_build_context "$project_dir" "$relevant_modules" "standard")
   fi
 
+  # Structural context — mirrors the mra review injection (#25); best-effort,
+  # empty without codegraph, disable via MRA_STRUCTURAL_PROVIDER=off.
+  local structural_ctx=""
+  structural_ctx=$(structural_review_context "$project_dir" "$changed_files" 2>/dev/null) || structural_ctx=""
+
+  if [[ -n "$structural_ctx" ]]; then
+    prompt="${structural_ctx}
+
+${prompt}"
+  fi
   if [[ -n "$pkb_ctx" ]]; then
     prompt="${pkb_ctx}
 
