@@ -22,6 +22,7 @@ BIN=$(mktemp -d)
 cat > "$BIN/codegraph" <<'STUB'
 #!/usr/bin/env bash
 case "$1" in
+  files)    echo '[{"path":"src/auth.ts","nodeCount":5},{"path":"src/session.ts","nodeCount":3},{"path":"config.yml","nodeCount":0}]' ;;
   explore)  echo "SYMBOL handleLogin (src/auth.ts) ← called by SessionController.create" ;;
   affected) cat >/dev/null; printf 'tests/auth.test.ts\ntests/session.test.ts\n' ;;
   *) exit 2 ;;
@@ -68,7 +69,38 @@ out=$(MRA_CODEGRAPH_BIN="$BIN/nonexistent" structural_review_context "$PROJ" "$C
 out=$(MRA_CODEGRAPH_BIN="$BIN/codegraph" structural_review_context "$PROJ" "" 2>&1) || true
 [[ -z "$out" ]] && pass "empty change set: empty" || fail "empty changes leaked: $out"
 
-# --- 5. review.sh wires the section into the review context ---
+# --- 5. Out-of-index diff yields empty (no loose-match noise injection) ---
+# Live finding from the mra-repo ablation: codegraph cannot parse bash, so a
+# bash diff got 8KB of loosely-matched TS symbols. If the graph has symbols
+# for NONE of the changed files, the section must be empty.
+cat > "$BIN/codegraph" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  files)    echo '[{"path":"other/unrelated.ts","nodeCount":9},{"path":"lib/review.sh","nodeCount":0}]' ;;
+  explore)  echo "LOOSE-MATCH noise that must not be injected" ;;
+  affected) cat >/dev/null; echo "tests/loose.test.ts" ;;
+  *) exit 2 ;;
+esac
+STUB
+chmod +x "$BIN/codegraph"
+out=$(MRA_CODEGRAPH_BIN="$BIN/codegraph" structural_review_context "$PROJ" $'lib/review.sh\nlib/pkb.sh' 2>&1) || true
+[[ -z "$out" ]] && pass "no indexed changed file (incl. nodeCount=0): empty section" || fail "out-of-index diff leaked: $(echo "$out" | head -2)"
+
+# --- 6. files-listing failure fails OPEN (legacy behaviour preserved) ---
+cat > "$BIN/codegraph" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  files)    exit 3 ;;
+  explore)  echo "SYMBOL handleLogin (src/auth.ts)" ;;
+  affected) cat >/dev/null; echo "tests/auth.test.ts" ;;
+  *) exit 2 ;;
+esac
+STUB
+chmod +x "$BIN/codegraph"
+out=$(MRA_CODEGRAPH_BIN="$BIN/codegraph" structural_review_context "$PROJ" "$CHANGED")
+echo "$out" | grep -q "handleLogin" && pass "files-listing failure fails open (section kept)" || fail "fail-open broken: $(echo "$out" | head -2)"
+
+# --- 7. review.sh wires the section into the review context ---
 grep -q "structural_review_context" "$SCRIPT_DIR/lib/review.sh" \
   && pass "review.sh consumes structural_review_context" \
   || fail "review.sh does not reference structural_review_context"
