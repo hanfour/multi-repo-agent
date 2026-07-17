@@ -99,7 +99,7 @@ pkb_generate() {
 
   # --- Phase 3: Generate tunnel links (cross-module references) ---
   log_progress "[phase 3] generating tunnel links..." "pkb"
-  _pkb_generate_tunnels "$pkb"
+  _pkb_generate_tunnels "$pkb" "$project_dir"
 
   # --- Phase 4: Record change-detection baselines for incremental updates ---
   _pkb_record_mtimes "$project_dir" "$pkb"
@@ -216,7 +216,7 @@ pkb_incremental_update() {
   fi
 
   # Regenerate tunnels after module updates
-  _pkb_generate_tunnels "$pkb"
+  _pkb_generate_tunnels "$pkb" "$project_dir"
 
   # Record new change-detection baselines
   _pkb_record_mtimes "$project_dir" "$pkb"

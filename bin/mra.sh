@@ -30,6 +30,7 @@ source "$MRA_DIR/lib/alias.sh"
 source "$MRA_DIR/lib/cleanup.sh"
 source "$MRA_DIR/lib/db.sh"
 source "$MRA_DIR/lib/doctor.sh"
+source "$MRA_DIR/lib/structural.sh"
 source "$MRA_DIR/lib/scan.sh"
 source "$MRA_DIR/lib/ask.sh"
 source "$MRA_DIR/lib/export.sh"
@@ -581,6 +582,7 @@ main() {
       local output_language=""
       output_language=$(config_get "outputLanguage" 2>/dev/null)
       [[ -z "$output_language" || "$output_language" == "null" ]] && output_language=""
+      structural_analyze_hint "$project" "$project_dir"
       pkb_generate "$project" "$project_dir" "$model" "$output_language"
       ;;
 

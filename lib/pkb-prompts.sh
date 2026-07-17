@@ -386,51 +386,43 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Tunnel linking: detect shared entities across module summaries
-# Creates tunnels.md with cross-reference map
+# Tunnel linking: shared entities across module summaries → tunnels.md
+#
+# Issue #26: the capitalized-word scan is only a PROPOSER. When a codegraph
+# index is available, each candidate is verified against the symbol graph
+# (query) and its referencing modules come from real call edges (callers) —
+# noise words never survive. Without codegraph (or if it fails) the legacy
+# heuristic table is written unchanged.
 # ---------------------------------------------------------------------------
 _pkb_generate_tunnels() {
-  local pkb="$1"
+  local pkb="$1" project_dir="${2:-}"
   local tunnels_file="$pkb/tunnels.md"
-  local -A entity_modules=()
 
-  # Scan all module summaries for entity references
-  for mod_file in "$pkb"/modules/*.md; do
-    [[ -f "$mod_file" && -s "$mod_file" ]] || continue
-    local mod_name
-    mod_name=$(basename "$mod_file" .md)
+  if [[ -n "$project_dir" ]] && type structural_available &>/dev/null \
+      && structural_available "$project_dir"; then
+    if _pkb_generate_tunnels_structural "$pkb" "$project_dir"; then
+      return 0
+    fi
+    log_info "[tunnels] codegraph path unavailable — falling back to heuristic scan" "pkb"
+  fi
 
-    # Extract capitalized entity names (likely types/components)
-    local entities
-    entities=$(grep -oE '\b[A-Z][a-zA-Z]{2,}\b' "$mod_file" 2>/dev/null | sort -u || true)
-    while IFS= read -r entity; do
-      [[ -z "$entity" ]] && continue
-      # Skip common noise words
-      case "$entity" in
-        Module|Purpose|Name|Type|Table|Key|Components|Dependencies|Internal|External|Business|Rules|Gotchas) continue ;;
-      esac
-      if [[ -n "${entity_modules[$entity]+x}" ]]; then
-        entity_modules["$entity"]="${entity_modules[$entity]}, $mod_name"
-      else
-        entity_modules["$entity"]="$mod_name"
-      fi
-    done <<< "$entities"
-  done
-
-  # Write tunnels (only entities appearing in 2+ modules)
+  # Legacy heuristic path: entities appearing in 2+ module summaries
+  local candidates
+  candidates=$(_pkb_tunnel_candidates "$pkb")
   local has_tunnels=false
   {
     echo "# Cross-Module References (Tunnels)"
     echo ""
     echo "| Entity | Modules |"
     echo "|--------|---------|"
-    for entity in $(echo "${!entity_modules[@]}" | tr ' ' '\n' | sort); do
-      local modules="${entity_modules[$entity]}"
-      if [[ "$modules" == *","* ]]; then
+    if [[ -n "$candidates" ]]; then
+      local entity modules
+      while IFS=$'\t' read -r entity modules; do
+        [[ -z "$entity" ]] && continue
         echo "| ${entity} | ${modules} |"
         has_tunnels=true
-      fi
-    done
+      done <<< "$candidates"
+    fi
   } > "$tunnels_file"
 
   if [[ "$has_tunnels" == "true" ]]; then
@@ -442,6 +434,91 @@ _pkb_generate_tunnels() {
     rm -f "$tunnels_file"
     log_info "[tunnels] no cross-module references found" "pkb"
   fi
+}
+
+# Entities appearing in 2+ module summaries, one per line: "entity<TAB>mod1, mod2".
+_pkb_tunnel_candidates() {
+  local pkb="$1"
+  local -A entity_modules=()
+
+  for mod_file in "$pkb"/modules/*.md; do
+    [[ -f "$mod_file" && -s "$mod_file" ]] || continue
+    local mod_name
+    mod_name=$(basename "$mod_file" .md)
+
+    local entities
+    entities=$(grep -oE '\b[A-Z][a-zA-Z]{2,}\b' "$mod_file" 2>/dev/null | sort -u || true)
+    while IFS= read -r entity; do
+      [[ -z "$entity" ]] && continue
+      case "$entity" in
+        Module|Purpose|Name|Type|Table|Key|Components|Dependencies|Internal|External|Business|Rules|Gotchas) continue ;;
+      esac
+      if [[ -n "${entity_modules[$entity]+x}" ]]; then
+        entity_modules["$entity"]="${entity_modules[$entity]}, $mod_name"
+      else
+        entity_modules["$entity"]="$mod_name"
+      fi
+    done <<< "$entities"
+  done
+
+  local entity
+  for entity in $(echo "${!entity_modules[@]}" | tr ' ' '\n' | sort); do
+    [[ "${entity_modules[$entity]}" == *","* ]] || continue
+    printf '%s\t%s\n' "$entity" "${entity_modules[$entity]}"
+  done
+}
+
+# codegraph-verified tunnels. Returns 1 (caller falls back) when there are no
+# candidates or the CLI never answered; returns 0 when the graph answered —
+# even if it found no cross-module references (that is a real answer).
+_pkb_generate_tunnels_structural() {
+  local pkb="$1" project_dir="$2"
+  local tunnels_file="$pkb/tunnels.md"
+
+  local candidates
+  candidates=$(_pkb_tunnel_candidates "$pkb" | cut -f1 | head -30)
+  [[ -n "$candidates" ]] || return 1
+
+  local any_query_ok=false rows="" entity
+  while IFS= read -r entity; do
+    [[ -z "$entity" ]] && continue
+    local def_json def_file def_mod
+    def_json=$(structural_query "$project_dir" "$entity" 2>/dev/null) || continue
+    any_query_ok=true
+    def_file=$(jq -r 'first(.. | objects | .file? // empty)' <<<"$def_json" 2>/dev/null || true)
+    [[ -n "$def_file" && "$def_file" != "null" ]] || continue
+    def_mod=$(_pkb_file_to_module "$def_file" "$project_dir")
+    [[ -n "$def_mod" ]] || continue
+
+    local callers_json ref_mods
+    callers_json=$(structural_callers "$project_dir" "$entity" 2>/dev/null) || callers_json=""
+    ref_mods=$(jq -r '.. | objects | .file? // empty' <<<"$callers_json" 2>/dev/null | while IFS= read -r f; do
+        [[ -n "$f" ]] && _pkb_file_to_module "$f" "$project_dir"
+      done | grep -v '^$' | sort -u | grep -vx "$def_mod" | paste -sd ',' - | sed 's/,/, /g')
+    [[ -n "$ref_mods" ]] || continue
+
+    rows="${rows}| ${entity} | ${def_mod} | ${ref_mods} |
+"
+  done <<< "$candidates"
+
+  [[ "$any_query_ok" == "true" ]] || return 1
+
+  if [[ -n "$rows" ]]; then
+    {
+      echo "# Cross-Module References (Tunnels)"
+      echo ""
+      echo "source: codegraph (symbol-verified; referencing modules from real call edges)"
+      echo ""
+      echo "| Entity | Defined in | Referenced by |"
+      echo "|--------|------------|---------------|"
+      printf '%s' "$rows"
+    } > "$tunnels_file"
+    log_info "[tunnels] $(printf '%s' "$rows" | grep -c '^|') codegraph-verified cross-module references" "pkb"
+  else
+    rm -f "$tunnels_file"
+    log_info "[tunnels] no codegraph-verified cross-module references" "pkb"
+  fi
+  return 0
 }
 
 _pkb_update_sitemap() {

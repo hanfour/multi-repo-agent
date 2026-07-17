@@ -516,6 +516,22 @@ doctor_security() {
 }
 
 # Warn if the issue-create gate could be bypassed by a tool allowlist.
+# Advisory (issue #23): report codegraph presence and per-project index
+# coverage so operators can see where symbol-level context is available.
+_doctor_check_structural() {
+  local workspace="$1"
+  command -v "${MRA_CODEGRAPH_BIN:-codegraph}" >/dev/null 2>&1 || return 0
+  local graph_file="$workspace/.collab/dep-graph.json"
+  [[ -f "$graph_file" ]] || return 0
+  local total=0 indexed=0 project
+  while IFS= read -r project; do
+    [[ -z "$project" ]] && continue
+    total=$((total + 1))
+    [[ -d "$workspace/$project/.codegraph" ]] && indexed=$((indexed + 1))
+  done < <(jq -r '.projects | keys[]' "$graph_file" 2>/dev/null)
+  log_info "structural: codegraph CLI present — $indexed/$total projects indexed (.codegraph/); unindexed ones can run 'codegraph init'" "doctor"
+}
+
 _doctor_check_prd_allowlist() {
   local f hit=""
   for f in "$HOME/.claude/settings.json" ".claude/settings.json"; do
@@ -587,6 +603,10 @@ run_doctor() {
 
   # PRD allowlist gate check (does not affect pass/fail counts — advisory only)
   _doctor_check_prd_allowlist
+
+  # Structural layer visibility (issue #23) — advisory only: the layer is
+  # optional, so absence is never a finding.
+  _doctor_check_structural "$workspace"
 
   # Summary
   log_info "=== Summary ===" "doctor"
