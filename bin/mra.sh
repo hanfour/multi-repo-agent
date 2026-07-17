@@ -75,6 +75,8 @@ source "$MRA_DIR/lib/pkb-cache.sh"
 source "$MRA_DIR/lib/pkb-query.sh"
 source "$MRA_DIR/lib/pkb-prompts.sh"
 source "$MRA_DIR/lib/eval.sh"
+source "$MRA_DIR/lib/eval-probe.sh"
+source "$MRA_DIR/lib/eval-ablation.sh"
 source "$MRA_DIR/lib/dev-agent.sh"
 source "$MRA_DIR/lib/dev.sh"
 source "$MRA_DIR/lib/prd.sh"
@@ -137,6 +139,8 @@ Commands:
   test-audit <project> [--model M]     Audit tests vs Kent Beck 11 principles
   analyze <project> [--model M]        Generate/update project knowledge base (PKB)
   eval-review <project> --pr <N> [--baseline <file>] [--strategy S]  Score AI review against a human baseline
+  eval-probe [--out <file>]            Deterministic PKB probe (no LLM): fixed cases, SHA-stamped report
+  eval-ablation <project> [--base R] [--pr N] [--model M]  Run 2x2 PKB/structural ablation arms
   --all                         Load all projects
   <project...>                  Load specific projects
 
@@ -716,6 +720,17 @@ main() {
       shift
       local workspace; workspace=$(resolve_workspace)
       eval_review "$workspace" "$@"
+      ;;
+
+    eval-probe)
+      shift
+      eval_pkb_probe "$@"
+      ;;
+
+    eval-ablation)
+      shift
+      local workspace; workspace=$(resolve_workspace)
+      eval_pkb_ablation "$workspace" "$@"
       ;;
 
     test-audit)
