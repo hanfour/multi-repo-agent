@@ -223,6 +223,21 @@ _pkb_generate_modules() {
 
   log_info "found ${#modules[@]} modules to analyze" "pkb"
 
+  # Record each module's ACTUAL directory into meta.json (issue #21) so
+  # file→module lookup is fact-driven instead of path-regex guessing.
+  local map_json="{}"
+  for entry in "${modules[@]}"; do
+    local m_name="${entry%%:*}" m_dir="${entry#*:}"
+    map_json=$(jq --arg k "$m_name" --arg v "${m_dir#"$project_dir"/}" '. + {($k): $v}' <<<"$map_json")
+  done
+  local meta_tmp
+  meta_tmp=$(mktemp)
+  if jq --argjson m "$map_json" '.moduleMap = $m' "$pkb/meta.json" > "$meta_tmp" 2>/dev/null; then
+    mv "$meta_tmp" "$pkb/meta.json"
+  else
+    rm -f "$meta_tmp"
+  fi
+
   # Generate module summaries (batch 3 at a time to avoid overloading)
   local batch_size=3
   local i=0

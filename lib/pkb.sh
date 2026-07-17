@@ -101,8 +101,9 @@ pkb_generate() {
   log_progress "[phase 3] generating tunnel links..." "pkb"
   _pkb_generate_tunnels "$pkb"
 
-  # --- Phase 4: Record source file mtimes for incremental updates ---
+  # --- Phase 4: Record change-detection baselines for incremental updates ---
   _pkb_record_mtimes "$project_dir" "$pkb"
+  pkb_record_snapshot "$project_dir"
 
   # Finalize
   pkb_update_meta "$project_dir"
@@ -131,12 +132,23 @@ pkb_incremental_update() {
     return 1
   fi
 
-  # mtime check: skip update if no source files changed
+  # Change gate: prefer the git blob-hash snapshot (precise: per-file, catches
+  # deletions, all languages — issue #20); fall back to the coarse mtime check
+  # for non-git projects or pre-snapshot PKBs.
   local changed_areas
-  changed_areas=$(_pkb_check_mtimes "$project_dir")
-  if [[ -z "$changed_areas" ]]; then
-    log_info "no source changes detected (mtime), skipping PKB update" "pkb"
-    return 0
+  if git -C "$project_dir" rev-parse HEAD >/dev/null 2>&1 && \
+     jq -e '.snapshotCommit' "$pkb/meta.json" >/dev/null 2>&1; then
+    changed_areas=$(pkb_stale_files "$project_dir")
+    if [[ -z "$changed_areas" ]]; then
+      log_info "no source changes detected (snapshot), skipping PKB update" "pkb"
+      return 0
+    fi
+  else
+    changed_areas=$(_pkb_check_mtimes "$project_dir")
+    if [[ -z "$changed_areas" ]]; then
+      log_info "no source changes detected (mtime), skipping PKB update" "pkb"
+      return 0
+    fi
   fi
 
   # If config files changed, regenerate conventions
@@ -155,7 +167,7 @@ pkb_incremental_update() {
     [[ -z "$file" ]] && continue
     # Extract module name from path (e.g., src/features/chat/... → chat)
     local module_name
-    module_name=$(_pkb_file_to_module "$file")
+    module_name=$(_pkb_file_to_module "$file" "$project_dir")
     [[ -z "$module_name" ]] && continue
     if [[ -z "${seen_modules[$module_name]+x}" ]]; then
       seen_modules["$module_name"]=1
@@ -206,8 +218,9 @@ pkb_incremental_update() {
   # Regenerate tunnels after module updates
   _pkb_generate_tunnels "$pkb"
 
-  # Record new mtimes
+  # Record new change-detection baselines
   _pkb_record_mtimes "$project_dir" "$pkb"
+  pkb_record_snapshot "$project_dir"
 
   pkb_update_meta "$project_dir"
   log_success "PKB updated for modules:$affected_modules" "pkb"
@@ -227,20 +240,29 @@ pkb_capture_decisions() {
   local conventions_file="$pkb/conventions.md"
   [[ ! -f "$conventions_file" ]] && return
 
+  # Provenance tag (issue #22): every machine-distilled decision records where
+  # it came from, so entries are auditable and safely cleanable later —
+  # mirroring codegraph's provenance/synthesizedBy discipline on heuristic edges.
+  local short_sha source_tag
+  short_sha=$(git -C "$project_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  source_tag="source:review@${short_sha} $(date +%Y-%m-%d)"
+
   # Extract CRITICAL and HIGH findings that reveal project conventions
   local decisions
-  decisions=$(echo "$review_json" | jq -r '
+  decisions=$(echo "$review_json" | jq -r --arg tag "$source_tag" '
     .comments[]? |
     select(.severity == "CRITICAL" or .severity == "HIGH") |
-    "[DECISION] \(.body | split("\n")[0])"
+    "[DECISION \($tag)] \(.body | split("\n")[0])"
   ' 2>/dev/null || true)
 
   if [[ -n "$decisions" && "$decisions" != "null" ]]; then
-    # Append new decisions if not already present
+    # Append new decisions if not already present — dedup compares the BODY
+    # text (never the source tag), so a re-review of the same finding, or a
+    # legacy untagged copy, is not duplicated.
     while IFS= read -r decision; do
       [[ -z "$decision" ]] && continue
-      # Check if this decision already exists
-      if ! grep -qF "$(echo "$decision" | cut -c13-50)" "$conventions_file" 2>/dev/null; then
+      local body="${decision#*\] }"
+      if ! grep -qF "$(echo "$body" | cut -c1-40)" "$conventions_file" 2>/dev/null; then
         echo "$decision" >> "$conventions_file"
       fi
     done <<< "$decisions"
