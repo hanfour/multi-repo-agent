@@ -77,6 +77,50 @@ structural_affected() {
   _structural_run "$project_dir" affected --stdin --quiet
 }
 
+# One-shot exploration: relevant symbols' source + call paths + blast radius
+# for a natural-language query or a bag of symbol/file names.
+structural_explore() {
+  local project_dir="$1" query="$2"
+  _structural_run "$project_dir" explore "$query"
+}
+
+# Review-side context section (issue #25): symbol-level blast radius (explore
+# over the changed files) plus transitively affected test files, capped at
+# MRA_REVIEW_STRUCTURAL_MAX_BYTES (default 8KB — size to the answer, not the
+# budget). Best-effort by contract: any failure, missing index, or empty
+# change set yields EMPTY output so the review prompt stays byte-identical.
+structural_review_context() {
+  local project_dir="$1" changed_files="$2"
+  structural_available "$project_dir" || return 0
+  [[ -n "${changed_files//[[:space:]]/}" ]] || return 0
+
+  local cap="${MRA_REVIEW_STRUCTURAL_MAX_BYTES:-8192}"
+  [[ "$cap" =~ ^[1-9][0-9]*$ ]] || cap=8192
+
+  local query explore_out affected_out
+  query=$(printf '%s\n' "$changed_files" | head -10 | tr '\n' ' ')
+  explore_out=$(structural_explore "$project_dir" "$query" 2>/dev/null) || explore_out=""
+  affected_out=$(printf '%s\n' "$changed_files" | structural_affected "$project_dir" 2>/dev/null) || affected_out=""
+  [[ -z "${explore_out//[[:space:]]/}" && -z "${affected_out//[[:space:]]/}" ]] && return 0
+
+  local section
+  section="## Structural Context (codegraph symbol graph)
+Pre-computed from the project's code index; treat as already read. Verify only what the diff itself contradicts."
+  if [[ -n "${explore_out//[[:space:]]/}" ]]; then
+    section="${section}
+
+### Blast radius around the changed files
+${explore_out}"
+  fi
+  if [[ -n "${affected_out//[[:space:]]/}" ]]; then
+    section="${section}
+
+### Test files transitively affected (check whether they need updates)
+${affected_out}"
+  fi
+  printf '%s' "$section" | head -c "$cap"
+}
+
 # Analyze-side messaging: adopt an existing index, hint when the CLI is
 # present but the project is unindexed, stay silent when codegraph is absent.
 structural_analyze_hint() {
