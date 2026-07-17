@@ -222,6 +222,22 @@ review_project() {
     use_pkb=true
     log_info "PKB available — using knowledge base (modules: ${relevant_modules:-all})" "review"
   fi
+  # --- Structural context (issue #25): symbol-level blast radius + affected
+  # tests from an existing codegraph index. Best-effort and capped — with no
+  # codegraph this adds nothing and the prompt stays byte-identical. ---
+  local structural_context=""
+  structural_context=$(structural_review_context "$project_dir" "$changed_files_for_strategy" 2>/dev/null) || structural_context=""
+  if [[ -n "$structural_context" ]]; then
+    if [[ -n "$pkb_context" ]]; then
+      pkb_context="${pkb_context}
+
+${structural_context}"
+    else
+      pkb_context="$structural_context"
+    fi
+    log_info "structural context loaded (codegraph)" "review"
+  fi
+
   local review_instruction_context=""
   review_instruction_context=$(review_context_build "$project_dir")
   if [[ -n "$review_instruction_context" ]]; then
