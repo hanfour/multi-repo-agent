@@ -77,6 +77,12 @@ structural_affected() {
   _structural_run "$project_dir" affected --stdin --quiet
 }
 
+# Who calls <symbol> — real edges from the graph.
+structural_callers() {
+  local project_dir="$1" symbol="$2"
+  _structural_run "$project_dir" callers "$symbol" --json
+}
+
 # One-shot exploration: relevant symbols' source + call paths + blast radius
 # for a natural-language query or a bag of symbol/file names.
 structural_explore() {
