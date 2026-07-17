@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
-- Review structural context now gates on index membership: the section is injected only when the codegraph index actually has symbols (`nodeCount > 0`) for at least one changed file, and the explore query is scoped to those files. Live-measured on a bash repo (a language codegraph cannot parse): the ungated section was 8KB of loosely-matched symbols from unrelated indexed files. A failed `codegraph files` listing fails open (legacy behaviour kept).
+- Review structural context now gates on index membership: the section is injected only when the codegraph index actually has symbols (`nodeCount > 0`) for at least one changed file, and the explore query is scoped to those files. Live-measured on a bash repo (a language codegraph cannot parse): the ungated section was 8KB of loosely-matched symbols from unrelated indexed files. A failed `codegraph files` listing fails open (legacy behaviour kept). The listing call carries its own 4MB output ceiling — the generic 64KB cap truncated the JSON on a 12k-node index, which silently fail-opened the gate on exactly the repos where scoping matters.
 
 ### Added
 - PKB evaluation discipline (#27): `mra eval-probe` — a deterministic, LLM-free probe (fixed fixture + question set over moduleMap lookup, regex fallback, and staleness detection) emitting a SHA-stamped JSON report comparable across commits; `mra eval-ablation <project>` — runs the same review case 2×2 (PKB on/off × structural on/off) via env seams (`MRA_EVAL_DISABLE_PKB`, `MRA_STRUCTURAL_PROVIDER`) and persists a per-arm findings/duration report under `.collab/eval/`. The eval review runner now mirrors `mra review`'s structural-context injection.

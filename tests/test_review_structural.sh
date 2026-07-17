@@ -86,6 +86,30 @@ chmod +x "$BIN/codegraph"
 out=$(MRA_CODEGRAPH_BIN="$BIN/codegraph" structural_review_context "$PROJ" $'lib/review.sh\nlib/pkb.sh' 2>&1) || true
 [[ -z "$out" ]] && pass "no indexed changed file (incl. nodeCount=0): empty section" || fail "out-of-index diff leaked: $(echo "$out" | head -2)"
 
+# --- 5b. Large index listing must not silently break the gate ---
+# Live finding #2 (super-dsp-2.0, 12k nodes): the files listing exceeded the
+# generic 64KB output cap, the truncated JSON failed to parse, and the gate
+# fail-opened on exactly the repos where scoping matters. A large but valid
+# listing that is DISJOINT from the diff must still yield an empty section.
+cat > "$BIN/codegraph" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  files)
+    printf '['
+    for i in $(seq 1 900); do
+      printf '{"path":"other/very/long/path/to/an/indexed/source/file-number-%04d.ts","nodeCount":7},' "$i"
+    done
+    printf '{"path":"other/last.ts","nodeCount":1}]'
+    ;;
+  explore)  echo "LOOSE-MATCH noise that must not be injected" ;;
+  affected) cat >/dev/null; echo "tests/loose.test.ts" ;;
+  *) exit 2 ;;
+esac
+STUB
+chmod +x "$BIN/codegraph"
+out=$(MRA_CODEGRAPH_BIN="$BIN/codegraph" structural_review_context "$PROJ" "$CHANGED" 2>&1) || true
+[[ -z "$out" ]] && pass "large (>64KB) index listing: gate still engages, empty section" || fail "large listing broke the gate (fail-open leak): $(echo "$out" | head -2)"
+
 # --- 6. files-listing failure fails OPEN (legacy behaviour preserved) ---
 cat > "$BIN/codegraph" <<'STUB'
 #!/usr/bin/env bash
