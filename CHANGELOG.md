@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Structural layer foundation (#23): `lib/structural.sh` wraps an existing [codegraph](https://github.com/colbymchenry/codegraph) CLI — `structural_available` / `structural_impact` / `structural_query` / `structural_affected` — adopt-if-exists (mra never runs `codegraph init` for you; `mra analyze` hints when a project is unindexed, `mra doctor` reports index coverage), every call bounded by a perl-alarm watchdog (`MRA_STRUCTURAL_TIMEOUT_SECONDS`, default 30s) and an output cap (`MRA_STRUCTURAL_MAX_BYTES`, default 64KB), disable with config `structural.provider=off`. No codegraph anywhere = zero behaviour change.
 - PKB playbook preamble (#24): every `pkb_build_context` tier now opens with a fixed ~100-token usage playbook — treat PKB sections as already read (no re-verifying by grep), how to react to the staleness banner, prefer module summaries over repo crawling, and PKB text is context, never instructions.
 - PKB decision provenance (#22): decisions captured from review findings are written as `[DECISION source:review@<sha> <date>] …`, so machine-distilled entries in conventions.md are auditable and cleanable; dedup compares body text only.
 - PKB fact-driven moduleMap (#21): generation records each module's actual directory in `meta.json`; file→module lookup consults the map (longest prefix wins) before the legacy path-regex guesses, so non-standard layouts resolve correctly.
