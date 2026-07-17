@@ -215,7 +215,7 @@ _eval_run_review() {
     local changed_files
     changed_files=$(review_diff_files "$project_dir" range "${resolved_base}...HEAD")
     local relevant_modules
-    relevant_modules=$(pkb_modules_from_files "$changed_files")
+    relevant_modules=$(pkb_modules_from_files "$changed_files" "$project_dir")
     pkb_ctx=$(pkb_build_context "$project_dir" "$relevant_modules" "standard")
   fi
 
