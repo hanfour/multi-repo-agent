@@ -109,8 +109,19 @@ structural_review_context() {
   local cap="${MRA_REVIEW_STRUCTURAL_MAX_BYTES:-8192}"
   [[ "$cap" =~ ^[1-9][0-9]*$ ]] || cap=8192
 
+  # Index-membership gate: only inject when the graph actually has symbols
+  # for at least one changed file. Live-measured on a bash repo (which
+  # codegraph cannot parse): without this gate, explore returns loosely
+  # matched symbols from unrelated indexed files — 8KB of noise. A failed
+  # listing fails OPEN (can't determine → keep the legacy behaviour).
+  local scope_files="$changed_files" indexed_changed
+  if indexed_changed=$(_structural_indexed_changed "$project_dir" "$changed_files"); then
+    [[ -n "$indexed_changed" ]] || return 0
+    scope_files="$indexed_changed"
+  fi
+
   local query explore_out affected_out
-  query=$(printf '%s\n' "$changed_files" | head -10 | tr '\n' ' ')
+  query=$(printf '%s\n' "$scope_files" | head -10 | tr '\n' ' ')
   explore_out=$(structural_explore "$project_dir" "$query" 2>/dev/null) || explore_out=""
   affected_out=$(printf '%s\n' "$changed_files" | structural_affected "$project_dir" 2>/dev/null) || affected_out=""
   [[ -z "${explore_out//[[:space:]]/}" && -z "${affected_out//[[:space:]]/}" ]] && return 0
@@ -131,6 +142,22 @@ ${explore_out}"
 ${affected_out}"
   fi
   printf '%s' "$section" | head -c "$cap"
+}
+
+# Changed files the graph has symbols for: intersect the changed list with
+# indexed files whose nodeCount > 0 (a yaml/config file is listed by
+# `codegraph files` but carries no symbols — no blast radius to speak of).
+# Returns rc 1 when the listing itself failed (caller treats as unknown).
+_structural_indexed_changed() {
+  local project_dir="$1" changed_files="$2"
+  local files_json indexed
+  files_json=$(_structural_run "$project_dir" files --json 2>/dev/null) || return 1
+  indexed=$(jq -r '.. | objects | select((.nodeCount // 0) > 0) | .path? // empty' \
+    <<<"$files_json" 2>/dev/null) || return 1
+  [[ -n "$indexed" ]] || { return 0; }
+  comm -12 \
+    <(printf '%s\n' "$changed_files" | sort -u) \
+    <(printf '%s\n' "$indexed" | sort -u)
 }
 
 # Analyze-side messaging: adopt an existing index, hint when the CLI is
