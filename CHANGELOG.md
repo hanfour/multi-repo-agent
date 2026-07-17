@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Review structural context now gates on index membership: the section is injected only when the codegraph index actually has symbols (`nodeCount > 0`) for at least one changed file, and the explore query is scoped to those files. Live-measured on a bash repo (a language codegraph cannot parse): the ungated section was 8KB of loosely-matched symbols from unrelated indexed files. A failed `codegraph files` listing fails open (legacy behaviour kept).
+
 ### Added
 - PKB evaluation discipline (#27): `mra eval-probe` — a deterministic, LLM-free probe (fixed fixture + question set over moduleMap lookup, regex fallback, and staleness detection) emitting a SHA-stamped JSON report comparable across commits; `mra eval-ablation <project>` — runs the same review case 2×2 (PKB on/off × structural on/off) via env seams (`MRA_EVAL_DISABLE_PKB`, `MRA_STRUCTURAL_PROVIDER`) and persists a per-arm findings/duration report under `.collab/eval/`. The eval review runner now mirrors `mra review`'s structural-context injection.
 - Structural tunnels (#26): the capitalized-word tunnel scan is now only a proposer — with a codegraph index, each candidate entity is verified against the symbol graph (`codegraph query`) and its referencing modules come from real call edges (`codegraph callers`) aggregated via the moduleMap, written with a `source: codegraph` provenance header. Noise words never survive verification; without codegraph (or on failure) the legacy heuristic table is unchanged.
