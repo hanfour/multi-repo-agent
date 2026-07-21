@@ -151,7 +151,12 @@ ${affected_out}"
 _structural_indexed_changed() {
   local project_dir="$1" changed_files="$2"
   local files_json indexed
-  files_json=$(_structural_run "$project_dir" files --json 2>/dev/null) || return 1
+  # The full file listing of a large index easily exceeds the generic 64KB
+  # output cap, and truncated JSON would fail parsing → permanent fail-open
+  # on exactly the repos where scoping matters (live-hit on a 12k-node
+  # index). Give this one call a 4MB ceiling — still bounded; a listing
+  # beyond it degrades to fail-open via the jq guard below.
+  files_json=$(MRA_STRUCTURAL_MAX_BYTES=4194304 _structural_run "$project_dir" files --json 2>/dev/null) || return 1
   indexed=$(jq -r '.. | objects | select((.nodeCount // 0) > 0) | .path? // empty' \
     <<<"$files_json" 2>/dev/null) || return 1
   [[ -n "$indexed" ]] || { return 0; }
