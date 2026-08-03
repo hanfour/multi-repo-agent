@@ -1,0 +1,12 @@
+# Pins in .github/workflows are full commit SHAs (#36) so CI executes a known
+# revision rather than whatever a mutable tag points at today. That only stays
+# safe if something bumps them, which is this file's job — Dependabot rewrites
+# the SHA and the trailing version comment together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
