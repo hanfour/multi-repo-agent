@@ -104,6 +104,14 @@ config_handle() {
     review.models.claude|review.models.codex)
       config_set_string "$key" "$value"
       log_success "$key set to: $value" "config" ;;
+    review.codexReasoningEffort)
+      # Spliced into a TOML string for `codex -c`; empty defers to the CLI default.
+      if [[ -z "$value" || "$value" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        config_set_string "$key" "$value"
+        log_success "$key set to: ${value:-<codex default>}" "config"
+      else
+        log_error "review.codexReasoningEffort must be an identifier (e.g. max, xhigh, high) or empty" "config"; return 1
+      fi ;;
     review.context.loadClaudeSkills)
       case "$value" in
         summary|full|off|false|none)
