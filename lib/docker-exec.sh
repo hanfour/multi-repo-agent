@@ -121,8 +121,18 @@ _docker_trust_check() {
 
 # Resolve which docker-compose file and service name a project uses
 # Scans workspace for docker-compose files that reference the project
+# resolve_compose_config <workspace> <project> <file-var> <service-var>
+#
+# Writes the compose file path and the service name into the two named
+# variables. It used to echo "file|service" and let callers split on `|`, which
+# truncated any path containing a pipe — and the TM-005 trust gate below then
+# ran against the truncated path while `docker compose -f` reported a "no such
+# file" that named the wrong cause (#41). Namerefs remove the encoding rather
+# than picking a different delimiter to be unlucky with.
 resolve_compose_config() {
   local workspace="$1" project="$2"
+  local -n _rcc_file="$3"
+  local -n _rcc_service="$4"
   local compose_file="" service_name=""
 
   # Check dep-graph for dockerCompose hint
@@ -164,7 +174,8 @@ resolve_compose_config() {
     fi
   fi
 
-  echo "$compose_file|$service_name"
+  _rcc_file="$compose_file"
+  _rcc_service="$service_name"
 }
 
 # Run a command inside a project's Docker container
@@ -173,10 +184,8 @@ run_in_docker() {
   local workspace="$1" project="$2" command="$3"
   local db_override="${4:-}"  # optional DB name override for test isolation
 
-  local config
-  config=$(resolve_compose_config "$workspace" "$project")
-  local compose_file="${config%%|*}"
-  local service_name="${config##*|}"
+  local compose_file="" service_name=""
+  resolve_compose_config "$workspace" "$project" compose_file service_name
 
   if [[ -z "$compose_file" || ! -f "$compose_file" ]]; then
     log_error "$project: no docker-compose file found" "docker"
@@ -230,10 +239,8 @@ run_in_docker() {
 build_docker_image() {
   local workspace="$1" project="$2"
 
-  local config
-  config=$(resolve_compose_config "$workspace" "$project")
-  local compose_file="${config%%|*}"
-  local service_name="${config##*|}"
+  local compose_file="" service_name=""
+  resolve_compose_config "$workspace" "$project" compose_file service_name
 
   if [[ -z "$compose_file" || ! -f "$compose_file" ]]; then
     log_error "$project: no docker-compose file found" "docker"
@@ -269,10 +276,8 @@ start_service_container() {
     return 0
   fi
 
-  local config
-  config=$(resolve_compose_config "$workspace" "$project")
-  local compose_file="${config%%|*}"
-  local service_name="${config##*|}"
+  local compose_file="" service_name=""
+  resolve_compose_config "$workspace" "$project" compose_file service_name
 
   if [[ -z "$compose_file" || ! -f "$compose_file" ]]; then
     log_error "$project: no docker-compose file found" "docker"
@@ -302,10 +307,8 @@ start_service_container() {
 stop_service_container() {
   local workspace="$1" project="$2"
 
-  local config
-  config=$(resolve_compose_config "$workspace" "$project")
-  local compose_file="${config%%|*}"
-  local service_name="${config##*|}"
+  local compose_file="" service_name=""
+  resolve_compose_config "$workspace" "$project" compose_file service_name
 
   if [[ -n "$compose_file" && -f "$compose_file" ]]; then
     docker compose -f "$compose_file" stop "$service_name" 2>/dev/null
