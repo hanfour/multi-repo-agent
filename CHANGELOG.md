@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-08-03
+
 ### Security
 - Review completion sentinel is matched against a **whole line** on every path. `review_verdict_of` (the debate path) used an unanchored substring match while the single-pass and provider paths required a whole line — three rules where `lib/review-verdict.sh` documents one. An agent that quoted the sentinel out of the diff under review and was then cut off by max-turns, never declaring a verdict, therefore read as `APPROVED`; with both debate agents cut off that way `_debate_assess` returned `APPROVE`. No attacker required — reviewing mra's own review code is enough. `tests/test_review_verdict.sh` had been asserting the substring behaviour, which is why the suite stayed green over it (GHSA-vj6f-5fw7-p56f).
 - Sentinel token now carries a **per-run nonce** (`MRA-REVIEW-COMPLETE-<8 random bytes>`, minted once per process, overridable so tests can spell it literally). A constant token is fully predictable from this public source, and the text it is matched against is the output of a model that has just read the diff — so a line placed in any reviewed file could reach the verdict parser as a forged approval. Anchoring alone does not close this: once the sentinel must own a line, injected content can supply a line. `lib/review-prompt.sh` also spelled the sentinel literally rather than interpolating the token, so the nonce would never have reached the single-pass prompt (GHSA-5gjm-rqvq-f877).
@@ -129,5 +131,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed confidential design documents that did not belong to this tool from the
   repository **and its git history**.
 
-[Unreleased]: https://github.com/hanfour/multi-repo-agent/commits/main
+[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.1.0
 [2.3.0]: https://github.com/hanfour/multi-repo-agent/commits/main
