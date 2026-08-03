@@ -110,6 +110,23 @@ review_provider_effective_model() {
   fi
 }
 
+# Codex reviews run with --ignore-user-config, so ~/.codex/config.toml never
+# reaches the child and its model_reasoning_effort is silently ignored. The
+# effort therefore has to travel as an explicit -c override, or every review
+# runs at whatever the Codex CLI defaults to. Empty means "defer to that
+# default"; the value is spliced into a TOML string, so it is whitelisted the
+# same way the provider transport overrides are.
+review_provider_codex_reasoning_effort() {
+  local v
+  v=$(_review_config_value "codexReasoningEffort")
+  [[ -n "$v" ]] || return 0
+  if [[ ! "$v" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    log_warn "ignoring invalid review.codexReasoningEffort='$v' (expected an identifier such as max, xhigh, high)" "review" >&2
+    return 0
+  fi
+  printf '%s' "$v"
+}
+
 review_provider_label() {
   local provider="$1" model="${2:-}"
   if [[ -n "$model" ]]; then
@@ -377,6 +394,9 @@ _review_call_one_provider() {
         args+=(-c "model_providers.$provider_name.requires_openai_auth=$requires_openai_auth")
       fi
       [[ -n "$model" ]] && args+=(--model "$model")
+      local reasoning_effort
+      reasoning_effort=$(review_provider_codex_reasoning_effort)
+      [[ -n "$reasoning_effort" ]] && args+=(-c "model_reasoning_effort=\"$reasoning_effort\"")
       args+=("$prompt")
       local watchdog_secs
       watchdog_secs=$(_review_codex_watchdog_secs)
