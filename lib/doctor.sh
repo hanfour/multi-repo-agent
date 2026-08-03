@@ -49,6 +49,48 @@ doctor_basic() {
 # Level 2: Database checks
 # ---------------------------------------------------------------------------
 
+# _doctor_db_rows <db.json>
+# One US-separated row per database, in `keys[]` order:
+#   name, engine, version // "latest", port, password // "mra_password"
+#
+# Replaces four `jq -r` forks per database with one pass (#37). `tostring` is
+# load-bearing: `jq -r '.absent'` prints the literal text "null", but a bare
+# null inside @tsv prints an empty string, which would silently flip every
+# downstream emptiness check. tests/test_db_rows.sh pins the rendering against
+# the calls this replaced.
+# Fields are separated by US (\x1f), not TAB: bash treats tab as IFS
+# whitespace, so `IFS=$'\t' read` COLLAPSES runs of tabs and an empty field in
+# the middle -- an absent `platform`, say -- silently shifts every field after
+# it. US is not IFS whitespace, so empty fields survive.
+_doctor_db_rows() {
+  jq -r '
+    .databases | keys[] as $k | [
+      $k,
+      (.[$k].engine | tostring),
+      ((.[$k].version // "latest") | tostring),
+      (.[$k].port | tostring),
+      ((.[$k].password // "mra_password") | tostring)
+    ] | join("\u001f")
+  ' "$1"
+}
+
+# _doctor_db_schema_rows <db.json> <db-name>
+# One US-separated row per schema of that database, in `keys[]` order:
+#   schema name, source // ""
+#
+# Replaces a length probe, a keys[] listing and one source lookup per schema —
+# 2 + N forks per database — with a single pass. Emits nothing when the
+# database uses the single-schema format, so callers test row count where they
+# used to test the length probe.
+_doctor_db_schema_rows() {
+  jq -r --arg n "$2" '
+    .databases[$n].schemas // {} | keys[] as $s | [
+      $s,
+      ((.[$s].source // "") | tostring)
+    ] | join("\u001f")
+  ' "$1" 2>/dev/null
+}
+
 doctor_databases() {
   local workspace="$1"
   local pass=0 fail=0 warn=0
@@ -64,24 +106,22 @@ doctor_databases() {
     return 0
   fi
 
-  local db_names=()
-  while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    db_names+=("$name")
-  done < <(jq -r '.databases | keys[]' "$db_json_path")
+  local db_rows=()
+  while IFS= read -r row; do
+    [[ -z "$row" ]] && continue
+    db_rows+=("$row")
+  done < <(_doctor_db_rows "$db_json_path")
 
-  if [[ ${#db_names[@]} -eq 0 ]]; then
+  if [[ ${#db_rows[@]} -eq 0 ]]; then
     log_warn "no databases defined in db.json" "doctor" >&2
     echo "$pass $fail $warn"
     return 0
   fi
 
-  for db_name in "${db_names[@]}"; do
-    local engine version port password container_name
-    engine=$(jq -r --arg n "$db_name" '.databases[$n].engine' "$db_json_path")
-    version=$(jq -r --arg n "$db_name" '.databases[$n].version // "latest"' "$db_json_path")
-    port=$(jq -r --arg n "$db_name" '.databases[$n].port' "$db_json_path")
-    password=$(jq -r --arg n "$db_name" '.databases[$n].password // "mra_password"' "$db_json_path")
+  local db_row
+  for db_row in "${db_rows[@]}"; do
+    local db_name engine version port password container_name
+    IFS=$'\037' read -r db_name engine version port password <<<"$db_row"
     container_name="mra-db-$db_name"
 
     # --- Container running? ---
@@ -122,21 +162,20 @@ doctor_databases() {
     fi
 
     # --- Determine if instance uses multi-schema format ---
-    local has_schemas
-    has_schemas=$(jq -r --arg n "$db_name" '.databases[$n].schemas // empty | length' "$db_json_path" 2>/dev/null || echo "0")
+    # A non-empty row set IS the multi-schema signal; the separate length probe
+    # it replaces was one more fork saying the same thing.
+    local schema_rows=()
+    while IFS= read -r schema_row; do
+      [[ -z "$schema_row" ]] && continue
+      schema_rows+=("$schema_row")
+    done < <(_doctor_db_schema_rows "$db_json_path" "$db_name")
 
-    if [[ -n "$has_schemas" && "$has_schemas" != "0" ]]; then
+    if [[ ${#schema_rows[@]} -gt 0 ]]; then
       # Multi-schema format: iterate each schema
-      local schema_names=()
-      while IFS= read -r schema; do
-        [[ -z "$schema" ]] && continue
-        schema_names+=("$schema")
-      done < <(jq -r --arg n "$db_name" '.databases[$n].schemas | keys[]' "$db_json_path")
-
-      for schema_name in "${schema_names[@]}"; do
-        local schema_source
-        schema_source=$(jq -r --arg n "$db_name" --arg s "$schema_name" \
-          '.databases[$n].schemas[$s].source // ""' "$db_json_path")
+      local schema_row_item
+      for schema_row_item in "${schema_rows[@]}"; do
+        local schema_name schema_source
+        IFS=$'\037' read -r schema_name schema_source <<<"$schema_row_item"
 
         # --- Tables exist in this schema? ---
         local table_count=0
