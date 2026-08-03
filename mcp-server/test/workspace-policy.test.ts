@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -8,6 +8,7 @@ import {
   loadWorkspacePolicy,
   isWorkspaceAllowed,
   assertWorkspaceAllowed,
+  resolveAllowedWorkspace,
   WorkspaceNotAllowedError,
 } from "../src/workspace-policy.js";
 
@@ -150,4 +151,57 @@ test("assertWorkspaceAllowed throws WorkspaceNotAllowedError", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// --- #40: the path the policy authorised must be the path that gets used -----
+// isWorkspaceAllowed resolved the workspace to check it, then index.ts handed
+// the ORIGINAL caller-supplied string to executeMra as cwd. Between those two
+// points a path component could be swapped for a symlink pointing outside the
+// allowlist. resolveAllowedWorkspace resolves once and returns what it checked.
+
+test("resolveAllowedWorkspace returns the resolved path, not the caller's string", () => {
+  const root = makeTempRoot();
+  const real = join(root, "project");
+  mkdirSync(real);
+  const link = join(root, "alias");
+  symlinkSync(real, link);
+
+  const policy = loadWorkspacePolicy({ MRA_ALLOWED_WORKSPACES: root });
+
+  assert.equal(resolveAllowedWorkspace(link, policy), realpathSync(real));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("resolveAllowedWorkspace collapses .. before returning", () => {
+  const root = makeTempRoot();
+  mkdirSync(join(root, "a"));
+  mkdirSync(join(root, "b"));
+  const policy = loadWorkspacePolicy({ MRA_ALLOWED_WORKSPACES: root });
+
+  assert.equal(resolveAllowedWorkspace(join(root, "a", "..", "b"), policy), join(root, "b"));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("resolveAllowedWorkspace throws for a workspace outside the allowlist", () => {
+  const root = makeTempRoot();
+  const outside = makeTempRoot();
+  const policy = loadWorkspacePolicy({ MRA_ALLOWED_WORKSPACES: root });
+
+  assert.throws(() => resolveAllowedWorkspace(outside, policy), WorkspaceNotAllowedError);
+  assert.throws(() => resolveAllowedWorkspace("", policy), WorkspaceNotAllowedError);
+  rmSync(root, { recursive: true, force: true });
+  rmSync(outside, { recursive: true, force: true });
+});
+
+test("a symlink escaping the allowlist is still rejected", () => {
+  const root = makeTempRoot();
+  const outside = makeTempRoot();
+  const link = join(root, "escape");
+  symlinkSync(outside, link);
+
+  const policy = loadWorkspacePolicy({ MRA_ALLOWED_WORKSPACES: root });
+
+  assert.throws(() => resolveAllowedWorkspace(link, policy), WorkspaceNotAllowedError);
+  rmSync(root, { recursive: true, force: true });
+  rmSync(outside, { recursive: true, force: true });
 });

@@ -31,6 +31,19 @@ export async function executeMra(
 
     let stdout = "";
     let stderr = "";
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+
+    // Single exit for every terminal path. `close` used to be the only handler
+    // that cleared the timer, but it does not necessarily follow `error` — so a
+    // failed spawn left the timer armed for the whole timeout (up to three
+    // minutes) holding the event loop open and delaying server shutdown.
+    const settle = (result: MraResult): void => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== undefined) clearTimeout(timeout);
+      resolve_promise(result);
+    };
 
     proc.stdout.on("data", (data: Buffer) => {
       stdout += data.toString();
@@ -41,16 +54,16 @@ export async function executeMra(
     });
 
     proc.on("error", (err) => {
-      resolve_promise({
+      settle({
         output: "",
         exitCode: 1,
         error: `Failed to execute mra: ${err.message}`,
       });
     });
 
-    const timeout = setTimeout(() => {
+    timeout = setTimeout(() => {
       proc.kill("SIGTERM");
-      resolve_promise({
+      settle({
         output: stdout.trim(),
         exitCode: 124,
         error: "Command timed out",
@@ -58,8 +71,7 @@ export async function executeMra(
     }, timeoutMs);
 
     proc.on("close", (code) => {
-      clearTimeout(timeout);
-      resolve_promise({
+      settle({
         output: stdout.trim(),
         exitCode: code ?? 1,
         error: stderr.trim(),

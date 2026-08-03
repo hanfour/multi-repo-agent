@@ -26,10 +26,8 @@ run_integration_test() {
 
   # Start provider with modified code
   log_progress "starting $provider service" "test"
-  local config
-  config=$(resolve_compose_config "$workspace" "$provider")
-  local compose_file="${config%%|*}"
-  local service_name="${config##*|}"
+  local compose_file="" service_name=""
+  resolve_compose_config "$workspace" "$provider" compose_file service_name
 
   if [[ -z "$compose_file" || ! -f "$compose_file" ]]; then
     log_error "$provider: no docker-compose file, skipping integration test" "test"
@@ -73,10 +71,8 @@ run_integration_test() {
   log_info "$consumer will connect to $provider at $api_url" "test"
 
   # Run consumer tests with provider URL override
-  local consumer_config
-  consumer_config=$(resolve_compose_config "$workspace" "$consumer")
-  local consumer_compose="${consumer_config%%|*}"
-  local consumer_service="${consumer_config##*|}"
+  local consumer_compose="" consumer_service=""
+  resolve_compose_config "$workspace" "$consumer" consumer_compose consumer_service
 
   if [[ -z "$consumer_compose" || ! -f "$consumer_compose" ]]; then
     log_warn "$consumer: no docker-compose file, running tests on host" "test"
