@@ -9,7 +9,10 @@ help:
 	@echo "make lint         Run shellcheck over lib/, bin/, scanners/, tests/"
 	@echo "make clean        Remove mcp-server build artifacts"
 
-test:
+# Depends on mcp-install so a fresh checkout runs the full suite instead of
+# hitting test.sh's "deps missing" failure. The sentinel below keeps this a
+# no-op once deps are current.
+test: mcp-install
 	bash test.sh
 
 # Install only when package.json / package-lock.json changes — npm writes
