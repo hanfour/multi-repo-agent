@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-08-03
+
+### Security
+- Review completion sentinel is matched against a **whole line** on every path. `review_verdict_of` (the debate path) used an unanchored substring match while the single-pass and provider paths required a whole line — three rules where `lib/review-verdict.sh` documents one. An agent that quoted the sentinel out of the diff under review and was then cut off by max-turns, never declaring a verdict, therefore read as `APPROVED`; with both debate agents cut off that way `_debate_assess` returned `APPROVE`. No attacker required — reviewing mra's own review code is enough. `tests/test_review_verdict.sh` had been asserting the substring behaviour, which is why the suite stayed green over it (GHSA-vj6f-5fw7-p56f).
+- Sentinel token now carries a **per-run nonce** (`MRA-REVIEW-COMPLETE-<8 random bytes>`, minted once per process, overridable so tests can spell it literally). A constant token is fully predictable from this public source, and the text it is matched against is the output of a model that has just read the diff — so a line placed in any reviewed file could reach the verdict parser as a forged approval. Anchoring alone does not close this: once the sentinel must own a line, injected content can supply a line. `lib/review-prompt.sh` also spelled the sentinel literally rather than interpolating the token, so the nonce would never have reached the single-pass prompt (GHSA-5gjm-rqvq-f877).
+- `expand_add_dir_string` validates against an **allowlist** instead of a metacharacter blacklist. The blacklist (`;`, `&&`, `||`, backtick, `$(`) missed process substitution — `<(cmd)` executed cmd — as well as parameter expansion, tilde expansion and globbing; it was also too tight, testing the *escaped* string, so a legitimate path containing a backtick or semicolon was refused. Not reachable from any of the 18 call sites, all of which feed `printf %q` output, but a stated guarantee that does not hold is worse than none. Paths containing control characters now fail closed rather than being evaluated (GHSA-8m99-vc82-25m4).
+
+### Fixed
+- `test.sh` fails when the mcp-server suite could not run. A missing `mcp-server/node_modules` printed "skipped", left the exit status at 0 and reported a green summary while all 24 TypeScript tests sat unexecuted. CI installs deps and was unaffected, which is why only local runs hit it. `make test` now depends on `mcp-install` so the common path installs and runs (#34).
+- `executeMra` clears its timeout on every terminal path. Only the `close` handler cleared it, and `close` does not necessarily follow `error`, so a failed spawn left the timer armed for up to three minutes holding the event loop open (#38).
+- MCP tool calls run against the path the policy authorised. The workspace was resolved with `realpath` to check it against the allowlist, then the original caller-supplied string was handed to `spawn` as cwd — check and use referred to different paths (#40).
+- `resolve_compose_config` returns its two values through namerefs instead of a `"file|service"` string. A `|` in the workspace path truncated the compose file path, and the TM-005 trust gate was evaluated against the truncated value (#41).
+- `make lint` gates at `-S error`, the severity CI blocks on. It ran `-S warning` and exited 1 on 49 findings while CI was green, so the documented developer command was permanently red and its output went unread. `make lint-all` keeps the warning backlog visible; the backlog itself is tracked in #50 (#35).
+
+### Changed
+- Third-party GitHub Actions are pinned to full commit SHAs with Dependabot configured to bump them. `deploy-site.yml` holds `pages:write` and `id-token:write`, so a repointed tag there could publish arbitrary content to the project site (#36).
+- Database configuration is read in one `jq` pass per operation rather than one fork per field. Loop-level `jq` invocations drop 12→4 in `lib/doctor.sh` and 24→12 in `lib/db.sh`. Rows use US (`\x1f`) rather than TAB as the separator — bash treats tab as IFS whitespace and collapses runs of it, so an empty middle field silently shifts every field after it — and every field passes through `tostring` because `jq -r '.absent'` prints the literal text `null` where a bare null in a joined row prints an empty string. Partial: the schema sub-loops are unchanged (#37).
+- `bin/mra.sh` loads libraries from an ordered `MRA_LIBS` list instead of 78 hand-written `source` lines; 803 → 755 lines. Load order is preserved byte-identically and `tests/test_lib_loader.sh` fails if a `lib/*.sh` is ever omitted from the list. The 42-branch dispatch is unchanged (#39).
+
 ### Fixed
 - Review structural context now gates on index membership: the section is injected only when the codegraph index actually has symbols (`nodeCount > 0`) for at least one changed file, and the explore query is scoped to those files. Live-measured on a bash repo (a language codegraph cannot parse): the ungated section was 8KB of loosely-matched symbols from unrelated indexed files. A failed `codegraph files` listing fails open (legacy behaviour kept). The listing call carries its own 4MB output ceiling — the generic 64KB cap truncated the JSON on a 12k-node index, which silently fail-opened the gate on exactly the repos where scoping matters.
 
@@ -112,5 +131,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed confidential design documents that did not belong to this tool from the
   repository **and its git history**.
 
-[Unreleased]: https://github.com/hanfour/multi-repo-agent/commits/main
+[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.1.0
 [2.3.0]: https://github.com/hanfour/multi-repo-agent/commits/main
