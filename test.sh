@@ -40,8 +40,12 @@ NODE_NOTE=""
 if [[ -f "$MRA_DIR/mcp-server/package.json" ]]; then
   printf '\n>>> mcp-server (npm test)\n'
   if [[ ! -d "$MRA_DIR/mcp-server/node_modules" ]]; then
-    echo "   skipped: run 'npm --prefix mcp-server install' first"
-    NODE_NOTE="(skipped: deps not installed)"
+    # A suite that could not run is not a suite that passed. Leaving NODE_RC at
+    # 0 here made a fresh checkout print a green summary while the whole
+    # TypeScript suite sat unexecuted (#34).
+    echo "   NOT RUN: deps missing — run 'npm --prefix mcp-server install' first"
+    NODE_RC=1
+    NODE_NOTE="NOT RUN (deps not installed) — counted as a failure, not a pass"
   else
     npm_log=$(mktemp)
     if (cd "$MRA_DIR/mcp-server" && npm test --silent) >"$npm_log" 2>&1; then
