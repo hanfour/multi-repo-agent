@@ -29,11 +29,18 @@ assert_eq() { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$
 OK="===MRA-REVIEW-COMPLETE: APPROVED==="
 CR="===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED==="
 
+# Real agent output ends with the sentinel ON ITS OWN LINE — that is exactly what
+# the prompt demands ("end your output with EXACTLY ONE of these lines on its
+# own", lib/review-debate-agents.sh). Compose fixtures the same way; a sentinel
+# trailing other text on one line is a QUOTE, not a declared verdict
+# (GHSA-vj6f-5fw7-p56f).
+with_verdict() { printf '%s\n%s' "$1" "$2"; }
+
 # 1. Both agents produced no sentinel (silent failure / cutoff) -> ERROR.
 assert_eq "both incomplete -> ERROR" "ERROR" "$(_debate_assess "" "")"
 
 # 2. Both agents completed with APPROVED -> APPROVE (the only path to a clean green).
-assert_eq "both APPROVED -> APPROVE" "APPROVE" "$(_debate_assess "looks clean $OK" "$OK")"
+assert_eq "both APPROVED -> APPROVE" "APPROVE" "$(_debate_assess "$(with_verdict 'looks clean' "$OK")" "$OK")"
 
 # 3. One agent reports CHANGES_REQUESTED -> PROCEED to synthesis.
 assert_eq "one CHANGES_REQUESTED -> PROCEED" "PROCEED" "$(_debate_assess "$CR" "$OK")"
@@ -41,7 +48,7 @@ assert_eq "one CHANGES_REQUESTED -> PROCEED" "PROCEED" "$(_debate_assess "$CR" "
 # 4. KEY: findings emitted as "### [HIGH]" headings (the live false-green format)
 #    are IRRELEVANT — the explicit CHANGES_REQUESTED verdict drives PROCEED.
 assert_eq "heading-format findings still PROCEED" "PROCEED" \
-  "$(_debate_assess "### [HIGH] real bug invisible behind backdrop $CR" "$OK")"
+  "$(_debate_assess "$(with_verdict '### [HIGH] real bug invisible behind backdrop' "$CR")" "$OK")"
 
 # 5. One APPROVED, the other failed (no sentinel): cannot claim both clean -> ERROR.
 assert_eq "one agent failed -> ERROR" "ERROR" "$(_debate_assess "$OK" "")"
@@ -52,13 +59,29 @@ assert_eq "CR + failed other -> PROCEED" "PROCEED" "$(_debate_assess "$CR" "")"
 # 7. Garbled non-empty output, no sentinel -> ERROR, never approve.
 assert_eq "garbled no sentinel -> ERROR" "ERROR" "$(_debate_assess "I was analyzing the diff but" "")"
 
+# 7b. GHSA-vj6f-5fw7-p56f: an agent that QUOTED the sentinel out of the diff and
+#     was then cut off never declared a verdict. Under the old substring match
+#     both agents read as APPROVED and _debate_assess returned APPROVE — a false
+#     green in the mechanism built to prevent false greens. Reviewing mra's own
+#     review code is enough to reach this; no attacker required.
+quoted_cutoff="$(printf '%s\n%s\n%s' \
+  'Reviewing lib/review-verdict.sh. The code under review contains:' \
+  '    printf "===MRA-REVIEW-COMPLETE: APPROVED==="' \
+  'Now let me analyse the surrounding logic and check whether')"
+assert_eq "both quoted-then-cutoff -> ERROR" "ERROR" \
+  "$(_debate_assess "$quoted_cutoff" "$quoted_cutoff")"
+assert_eq "one real approval + one quoted-cutoff -> ERROR" "ERROR" \
+  "$(_debate_assess "$OK" "$quoted_cutoff")"
+assert_eq "verifier quoted-then-cutoff -> INCONCLUSIVE" "INCONCLUSIVE" \
+  "$(_debate_verify_gate "$quoted_cutoff")"
+
 # --- Adversarial verify-before-approve (single skeptical 3rd reviewer) ---
 # When both agents APPROVE, a verifier re-checks the diff. _debate_verify_gate
 # maps its EXPLICIT verdict to the final action: confirm the approval, downgrade
 # (it found something the two missed), or — if it did not complete — fall back to
 # a fail-closed incomplete review rather than approving on verifier flakiness.
-assert_eq "verifier APPROVED -> APPROVE"            "APPROVE"      "$(_debate_verify_gate "re-checked, genuinely clean $OK")"
-assert_eq "verifier CHANGES_REQUESTED -> DOWNGRADE" "DOWNGRADE"    "$(_debate_verify_gate "- [HIGH] missed null deref at x.ts:5 $CR")"
+assert_eq "verifier APPROVED -> APPROVE"            "APPROVE"      "$(_debate_verify_gate "$(with_verdict 're-checked, genuinely clean' "$OK")")"
+assert_eq "verifier CHANGES_REQUESTED -> DOWNGRADE" "DOWNGRADE"    "$(_debate_verify_gate "$(with_verdict '- [HIGH] missed null deref at x.ts:5' "$CR")")"
 assert_eq "verifier no verdict -> INCONCLUSIVE"     "INCONCLUSIVE" "$(_debate_verify_gate "")"
 assert_eq "verifier cutoff/garbled -> INCONCLUSIVE" "INCONCLUSIVE" "$(_debate_verify_gate "I was checking the diff but ran")"
 
