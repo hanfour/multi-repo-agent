@@ -80,6 +80,29 @@ TOML
 rec=$(run_codex)
 case "$rec" in *"[-c] [model_context_window=1000000]"*) pass "trailing comment is stripped" ;; *) fail "comment leaked into override: $rec" ;; esac
 
+# --- TOML digit separators are valid integers -------------------------------
+# `1_000_000` parses fine in codex (verified with `codex doctor`), so rejecting
+# it here would silently drop the override — the exact failure this helper
+# exists to prevent.
+write_toml <<'TOML'
+model_provider = "OpenAI"
+model_context_window = 1_000_000
+model_auto_compact_token_limit = 900_000
+TOML
+rec=$(run_codex)
+case "$rec" in *"[-c] [model_context_window=1000000]"*) pass "digit-separated context window is normalized" ;; *) fail "digit-separated context window dropped: $rec" ;; esac
+case "$rec" in *"[-c] [model_auto_compact_token_limit=900000]"*) pass "digit-separated compact limit is normalized" ;; *) fail "digit-separated compact limit dropped: $rec" ;; esac
+
+# --- separators codex itself rejects stay rejected ---------------------------
+for bad in '_1000' '1000_' '1__000'; do
+  write_toml <<TOML
+model_provider = "OpenAI"
+model_context_window = $bad
+TOML
+  rec=$(run_codex)
+  case "$rec" in *"model_context_window"*) fail "malformed integer '$bad' must be dropped: $rec" ;; *) pass "malformed integer '$bad' is dropped" ;; esac
+done
+
 # --- absent knobs are not forged --------------------------------------------
 write_toml <<'TOML'
 model_provider = "OpenAI"
