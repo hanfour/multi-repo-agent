@@ -338,12 +338,24 @@ _review_codex_watchdog_secs() {
 # silently runs against the model catalog's defaults instead.
 # Emits one `key=value` TOML override per line; unset or malformed values are
 # skipped so codex keeps its own default rather than receiving a broken one.
+# TOML integers may carry digit separators (`1_000_000`), which the raw text
+# extraction preserves verbatim. Normalize them away before validating, or a
+# perfectly valid config loses its override — the very failure this file exists
+# to prevent. Separator placement follows TOML: between digits only, so the
+# forms codex itself refuses to parse (`_1000`, `1000_`, `1__000`) are refused
+# here too rather than being silently repaired into something codex never saw.
+_review_toml_integer_value() {
+  local raw="$1"
+  [[ "$raw" =~ ^[0-9]+(_[0-9]+)*$ ]] || return 1
+  printf '%s' "${raw//_/}"
+}
+
 _review_codex_runtime_overrides() {
   local config="$1" v
   v=$(_review_toml_string_value "$config" "" model_context_window)
-  if [[ "$v" =~ ^[0-9]+$ ]]; then printf 'model_context_window=%s\n' "$v"; fi
+  if v=$(_review_toml_integer_value "$v"); then printf 'model_context_window=%s\n' "$v"; fi
   v=$(_review_toml_string_value "$config" "" model_auto_compact_token_limit)
-  if [[ "$v" =~ ^[0-9]+$ ]]; then printf 'model_auto_compact_token_limit=%s\n' "$v"; fi
+  if v=$(_review_toml_integer_value "$v"); then printf 'model_auto_compact_token_limit=%s\n' "$v"; fi
   v=$(_review_toml_string_value "$config" "" service_tier)
   if [[ "$v" =~ ^[A-Za-z0-9._-]+$ ]]; then printf 'service_tier="%s"\n' "$v"; fi
   v=$(_review_toml_string_value "$config" "" disable_response_storage)
