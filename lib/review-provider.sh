@@ -331,6 +331,26 @@ _review_codex_watchdog_secs() {
   printf '%s' "$secs"
 }
 
+# --ignore-user-config drops every knob in ~/.codex/config.toml, not just the
+# transport ones restored above. The runtime settings that shape a long review
+# — how much context the model gets, and when it starts compacting away the
+# findings it has accumulated — have to be forwarded explicitly or the review
+# silently runs against the model catalog's defaults instead.
+# Emits one `key=value` TOML override per line; unset or malformed values are
+# skipped so codex keeps its own default rather than receiving a broken one.
+_review_codex_runtime_overrides() {
+  local config="$1" v
+  v=$(_review_toml_string_value "$config" "" model_context_window)
+  if [[ "$v" =~ ^[0-9]+$ ]]; then printf 'model_context_window=%s\n' "$v"; fi
+  v=$(_review_toml_string_value "$config" "" model_auto_compact_token_limit)
+  if [[ "$v" =~ ^[0-9]+$ ]]; then printf 'model_auto_compact_token_limit=%s\n' "$v"; fi
+  v=$(_review_toml_string_value "$config" "" service_tier)
+  if [[ "$v" =~ ^[A-Za-z0-9._-]+$ ]]; then printf 'service_tier="%s"\n' "$v"; fi
+  v=$(_review_toml_string_value "$config" "" disable_response_storage)
+  if [[ "$v" == "true" || "$v" == "false" ]]; then printf 'disable_response_storage=%s\n' "$v"; fi
+  return 0
+}
+
 _review_provider_codex_prompt() {
   local prompt="$1" system_prompt_file="${2:-}"
   if [[ -n "$system_prompt_file" && -f "$system_prompt_file" && ! -L "$system_prompt_file" ]]; then
@@ -393,6 +413,10 @@ _review_call_one_provider() {
       if [[ "$requires_openai_auth" == "true" || "$requires_openai_auth" == "false" ]]; then
         args+=(-c "model_providers.$provider_name.requires_openai_auth=$requires_openai_auth")
       fi
+      local runtime_override
+      while IFS= read -r runtime_override; do
+        if [[ -n "$runtime_override" ]]; then args+=(-c "$runtime_override"); fi
+      done < <(_review_codex_runtime_overrides "$codex_config")
       [[ -n "$model" ]] && args+=(--model "$model")
       local reasoning_effort
       reasoning_effort=$(review_provider_codex_reasoning_effort)
