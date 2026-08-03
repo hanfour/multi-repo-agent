@@ -3,85 +3,37 @@ set -euo pipefail
 
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Source all libs
-source "$MRA_DIR/lib/colors.sh"
-source "$MRA_DIR/lib/claude-invoke.sh"
-source "$MRA_DIR/lib/review-verdict.sh"
-source "$MRA_DIR/lib/args.sh"
-source "$MRA_DIR/lib/security-log.sh"
-source "$MRA_DIR/lib/project-path.sh"
-source "$MRA_DIR/lib/url-policy.sh"
-source "$MRA_DIR/lib/validate.sh"
-source "$MRA_DIR/lib/config.sh"
-source "$MRA_DIR/lib/project-memory.sh"
-source "$MRA_DIR/lib/preflight.sh"
-source "$MRA_DIR/lib/detect-type.sh"
-source "$MRA_DIR/lib/sync.sh"
-source "$MRA_DIR/lib/branch.sh"
-source "$MRA_DIR/lib/branch-ops.sh"
-source "$MRA_DIR/lib/review-select.sh"
-source "$MRA_DIR/lib/pr-ops.sh"
-source "$MRA_DIR/lib/deps.sh"
-source "$MRA_DIR/lib/repos.sh"
-source "$MRA_DIR/lib/init.sh"
-source "$MRA_DIR/lib/launch.sh"
-source "$MRA_DIR/lib/workflow.sh"
-source "$MRA_DIR/lib/alias.sh"
-source "$MRA_DIR/lib/cleanup.sh"
-source "$MRA_DIR/lib/db.sh"
-source "$MRA_DIR/lib/doctor.sh"
-source "$MRA_DIR/lib/structural.sh"
-source "$MRA_DIR/lib/scan.sh"
-source "$MRA_DIR/lib/ask.sh"
-source "$MRA_DIR/lib/export.sh"
-source "$MRA_DIR/lib/docker-exec.sh"
-source "$MRA_DIR/lib/test-runner.sh"
-source "$MRA_DIR/lib/change-detector.sh"
-source "$MRA_DIR/lib/integration-test.sh"
-source "$MRA_DIR/lib/status.sh"
-source "$MRA_DIR/lib/log-viewer.sh"
-source "$MRA_DIR/lib/diff-summary.sh"
-source "$MRA_DIR/lib/open-ide.sh"
-source "$MRA_DIR/lib/watch.sh"
-source "$MRA_DIR/lib/setup-project.sh"
-source "$MRA_DIR/lib/graph.sh"
-source "$MRA_DIR/lib/cost.sh"
-source "$MRA_DIR/lib/template.sh"
-source "$MRA_DIR/lib/ci.sh"
-source "$MRA_DIR/lib/snapshot.sh"
-source "$MRA_DIR/lib/dashboard.sh"
-source "$MRA_DIR/lib/federation.sh"
-source "$MRA_DIR/lib/notify.sh"
-source "$MRA_DIR/lib/lint.sh"
-source "$MRA_DIR/lib/review-diff.sh"
-source "$MRA_DIR/lib/review-prompt.sh"
-source "$MRA_DIR/lib/review-context.sh"
-source "$MRA_DIR/lib/review-provider.sh"
-source "$MRA_DIR/lib/review-json.sh"
-source "$MRA_DIR/lib/review-strategy.sh"
-source "$MRA_DIR/lib/review-pr-discussion.sh"
-source "$MRA_DIR/lib/review-post.sh"
-source "$MRA_DIR/lib/review.sh"
-source "$MRA_DIR/lib/review-protocol.sh"
-source "$MRA_DIR/lib/review-debate.sh"
-source "$MRA_DIR/lib/review-debate-agents.sh"
-source "$MRA_DIR/lib/personas.sh"
-source "$MRA_DIR/lib/review-personas.sh"
-source "$MRA_DIR/lib/plan-council.sh"
-source "$MRA_DIR/lib/model-provider.sh"
-source "$MRA_DIR/lib/test-audit.sh"
-source "$MRA_DIR/lib/pkb.sh"
-source "$MRA_DIR/lib/pkb-cache.sh"
-source "$MRA_DIR/lib/pkb-query.sh"
-source "$MRA_DIR/lib/pkb-prompts.sh"
-source "$MRA_DIR/lib/eval.sh"
-source "$MRA_DIR/lib/eval-probe.sh"
-source "$MRA_DIR/lib/eval-ablation.sh"
-source "$MRA_DIR/lib/dev-agent.sh"
-source "$MRA_DIR/lib/dev.sh"
-source "$MRA_DIR/lib/prd.sh"
-source "$MRA_DIR/lib/prd-issues.sh"
-source "$MRA_DIR/lib/prd-scaffold.sh"
+# Libraries, in load order. Order is significant — lib/review-verdict.sh mints
+# the run's sentinel token at source time, and later files read it — so this
+# stays an explicit ordered list rather than a glob over lib/*.sh.
+#
+# Kept as data rather than 78 hand-written `source` lines, which were most of
+# what pushed this file over the project's 800-line ceiling (#39).
+# tests/test_lib_loader.sh fails if a lib/*.sh exists that this list omits.
+MRA_LIBS=(
+  colors claude-invoke review-verdict args security-log
+  project-path url-policy validate config project-memory
+  preflight detect-type sync branch branch-ops
+  review-select pr-ops deps repos init
+  launch workflow alias cleanup db
+  doctor structural scan ask export
+  docker-exec test-runner change-detector integration-test status
+  log-viewer diff-summary open-ide watch setup-project
+  graph cost template ci snapshot
+  dashboard federation notify lint review-diff
+  review-prompt review-context review-provider review-json review-strategy
+  review-pr-discussion review-post review review-protocol review-debate
+  review-debate-agents personas review-personas plan-council model-provider
+  test-audit pkb pkb-cache pkb-query pkb-prompts
+  eval eval-probe eval-ablation dev-agent dev
+  prd prd-issues prd-scaffold
+)
+
+for _mra_lib in "${MRA_LIBS[@]}"; do
+  source "$MRA_DIR/lib/${_mra_lib}.sh"
+done
+unset _mra_lib
+
 
 usage() {
   cat <<'USAGE'
