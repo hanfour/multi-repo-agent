@@ -74,11 +74,7 @@ function isInsideRoot(real: string, root: string): boolean {
   return !!rel && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-export function isWorkspaceAllowed(
-  workspace: string,
-  policy: WorkspacePolicy,
-): boolean {
-  if (!workspace) return false;
+function isResolvedAllowed(real: string, policy: WorkspacePolicy): boolean {
   if (policy.allowedRoots.length === 0) {
     // If the operator set MRA_ALLOWED_WORKSPACES but no entry resolved,
     // deny everything rather than silently downgrade — they intended
@@ -88,8 +84,36 @@ export function isWorkspaceAllowed(
     // opted into open mode (TM-002). Default is deny.
     return policy.openMode;
   }
-  const real = safeRealpath(workspace) ?? normalizePath(workspace);
   return policy.allowedRoots.some((root) => isInsideRoot(real, root));
+}
+
+export function isWorkspaceAllowed(
+  workspace: string,
+  policy: WorkspacePolicy,
+): boolean {
+  if (!workspace) return false;
+  return isResolvedAllowed(safeRealpath(workspace) ?? normalizePath(workspace), policy);
+}
+
+/**
+ * Authorise `workspace` and return the path that authorisation applied to.
+ *
+ * Callers must run the command against THIS path, not the string they were
+ * handed. Checking one path and using another leaves a window in which a
+ * component of the caller's string is replaced by a symlink pointing outside
+ * the allowlist between the check and the spawn (#40). Resolution happens
+ * exactly once here so there is no second lookup to disagree with the first.
+ */
+export function resolveAllowedWorkspace(
+  workspace: string,
+  policy: WorkspacePolicy,
+): string {
+  if (!workspace) throw new WorkspaceNotAllowedError(workspace, policy);
+  const real = safeRealpath(workspace) ?? normalizePath(workspace);
+  if (!isResolvedAllowed(real, policy)) {
+    throw new WorkspaceNotAllowedError(workspace, policy);
+  }
+  return real;
 }
 
 export class WorkspaceNotAllowedError extends Error {
