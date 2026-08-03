@@ -5,6 +5,39 @@
 # Path helpers
 # ---------------------------------------------------------------------------
 
+# _db_instance_rows <db.json>
+# One US-separated row per database, in `keys[]` order:
+#   name, engine, version, port, password // "mra_password", platform // "",
+#   has_schemas ("true"/"false"), schemas joined with ", "
+#
+# has_schemas and the joined list are separate fields on purpose: a database
+# CAN declare "schemas": {} , and the listing prints an empty SCHEMAS column
+# for it. Folding them into one field would make an empty join indistinguishable
+# from "no schemas key" and the caller would fall back to the instance name.
+#
+# Note `version` carries NO default here — lib/doctor.sh defaults it to
+# "latest", this file does not, and collapsing the two into one shared helper
+# would mean guessing which caller was right. See _doctor_db_rows for why
+# `tostring` matters (#37).
+# Fields are separated by US (\x1f), not TAB: bash treats tab as IFS
+# whitespace, so `IFS=$'\t' read` COLLAPSES runs of tabs and an empty field in
+# the middle -- an absent `platform`, say -- silently shifts every field after
+# it. US is not IFS whitespace, so empty fields survive.
+_db_instance_rows() {
+  jq -r '
+    .databases | keys[] as $k | [
+      $k,
+      (.[$k].engine | tostring),
+      (.[$k].version | tostring),
+      (.[$k].port | tostring),
+      ((.[$k].password // "mra_password") | tostring),
+      ((.[$k].platform // "") | tostring),
+      (.[$k] | has("schemas") | tostring),
+      ((.[$k].schemas // {} | keys | join(", ")) | tostring)
+    ] | join("\u001f")
+  ' "$1"
+}
+
 get_db_json_path() {
   local workspace="$1"
   echo "$workspace/.collab/db.json"
@@ -405,24 +438,21 @@ setup_all_databases() {
     return 1
   fi
 
-  local instance_names=()
-  while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    instance_names+=("$name")
-  done < <(jq -r '.databases | keys[]' "$db_json_path")
+  local instance_rows=()
+  while IFS= read -r row; do
+    [[ -z "$row" ]] && continue
+    instance_rows+=("$row")
+  done < <(_db_instance_rows "$db_json_path")
 
-  if [[ ${#instance_names[@]} -eq 0 ]]; then
+  if [[ ${#instance_rows[@]} -eq 0 ]]; then
     log_warn "no databases defined in db.json" "db"
     return 0
   fi
 
-  for instance_name in "${instance_names[@]}"; do
-    local engine version port password platform
-    engine=$(jq -r --arg n "$instance_name" '.databases[$n].engine' "$db_json_path")
-    version=$(jq -r --arg n "$instance_name" '.databases[$n].version' "$db_json_path")
-    port=$(jq -r --arg n "$instance_name" '.databases[$n].port' "$db_json_path")
-    password=$(jq -r --arg n "$instance_name" '.databases[$n].password // "mra_password"' "$db_json_path")
-    platform=$(jq -r --arg n "$instance_name" '.databases[$n].platform // ""' "$db_json_path")
+  local instance_row
+  for instance_row in "${instance_rows[@]}"; do
+    local instance_name engine version port password platform
+    IFS=$'\037' read -r instance_name engine version port password platform _ _ <<<"$instance_row"
 
     log_progress "setting up instance: $instance_name ($engine:$version)" "db"
 
@@ -607,13 +637,13 @@ list_databases() {
     return 0
   fi
 
-  local db_names=()
-  while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    db_names+=("$name")
-  done < <(jq -r '.databases | keys[]' "$db_json_path")
+  local db_rows=()
+  while IFS= read -r row; do
+    [[ -z "$row" ]] && continue
+    db_rows+=("$row")
+  done < <(_db_instance_rows "$db_json_path")
 
-  if [[ ${#db_names[@]} -eq 0 ]]; then
+  if [[ ${#db_rows[@]} -eq 0 ]]; then
     log_warn "no databases defined in db.json" "db"
     return 0
   fi
@@ -621,11 +651,11 @@ list_databases() {
   printf "\n%-16s %-10s %-8s %-6s %-10s %s\n" "INSTANCE" "ENGINE" "VERSION" "PORT" "STATUS" "SCHEMAS"
   printf "%s\n" "--------------------------------------------------------------------------------"
 
-  for db_name in "${db_names[@]}"; do
-    local engine version port container_name status schemas_list
-    engine=$(jq -r --arg n "$db_name" '.databases[$n].engine' "$db_json_path")
-    version=$(jq -r --arg n "$db_name" '.databases[$n].version' "$db_json_path")
-    port=$(jq -r --arg n "$db_name" '.databases[$n].port' "$db_json_path")
+  local db_row
+  for db_row in "${db_rows[@]}"; do
+    local db_name engine version port container_name status schemas_list
+    local has_schemas schemas_joined
+    IFS=$'\037' read -r db_name engine version port _ _ has_schemas schemas_joined <<<"$db_row"
     container_name="mra-db-$db_name"
 
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${container_name}$"; then
@@ -635,10 +665,8 @@ list_databases() {
     fi
 
     # List schemas if multi-db, otherwise show instance name
-    local has_schemas
-    has_schemas=$(jq -r --arg n "$db_name" '.databases[$n] | has("schemas")' "$db_json_path")
     if [[ "$has_schemas" == "true" ]]; then
-      schemas_list=$(jq -r --arg n "$db_name" '.databases[$n].schemas | keys | join(", ")' "$db_json_path")
+      schemas_list="$schemas_joined"
     else
       schemas_list="$db_name"
     fi
