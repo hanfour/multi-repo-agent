@@ -14,7 +14,7 @@ import {
 } from "./input-validation.js";
 import {
   loadWorkspacePolicy,
-  assertWorkspaceAllowed,
+  resolveAllowedWorkspace,
   WorkspaceNotAllowedError,
 } from "./workspace-policy.js";
 
@@ -76,8 +76,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
+  // Use the path the policy authorised, never the caller's string — see
+  // resolveAllowedWorkspace (#40).
+  let resolvedWorkspace: string;
   try {
-    assertWorkspaceAllowed(workspace, policy);
+    resolvedWorkspace = resolveAllowedWorkspace(workspace, policy);
   } catch (error) {
     if (error instanceof WorkspaceNotAllowedError) {
       return {
@@ -92,7 +95,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const timeout = toolTimeout(tool);
 
   try {
-    const result = await executeMra(mraArgs, workspace, timeout);
+    const result = await executeMra(mraArgs, resolvedWorkspace, timeout);
     const cleanOutput = stripAnsi(result.output);
 
     if (result.exitCode !== 0 && !cleanOutput) {
