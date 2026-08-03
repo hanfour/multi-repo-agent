@@ -18,7 +18,7 @@
 
 > Change an API in repo A. mra automatically finds every downstream consumer in repos B, C, D — reviews the impact, updates the code, and opens the PRs. All from one command.
 
-**v3.0.0** | 42 CLI commands | 6 AI agents | 9 MCP tools | 77 test suites | 10 TM-tracked security controls
+**v3.1.0** | 42 CLI commands | 6 AI agents | 9 MCP tools | 98 test suites | 10 TM-tracked security controls
 
 ---
 
