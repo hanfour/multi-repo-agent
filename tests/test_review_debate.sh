@@ -15,6 +15,11 @@
 # sentinel from both agents = an incomplete/failed review = ERROR, never APPROVE.
 set -uo pipefail
 
+# Pin the sentinel token so the fixtures below can spell it literally. A real
+# run mints a per-run nonce (GHSA-5gjm-rqvq-f877); lib/review-verdict.sh honours
+# this override, and tests/test_review_verdict.sh covers the nonce itself.
+export MRA_REVIEW_SENTINEL_TOKEN="MRA-REVIEW-COMPLETE"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/lib/colors.sh"
 source "$SCRIPT_DIR/lib/review-verdict.sh"

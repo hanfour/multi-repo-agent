@@ -4,10 +4,40 @@
 # place so a review can never be judged complete by two different rules.
 
 # The sentinel a completed review ends its output with:
-#   ===MRA-REVIEW-COMPLETE: APPROVED===
-#   ===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===
+#   ===MRA-REVIEW-COMPLETE-<nonce>: APPROVED===
+#   ===MRA-REVIEW-COMPLETE-<nonce>: CHANGES_REQUESTED===
 # Absence == the review did not finish (cutoff/failure), never an approval.
-MRA_REVIEW_SENTINEL_TOKEN="MRA-REVIEW-COMPLETE"
+#
+# The token carries a nonce minted once per process. A constant token is fully
+# predictable from this (public) source, so a diff could simply contain a line
+# spelling a valid sentinel and rely on the reviewing model quoting it back —
+# turning content under review into a forged verdict (GHSA-5gjm-rqvq-f877).
+# The nonce is generated after the diff was authored and never leaves this
+# process except inside the prompt, so diff content cannot spell it.
+#
+# Anchoring alone (GHSA-vj6f-5fw7-p56f) is not enough: once the sentinel must
+# occupy a whole line, injected content can still supply a whole line. Only an
+# unpredictable token removes the forgery primitive.
+_mra_review_mint_nonce() {
+  local n=""
+  if command -v openssl >/dev/null 2>&1; then
+    n=$(openssl rand -hex 8 2>/dev/null)
+  fi
+  if [[ ! "$n" =~ ^[0-9a-f]{16}$ && -r /dev/urandom ]]; then
+    n=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -dc '0-9a-f')
+  fi
+  if [[ ! "$n" =~ ^[0-9a-f]{16}$ ]]; then
+    # Last resort: bash's own PRNG. Weaker than urandom, but it still delivers
+    # the one property required here — unpredictability from diff content.
+    n=$(printf '%04x%04x%04x%04x' "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM")
+  fi
+  printf '%s' "$n"
+}
+
+# Deliberately overridable: tests pin it to spell sentinels literally, and an
+# operator debugging a transcript can do the same. It is NOT exported, so a
+# nested `mra` process mints its own.
+MRA_REVIEW_SENTINEL_TOKEN="${MRA_REVIEW_SENTINEL_TOKEN:-MRA-REVIEW-COMPLETE-$(_mra_review_mint_nonce)}"
 
 # Extract a declared verdict from arbitrary review text: APPROVED |
 # CHANGES_REQUESTED | NONE. CHANGES_REQUESTED wins if both appear.

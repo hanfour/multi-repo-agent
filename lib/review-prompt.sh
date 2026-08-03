@@ -114,8 +114,8 @@ Rules for "body":
 ## Completion (REQUIRED)
 After the JSON object, output EXACTLY ONE final line on its own — it confirms the
 review finished:
-===MRA-REVIEW-COMPLETE: APPROVED===           (status APPROVED)
-===MRA-REVIEW-COMPLETE: CHANGES_REQUESTED===   (status CHANGES_REQUESTED)
+==='"${MRA_REVIEW_SENTINEL_TOKEN}"': APPROVED===           (status APPROVED)
+==='"${MRA_REVIEW_SENTINEL_TOKEN}"': CHANGES_REQUESTED===   (status CHANGES_REQUESTED)
 Omitting this line marks the review INCOMPLETE (it will not be treated as an approval).'
   else
     output_instructions='## Review Output
