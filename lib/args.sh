@@ -35,21 +35,41 @@ append_add_dir_string() {
   fi
 }
 
+# Characters that can cause expansion, substitution, redirection or word
+# splitting when a string is evaluated as bash source. printf %q renders every
+# one of them as a backslash escape, so once escape pairs are collapsed none
+# may legitimately remain.
+_MRA_ADD_DIR_OPERAND='[^][(){}<>|&;$`\\'"'"'"*?~!#[:space:]]+'
+_MRA_ADD_DIR_RE="^--add-dir ${_MRA_ADD_DIR_OPERAND}( --add-dir ${_MRA_ADD_DIR_OPERAND})*$"
+
 # expand_add_dir_string <out-array-name> <quoted-string>
 # Parse a string produced by build_add_dir_string back into a bash array.
-# Uses eval, so the input must come from build_add_dir_string /
-# append_add_dir_string. As defence in depth we reject anything containing
-# shell metacharacters that printf %q output never produces unescaped.
+# Uses eval, so the input is validated against an allowlist first: collapse the
+# backslash escape pairs printf %q emits to a placeholder, then require what
+# remains to be nothing but `--add-dir <plain path>` pairs. Anything else fails
+# closed. The placeholder (rather than deletion) keeps an operand that is
+# entirely escaped -- a path like `~` renders as `\~` -- from collapsing to the
+# empty string and being refused.
+#
+# This replaced a blacklist of `;`, `&&`, `||`, backtick and `$(`, which was
+# wrong in both directions (GHSA-8m99-vc82-25m4). Too loose: it never saw
+# process substitution — `<(cmd)` EXECUTED cmd — nor parameter expansion,
+# tilde expansion or globbing, all of which it let through. Too tight: it
+# tested the ESCAPED string, so a legitimate path containing a backtick or a
+# semicolon arrived as `/a\;b` and was refused. Enumerating dangerous
+# metacharacters cannot be made complete; describing the safe shape can.
+#
+# Paths containing control characters are rejected rather than evaluated:
+# printf %q renders those as `$'...'`, which this allowlist does not admit.
 expand_add_dir_string() {
   local -n _out_arr="$1"
   local _str="$2"
-  if [[ -z "$_str" ]]; then
-    _out_arr=()
-    return
-  fi
-  if [[ "$_str" =~ \;|\&\&|\|\||\`|\$\( ]]; then
-    echo "expand_add_dir_string: refusing suspicious input: $_str" >&2
-    _out_arr=()
+  _out_arr=()
+  [[ -z "$_str" ]] && return 0
+  local _bare
+  _bare=$(printf '%s' "$_str" | sed 's/\\./_/g')
+  if [[ ! "$_bare" =~ $_MRA_ADD_DIR_RE ]]; then
+    echo "expand_add_dir_string: refusing input that is not printf %q --add-dir pairs: $_str" >&2
     return 1
   fi
   eval "_out_arr=( $_str )"

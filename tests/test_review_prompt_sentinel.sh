@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # build_review_prompt: inline mode requires the completion sentinel; terminal does not.
 set -uo pipefail
+
+# Pin the sentinel token so the fixtures below can spell it literally. A real
+# run mints a per-run nonce (GHSA-5gjm-rqvq-f877); lib/review-verdict.sh honours
+# this override, and tests/test_review_verdict.sh covers the nonce itself.
+export MRA_REVIEW_SENTINEL_TOKEN="MRA-REVIEW-COMPLETE"
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$MRA_DIR/lib/colors.sh"
 source "$MRA_DIR/lib/review-prompt.sh"
