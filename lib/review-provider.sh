@@ -110,6 +110,23 @@ review_provider_effective_model() {
   fi
 }
 
+# Codex reviews run with --ignore-user-config, so ~/.codex/config.toml never
+# reaches the child and its model_reasoning_effort is silently ignored. The
+# effort therefore has to travel as an explicit -c override, or every review
+# runs at whatever the Codex CLI defaults to. Empty means "defer to that
+# default"; the value is spliced into a TOML string, so it is whitelisted the
+# same way the provider transport overrides are.
+review_provider_codex_reasoning_effort() {
+  local v
+  v=$(_review_config_value "codexReasoningEffort")
+  [[ -n "$v" ]] || return 0
+  if [[ ! "$v" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    log_warn "ignoring invalid review.codexReasoningEffort='$v' (expected an identifier such as max, xhigh, high)" "review" >&2
+    return 0
+  fi
+  printf '%s' "$v"
+}
+
 review_provider_label() {
   local provider="$1" model="${2:-}"
   if [[ -n "$model" ]]; then
@@ -314,6 +331,38 @@ _review_codex_watchdog_secs() {
   printf '%s' "$secs"
 }
 
+# --ignore-user-config drops every knob in ~/.codex/config.toml, not just the
+# transport ones restored above. The runtime settings that shape a long review
+# — how much context the model gets, and when it starts compacting away the
+# findings it has accumulated — have to be forwarded explicitly or the review
+# silently runs against the model catalog's defaults instead.
+# Emits one `key=value` TOML override per line; unset or malformed values are
+# skipped so codex keeps its own default rather than receiving a broken one.
+# TOML integers may carry digit separators (`1_000_000`), which the raw text
+# extraction preserves verbatim. Normalize them away before validating, or a
+# perfectly valid config loses its override — the very failure this file exists
+# to prevent. Separator placement follows TOML: between digits only, so the
+# forms codex itself refuses to parse (`_1000`, `1000_`, `1__000`) are refused
+# here too rather than being silently repaired into something codex never saw.
+_review_toml_integer_value() {
+  local raw="$1"
+  [[ "$raw" =~ ^[0-9]+(_[0-9]+)*$ ]] || return 1
+  printf '%s' "${raw//_/}"
+}
+
+_review_codex_runtime_overrides() {
+  local config="$1" v
+  v=$(_review_toml_string_value "$config" "" model_context_window)
+  if v=$(_review_toml_integer_value "$v"); then printf 'model_context_window=%s\n' "$v"; fi
+  v=$(_review_toml_string_value "$config" "" model_auto_compact_token_limit)
+  if v=$(_review_toml_integer_value "$v"); then printf 'model_auto_compact_token_limit=%s\n' "$v"; fi
+  v=$(_review_toml_string_value "$config" "" service_tier)
+  if [[ "$v" =~ ^[A-Za-z0-9._-]+$ ]]; then printf 'service_tier="%s"\n' "$v"; fi
+  v=$(_review_toml_string_value "$config" "" disable_response_storage)
+  if [[ "$v" == "true" || "$v" == "false" ]]; then printf 'disable_response_storage=%s\n' "$v"; fi
+  return 0
+}
+
 _review_provider_codex_prompt() {
   local prompt="$1" system_prompt_file="${2:-}"
   if [[ -n "$system_prompt_file" && -f "$system_prompt_file" && ! -L "$system_prompt_file" ]]; then
@@ -376,7 +425,14 @@ _review_call_one_provider() {
       if [[ "$requires_openai_auth" == "true" || "$requires_openai_auth" == "false" ]]; then
         args+=(-c "model_providers.$provider_name.requires_openai_auth=$requires_openai_auth")
       fi
+      local runtime_override
+      while IFS= read -r runtime_override; do
+        if [[ -n "$runtime_override" ]]; then args+=(-c "$runtime_override"); fi
+      done < <(_review_codex_runtime_overrides "$codex_config")
       [[ -n "$model" ]] && args+=(--model "$model")
+      local reasoning_effort
+      reasoning_effort=$(review_provider_codex_reasoning_effort)
+      [[ -n "$reasoning_effort" ]] && args+=(-c "model_reasoning_effort=\"$reasoning_effort\"")
       args+=("$prompt")
       local watchdog_secs
       watchdog_secs=$(_review_codex_watchdog_secs)

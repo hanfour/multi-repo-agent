@@ -18,8 +18,9 @@
     "dualMergePolicy": "union",
     "models": {
       "claude": "sonnet",
-      "codex": ""
+      "codex": "gpt-5.6-luna"
     },
+    "codexReasoningEffort": "max",
     "context": {
       "loadAgentsMd": true,
       "loadLegacyClaudeMd": true,
