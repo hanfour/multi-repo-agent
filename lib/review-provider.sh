@@ -155,8 +155,30 @@ _review_sandbox_canonical_path() {
   fi
 }
 
+# _review_write_codex_sandbox_profile <profile> <original-home> <model-home> <writable-root>...
+#
+# mra is the ONLY sandbox around codex, so this profile has to carry the write
+# protection too.
+#
+# codex sandboxes every tool command it runs by applying a deny-default seatbelt
+# profile. macOS refuses that when the process is already sandboxed —
+# `sandbox-exec: sandbox_apply: Operation not permitted` — so wrapping codex made
+# every command fail: no file reads, no grep, no git, on every macOS machine,
+# silently, while the review prompt instructed the model to verify by reading
+# code. Measured A/B: identical codex invocation succeeds unwrapped and fails
+# wrapped. No outer profile can fix it; nesting a deny-default profile is refused
+# regardless of how permissive the outer one is.
+#
+# The invocation therefore tells codex not to sandbox itself. That hands this
+# profile a responsibility it did not have: it used to be `(allow default)` plus
+# credential denials, which permitted writes anywhere — weaker than the codex
+# sandbox it now replaces. Writes are denied by default and re-allowed only for
+# the model home, the review's own working roots, the temporary directory and
+# the standard devices.
 _review_write_codex_sandbox_profile() {
-  local profile="$1" original_home="$2" path quoted
+  local profile="$1" original_home="$2" model_home="${3:-}" path quoted
+  shift 3 2>/dev/null || shift $#
+  local writable_roots=("$@")
   {
     echo "(version 1)"
     echo "(allow default)"
@@ -181,6 +203,20 @@ _review_write_codex_sandbox_profile() {
       echo "(deny file-read* (subpath $quoted))"
       echo "(deny file-write* (subpath $quoted))"
     done
+
+    # Write protection, previously supplied by codex's own sandbox.
+    echo "(deny file-write*)"
+    local root
+    for root in "$model_home" "${writable_roots[@]}" "${TMPDIR:-/tmp}"; do
+      [[ -n "$root" ]] || continue
+      root=$(_review_sandbox_canonical_path "$root")
+      quoted=$(_review_sandbox_quote "$root")
+      echo "(allow file-write* (subpath $quoted))"
+    done
+    # Redirection, pipes and terminal output must keep working or every command
+    # the model runs fails on its own stdout.
+    echo '(allow file-write-data (literal "/dev/null") (literal "/dev/zero") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/tty"))'
+    echo '(allow file-write* (regex #"^/dev/fd/"))'
   } > "$profile"
   chmod 600 "$profile"
 }
@@ -202,7 +238,14 @@ _review_without_github_credentials() {
         return 1
       fi
       codex_sandbox_profile="$model_home/codex-sensitive.sb"
-      _review_write_codex_sandbox_profile "$codex_sandbox_profile" "$original_home" || return 1
+      local -a _sandbox_roots=()
+      if [[ -n "${MRA_REVIEW_SANDBOX_WRITABLE_ROOTS:-}" ]]; then
+        while IFS= read -r _root; do
+          [[ -n "$_root" ]] && _sandbox_roots+=("$_root")
+        done <<< "$MRA_REVIEW_SANDBOX_WRITABLE_ROOTS"
+      fi
+      _review_write_codex_sandbox_profile "$codex_sandbox_profile" "$original_home" \
+        "$model_home" "${_sandbox_roots[@]}" || return 1
     else
       _review_copy_auth_file "$original_home/.claude/.credentials.json" "$model_home/.claude/.credentials.json"
     fi
@@ -413,7 +456,20 @@ _review_call_one_provider() {
       requires_openai_auth=$(_review_toml_string_value "$codex_config" "model_providers.$provider_name" requires_openai_auth)
       [[ "$base_url" =~ ^https://[A-Za-z0-9._:/-]+$ ]] || base_url="https://api.openai.com/v1"
       [[ "$wire_api" =~ ^(responses|chat)$ ]] || wire_api="responses"
-      local args=(exec --sandbox read-only --cd "$trusted_cwd" --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules
+      # codex sandboxes each tool command by applying a deny-default seatbelt
+      # profile, which macOS refuses inside an existing sandbox. Where mra
+      # supplies that outer sandbox, codex must not try to nest its own — the
+      # flag's own documentation is "intended solely for running in environments
+      # that are externally sandboxed", which is exactly this. Without it every
+      # command the model runs dies with `sandbox_apply: Operation not
+      # permitted`, silently, and the review degrades to whatever is in the
+      # prompt. Where sandbox-exec is unavailable there is no outer sandbox, so
+      # codex keeps its own.
+      local -a codex_sandbox_args=(--sandbox read-only)
+      if command -v sandbox-exec >/dev/null 2>&1; then
+        codex_sandbox_args=(--dangerously-bypass-approvals-and-sandbox)
+      fi
+      local args=(exec "${codex_sandbox_args[@]}" --cd "$trusted_cwd" --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules
         --output-last-message "$codex_last"
         -c shell_environment_policy.inherit=none
         -c 'shell_environment_policy.set.PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"'
@@ -447,6 +503,10 @@ _review_call_one_provider() {
       # </dev/null: codex reads "additional input" from an inherited non-tty
       # stdin and blocks until EOF the caller may never send (issue #18's
       # observed freeze); the prompt travels as an argument, never stdin.
+      # The outer profile is now the only write boundary, so it has to know
+      # which roots codex legitimately writes to. Newline-separated: these are
+      # mktemp paths, which never contain newlines.
+      MRA_REVIEW_SANDBOX_WRITABLE_ROOTS="$trusted_cwd"$'\n'"$snapshot"$'\n'"$(dirname "$codex_last")" \
       MRA_REVIEW_AUTH_PROVIDER=codex _review_without_github_credentials "${codex_cmd[@]}" "${args[@]}" >"$codex_stdout" </dev/null || rc=$?
       if [[ "$rc" -eq 142 ]]; then
         log_error "codex timed out after ${watchdog_secs}s and was killed (tune MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS; 0 disables the watchdog)" "review" >&2
