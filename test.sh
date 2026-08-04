@@ -19,6 +19,22 @@ TEST_LOG_DIR="${MRA_TEST_LOG_DIR:-$MRA_DIR/.mra-test-logs}"
 rm -rf "$TEST_LOG_DIR"
 mkdir -p "$TEST_LOG_DIR"
 
+# Persisting a failing test's log (#52) means whatever it printed lands on
+# disk. tests/test_review_provider.sh prints the credential environment it is
+# asserting about, so a run with GH_TOKEN exported wrote a live token into
+# .mra-test-logs/. Gitignored is not the same as safe: redact before the log is
+# kept, and before the tail is echoed to the terminal or a CI transcript.
+#
+# Same token shapes lib/review-json.sh masks in review output.
+_redact_secrets() {
+  sed -E -i.bak \
+    -e 's/gh[pousr]_[A-Za-z0-9_]{20,}/[REDACTED_GITHUB_TOKEN]/g' \
+    -e 's/github_pat_[A-Za-z0-9_]{20,}/[REDACTED_GITHUB_TOKEN]/g' \
+    -e 's/sk-[A-Za-z0-9_-]{20,}/[REDACTED_OPENAI_API_KEY]/g' \
+    "$1" 2>/dev/null || true
+  rm -f "$1.bak"
+}
+
 run_one() {
   local script="$1"
   local name
@@ -32,6 +48,7 @@ run_one() {
   else
     SHELL_FAIL=$((SHELL_FAIL + 1))
     FAILED_FILES+=("$name")
+    _redact_secrets "$logfile"
     # Prefix every line with the test name: filtering this stream (a grep for
     # a summary line, a CI log search) must still say WHICH test produced it.
     tail -20 "$logfile" | sed "s|^|   [$name] |"
