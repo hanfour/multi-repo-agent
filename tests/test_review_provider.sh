@@ -6,6 +6,19 @@ set -euo pipefail
 # this override, and tests/test_review_verdict.sh covers the nonce itself.
 export MRA_REVIEW_SENTINEL_TOKEN="MRA-REVIEW-COMPLETE"
 
+# This file asserts that credentials do NOT reach the model child, so it must
+# own its credential environment rather than inherit the developer's.
+#
+# Without this the checks below are actively misleading. They invoke the review
+# path with a `GH_TOKEN=secret ...` command prefix, and bash treats a prefix
+# assignment on a function call as a temporary binding: `unset GH_TOKEN` inside
+# then removes that binding and REVEALS the outer exported value instead of
+# clearing it. With a real GH_TOKEN exported the stub therefore recorded the
+# developer's token, the isolation assertion failed, and the failure looked
+# like a flaky test rather than a dirty environment (#52). Production is
+# unaffected — nothing there passes GH_TOKEN as a command prefix.
+unset GH_TOKEN GITHUB_TOKEN OPENAI_API_KEY
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP=$(mktemp -d)
 export MRA_CONFIG="$TMP/config.json"
