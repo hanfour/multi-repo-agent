@@ -1,9 +1,10 @@
-.PHONY: test build lint lint-all mcp-install help clean
+.PHONY: test test-repeat build lint lint-all mcp-install help clean
 
 MCP_INSTALLED := mcp-server/node_modules/.package-lock.json
 
 help:
 	@echo "make test         Run all shell tests + mcp-server tests"
+	@echo "make test-repeat  Run the suite REPEAT times (default 20) to surface flaky tests"
 	@echo "make build        Build mcp-server (tsc) — incremental"
 	@echo "make mcp-install  Install mcp-server node deps (only when stale)"
 	@echo "make lint         Run shellcheck at the CI blocking severity (-S error)"
@@ -15,6 +16,19 @@ help:
 # no-op once deps are current.
 test: mcp-install
 	bash test.sh
+
+# Surfaces flaky tests without waiting for one to appear by chance (#52).
+# Stops at the first failure so .mra-test-logs/ describes THAT run rather than
+# being overwritten by the next one.
+REPEAT ?= 20
+test-repeat: mcp-install
+	@for i in $$(seq 1 $(REPEAT)); do \
+		printf '=== run %s/%s ===\n' "$$i" "$(REPEAT)"; \
+		bash test.sh >/dev/null 2>&1 || { \
+			echo "FAILED on run $$i — logs in .mra-test-logs/"; \
+			ls .mra-test-logs/ 2>/dev/null; exit 1; }; \
+	done; \
+	echo "$(REPEAT) runs, no failures"
 
 # Install only when package.json / package-lock.json changes — npm writes
 # .package-lock.json under node_modules whenever it (re)installs, so we use
