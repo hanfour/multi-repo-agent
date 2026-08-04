@@ -4,28 +4,38 @@
 set -uo pipefail
 
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$MRA_DIR"
+cd "$MRA_DIR" || exit 1
 
 SHELL_PASS=0
 SHELL_FAIL=0
 FAILED_FILES=()
+
+# Logs of FAILING tests are kept here so a failure can be diagnosed after the
+# fact. run_one used to print `tail -20` inline and immediately delete the log,
+# so a failure that scrolled past — or any invocation that filtered stdout —
+# lost the detail permanently. That is how an observed 97-of-98 run became
+# unreproducible (#52). Passing tests clean up after themselves.
+TEST_LOG_DIR="${MRA_TEST_LOG_DIR:-$MRA_DIR/.mra-test-logs}"
+rm -rf "$TEST_LOG_DIR"
+mkdir -p "$TEST_LOG_DIR"
 
 run_one() {
   local script="$1"
   local name
   name=$(basename "$script")
   printf '\n>>> %s\n' "$name"
-  local logfile
-  logfile=$(mktemp)
+  local logfile="$TEST_LOG_DIR/${name%.sh}.log"
   if bash "$script" >"$logfile" 2>&1; then
     SHELL_PASS=$((SHELL_PASS + 1))
     tail -3 "$logfile" | sed 's/^/   /'
+    rm -f "$logfile"
   else
     SHELL_FAIL=$((SHELL_FAIL + 1))
     FAILED_FILES+=("$name")
-    tail -20 "$logfile" | sed 's/^/   /'
+    # Prefix every line with the test name: filtering this stream (a grep for
+    # a summary line, a CI log search) must still say WHICH test produced it.
+    tail -20 "$logfile" | sed "s|^|   [$name] |"
   fi
-  rm -f "$logfile"
 }
 
 shopt -s nullglob
@@ -71,6 +81,9 @@ fi
 if (( SHELL_FAIL > 0 )); then
   printf '\nFailed shell tests:\n'
   printf '  - %s\n' "${FAILED_FILES[@]}"
+  printf '\nFull logs kept for diagnosis: %s\n' "$TEST_LOG_DIR"
+else
+  rmdir "$TEST_LOG_DIR" 2>/dev/null || true
 fi
 
 if (( SHELL_FAIL > 0 || NODE_RC != 0 )); then

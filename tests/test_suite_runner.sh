@@ -54,5 +54,57 @@ else
   fail "runner now fails even when the mcp-server suite passes: $out2"
 fi
 
+# --- #52: a failing test must leave diagnosable evidence --------------------
+# run_one used to print tail -20 inline and then `rm -f` the log, so a failure
+# that scrolled past — or any invocation that filtered stdout — lost the detail
+# permanently. That is exactly how an observed 97/1 run became unreproducible.
+FTMP=$(mktemp -d)
+mkdir -p "$FTMP/tests"
+cp "$SCRIPT_DIR/test.sh" "$FTMP/test.sh"
+cat > "$FTMP/tests/test_deliberate_failure.sh" <<'INNER'
+#!/usr/bin/env bash
+echo "UNIQUE-MARKER-line-one"
+echo "UNIQUE-MARKER-line-two"
+exit 1
+INNER
+cat > "$FTMP/tests/test_deliberate_pass.sh" <<'INNER'
+#!/usr/bin/env bash
+echo "passing test output"
+exit 0
+INNER
+
+fout=$(bash "$FTMP/test.sh" 2>&1); frc=$?
+
+[[ $frc -ne 0 ]] && ok "a failing test makes the run fail" \
+                 || fail "run exited 0 with a failing test"
+
+# The failing test's name must travel WITH its output, so filtering the stream
+# still identifies it.
+if printf '%s' "$fout" | grep -q 'test_deliberate_failure.*UNIQUE-MARKER-line-two'; then
+  ok "failure output lines carry the test name"
+else
+  fail "failure output does not identify its test on the same line"
+fi
+
+# The log must survive for post-hoc diagnosis, and the summary must say where.
+logdir="$FTMP/.mra-test-logs"
+if [[ -s "$logdir/test_deliberate_failure.log" ]]; then
+  ok "failing test log is preserved"
+else
+  fail "failing test log was discarded"
+fi
+grep -q 'UNIQUE-MARKER-line-one' "$logdir/test_deliberate_failure.log" 2>/dev/null \
+  && ok "preserved log holds the full output" || fail "preserved log is missing output"
+case "$fout" in
+  *".mra-test-logs"*) ok "summary points at the log directory" ;;
+  *) fail "summary does not mention where the logs are" ;;
+esac
+
+# A passing test must not leave litter behind.
+[[ ! -e "$logdir/test_deliberate_pass.log" ]] \
+  && ok "passing test leaves no log" || fail "passing test left a log behind"
+
+rm -rf "$FTMP"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

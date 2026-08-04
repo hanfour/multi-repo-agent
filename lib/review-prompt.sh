@@ -8,7 +8,9 @@
 build_review_prompt() {
   local project="$1"
   local project_dir="$2"
-  local graph_file="$3"
+  # Accepted for call-site symmetry with the other prompt builders; the diff
+  # and consumer context are passed in explicitly rather than read from it.
+  local _graph_file="$3"
   local base_ref="${4:-main}"
   local project_type="${5:-unknown}"
   local consumers="${6:-}"

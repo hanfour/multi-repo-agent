@@ -25,15 +25,17 @@ cat > "$GF" <<'JSON'
 }}
 JSON
 
-ordered=$(order_repos_by_deps "$GF" a b c)
+# Named apart from pr-ops.sh's own `ordered` array: shellcheck follows the
+# source and otherwise conflates this string with it.
+ordered_out=$(order_repos_by_deps "$GF" a b c)
 # b must appear before a
-pos_a=$(echo "$ordered" | grep -nx a | cut -d: -f1)
-pos_b=$(echo "$ordered" | grep -nx b | cut -d: -f1)
+pos_a=$(echo "$ordered_out" | grep -nx a | cut -d: -f1)
+pos_b=$(echo "$ordered_out" | grep -nx b | cut -d: -f1)
 if [[ -z "$pos_a" || -z "$pos_b" || "$pos_b" -ge "$pos_a" ]]; then
-  echo "FAIL: dependency 'b' should be ordered before consumer 'a' (got: $(echo $ordered | tr '\n' ' '))"; errors=$((errors+1))
+  echo "FAIL: dependency 'b' should be ordered before consumer 'a' (got: $(echo "$ordered_out" | tr '\n' ' '))"; errors=$((errors+1))
 fi
 # all three present
-for r in a b c; do echo "$ordered" | grep -qx "$r" || { echo "FAIL: $r missing from order"; errors=$((errors+1)); }; done
+for r in a b c; do echo "$ordered_out" | grep -qx "$r" || { echo "FAIL: $r missing from order"; errors=$((errors+1)); }; done
 
 # unrelated subset (only c) -> just c, no error
 ordered2=$(order_repos_by_deps "$GF" c)

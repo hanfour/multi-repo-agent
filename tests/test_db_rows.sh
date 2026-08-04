@@ -110,5 +110,66 @@ echo '{"databases":{}}' > "$TMP/empty.json"
 mapfile -t none < <(_db_instance_rows "$TMP/empty.json")
 eq "no databases yields no rows" "0" "${#none[@]}"
 
+# --- schema rows: one pass replaces a length probe, a keys listing and one
+#     source lookup per schema. Defined once in lib/db.sh; lib/doctor.sh uses
+#     the same function rather than keeping its own copy of the rule (#37).
+mapfile -t srows < <(_db_schema_rows "$TMP/db.json" zeta)
+eq "schema rows: one per schema" "2" "${#srows[@]}"
+IFS=$'\037' read -r sname ssource <<<"${srows[0]}"
+eq "schema rows keep keys[] order" "audit" "$sname"
+eq "absent source renders empty"   ""      "$ssource"
+IFS=$'\037' read -r sname ssource <<<"${srows[1]}"
+eq "schema source is carried" "dump.sql" "$ssource"
+
+mapfile -t nrows < <(_db_schema_rows "$TMP/db.json" alpha)
+eq "single-schema instance yields no schema rows" "0" "${#nrows[@]}"
+
+legacy_src=$(jq -r --arg n zeta --arg s public '.databases[$n].schemas[$s].source // ""' "$TMP/db.json")
+IFS=$'\037' read -r _ ssource <<<"${srows[1]}"
+eq "schema source matches legacy jq -r rendering" "$legacy_src" "$ssource"
+
+# --- owner lookup: find the instance holding a schema in ONE pass instead of
+#     one probe per instance plus two more on the match.
+owner=$(_db_find_schema_owner "$TMP/db.json" public)
+IFS=$'\037' read -r oname osource oengine opassword <<<"$owner"
+eq "owner instance"  "zeta"      "$oname"
+eq "owner source"    "dump.sql"  "$osource"
+eq "owner engine"    "postgres"  "$oengine"
+eq "owner password"  "secret"    "$opassword"
+
+# Legacy skipped a schema whose `source` is absent — `.source // "null"` made it
+# indistinguishable from a missing schema. Preserve that.
+eq "schema without a source is not an owner" "" "$(_db_find_schema_owner "$TMP/db.json" audit)"
+eq "unknown schema has no owner"             "" "$(_db_find_schema_owner "$TMP/db.json" nosuch)"
+
+cat > "$TMP/pw-default.json" <<'JSON'
+{ "databases": { "solo": { "engine": "mysql", "schemas": { "app": { "source": "a.sql" } } } } }
+JSON
+IFS=$'\037' read -r _ _ _ opassword < <(_db_find_schema_owner "$TMP/pw-default.json" app)
+eq "owner password falls back to the default" "mra_password" "$opassword"
+
+# --- doctor project types: one pass instead of one jq per project (#37) ------
+cat > "$TMP/graph.json" <<'JSON'
+{ "projects": {
+    "web":  { "type": "next" },
+    "api":  { "type": null },
+    "bare": {}
+} }
+JSON
+declare -A PT=()
+while IFS=$'\037' read -r k v; do PT["$k"]="$v"; done < <(_doctor_project_types "$TMP/graph.json")
+eq "type is carried"                 "next"    "${PT[web]:-}"
+eq "null type renders as unknown"    "unknown" "${PT[api]:-}"
+eq "absent type renders as unknown"  "unknown" "${PT[bare]:-}"
+eq "one row per project"             "3"       "${#PT[@]}"
+
+legacy=$(jq -r --arg p api '.projects[$p].type // "unknown"' "$TMP/graph.json")
+eq "matches legacy jq -r rendering" "$legacy" "${PT[api]:-}"
+
+# A missing graph file must yield nothing rather than an error, so callers fall
+# back exactly as they did when the per-project jq failed.
+missing_probe=$(_doctor_project_types "$TMP/nope.json" 2>/dev/null; echo "rc=$?")
+case "$missing_probe" in *"rc=0"*) ok "missing graph file is not an error" ;; *) fail "missing graph file errored: $missing_probe" ;; esac
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

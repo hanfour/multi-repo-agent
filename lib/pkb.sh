@@ -14,7 +14,10 @@
 #   modules/
 #     <name>.md     — per-module deep summary (features, hooks, stores)
 
+# Consumed by lib/pkb-cache.sh, which shellcheck cannot see from here.
+# shellcheck disable=SC2034
 PKB_VERSION=2
+# shellcheck disable=SC2034
 PKB_DIR_NAME=".mra/pkb"
 
 # ---------------------------------------------------------------------------
@@ -29,9 +32,6 @@ pkb_generate() {
 
   local pkb
   pkb="$(pkb_dir "$project_dir")"
-  local mra_dir
-  mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
   log_progress "generating PKB for $project..." "pkb"
 
   # Initialize

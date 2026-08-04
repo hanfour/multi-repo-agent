@@ -60,7 +60,8 @@ _pkb_keep_doc() {
 
 pkb_age_hours() {
   local project_dir="$1"
-  local meta_file="$(pkb_dir "$project_dir")/meta.json"
+  local meta_file
+  meta_file="$(pkb_dir "$project_dir")/meta.json"
   if [[ ! -f "$meta_file" ]]; then echo "999999"; return; fi
 
   local last_updated
@@ -80,7 +81,8 @@ pkb_age_hours() {
 # ---------------------------------------------------------------------------
 pkb_init_meta() {
   local project_dir="$1" project="$2"
-  local pkb="$(pkb_dir "$project_dir")"
+  local pkb
+  pkb="$(pkb_dir "$project_dir")"
   mkdir -p "$pkb/modules"
   pkb_ensure_gitignore "$project_dir"
 
@@ -99,7 +101,8 @@ EOF
 
 pkb_update_meta() {
   local project_dir="$1"
-  local pkb="$(pkb_dir "$project_dir")"
+  local pkb
+  pkb="$(pkb_dir "$project_dir")"
   local meta_file="$pkb/meta.json"
   [[ ! -f "$meta_file" ]] && return
 
@@ -231,8 +234,10 @@ _pkb_record_mtimes() {
     local full_dir="$project_dir/$d"
     if [[ -d "$full_dir" ]]; then
       local newest_mtime
-      newest_mtime=$(find "$full_dir" -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.rb' -o -name '*.go' -o -name '*.py' 2>/dev/null | \
-        xargs stat -f %m 2>/dev/null | sort -rn | head -1 || echo "0")
+      # -exec must be inside \( \) or it binds to the last -o branch only.
+      newest_mtime=$(find "$full_dir" \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \
+        -o -name '*.rb' -o -name '*.go' -o -name '*.py' \) \
+        -exec stat -f %m {} + 2>/dev/null | sort -rn | head -1 || echo "0")
       [[ -z "$newest_mtime" ]] && newest_mtime=0
       mtimes=$(echo "$mtimes" | jq --arg k "$d" --arg v "$newest_mtime" '. + {($k): ($v | tonumber)}')
     fi
@@ -279,8 +284,10 @@ _pkb_check_mtimes() {
     local full_dir="$project_dir/$d"
     if [[ -d "$full_dir" ]]; then
       local current_mtime stored_mtime
-      current_mtime=$(find "$full_dir" -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.rb' -o -name '*.go' -o -name '*.py' 2>/dev/null | \
-        xargs stat -f %m 2>/dev/null | sort -rn | head -1 || echo "0")
+      # -exec must be inside \( \) or it binds to the last -o branch only.
+      current_mtime=$(find "$full_dir" \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \
+        -o -name '*.rb' -o -name '*.go' -o -name '*.py' \) \
+        -exec stat -f %m {} + 2>/dev/null | sort -rn | head -1 || echo "0")
       [[ -z "$current_mtime" ]] && current_mtime=0
       stored_mtime=$(echo "$stored_mtimes" | jq -r --arg k "$d" '.[$k] // 0')
       if [[ "$current_mtime" != "$stored_mtime" ]]; then

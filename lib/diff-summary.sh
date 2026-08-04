@@ -21,8 +21,11 @@ show_diff_summary() {
     uncommitted=$(git -C "$project_dir" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
     # Safe way to get unpushed commits without failing on branch with no upstream
     unpushed=0
-    if git -C "$project_dir" rev-parse @{upstream} &>/dev/null; then
-      unpushed=$(git -C "$project_dir" log --oneline @{upstream}..HEAD 2>/dev/null | wc -l | tr -d ' ')
+    # @{upstream} is git revision syntax, not a brace expansion.
+  # shellcheck disable=SC1083
+  if git -C "$project_dir" rev-parse @{upstream} &>/dev/null; then
+      # shellcheck disable=SC1083
+    unpushed=$(git -C "$project_dir" log --oneline @{upstream}..HEAD 2>/dev/null | wc -l | tr -d ' ')
     fi
 
     [[ "$uncommitted" -eq 0 && "$unpushed" -eq 0 ]] && continue

@@ -11,7 +11,7 @@ fail() { echo "FAIL: $1"; errors=$((errors+1)); }
 MRA="$SCRIPT_DIR/bin/mra.sh"
 WS=$(mktemp -d); mkdir -p "$WS/.collab/requirements"; printf '{"gitOrg":"git@github.com:acme","projects":{}}' > "$WS/.collab/dep-graph.json"
 # a claude stub that records the injected system prompt
-SHIM=$(mktemp -d); export SHIM_OUT=$(mktemp)
+SHIM=$(mktemp -d); SHIM_OUT=$(mktemp); export SHIM_OUT
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "$SHIM_OUT"\n' > "$SHIM/claude"; chmod +x "$SHIM/claude"
 
 run() { ( cd "$WS" && MRA_WORKSPACE="$WS" MRA_CLAUDE_BIN="$SHIM/claude" bash "$MRA" "$@" </dev/null ) 2>&1; }
@@ -23,14 +23,14 @@ grep -q 'mra prd-scaffold' "$SHIM_OUT" && ok "greenfield instructs prd-scaffold"
 [[ "$(grep -cx -- '--add-dir' "$SHIM_OUT")" == "0" ]] && ok "greenfield loads zero repos" || fail "greenfield added --add-dir"
 
 # 2. --new with a flag value is rejected (never captured as a repo name)
-out=$(run prd --new --no-sync); rc=$?
+run prd --new --no-sync >/dev/null 2>&1; rc=$?
 [[ "$rc" -ne 0 ]] && ok "--new --no-sync rejected" || fail "--new captured a flag as name"
 
 # 3. --new with a bad slug rejected
-out=$(run prd --new -bad); [[ "$?" -ne 0 ]] && ok "--new -bad rejected" || fail "bad slug accepted"
+if run prd --new -bad >/dev/null 2>&1; then fail "bad slug accepted"; else ok "--new -bad rejected"; fi
 
 # 4. --new with a stray positional rejected
-out=$(run prd --new billing extra); [[ "$?" -ne 0 ]] && ok "--new + stray positional rejected" || fail "stray positional accepted"
+if run prd --new billing extra >/dev/null 2>&1; then fail "stray positional accepted"; else ok "--new + stray positional rejected"; fi
 
 # 5. greenfield does NOT reach list_all_projects/validate_repo_subset:
 #    the dep-graph has zero projects; if the brownfield branch ran with no args it would

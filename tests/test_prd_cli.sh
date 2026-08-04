@@ -20,7 +20,7 @@ a=$(_prd_alloc_req_id "$WS" 2026); b=$(_prd_alloc_req_id "$WS" 2026)
 [[ "$a" =~ ^REQ-2026-[0-9]{4}$ ]] && ok "alloc id format" || fail "bad id: $a"
 
 # prd_launch argv via stub
-SHIM=$(mktemp -d); export SHIM_OUT=$(mktemp)
+SHIM=$(mktemp -d); SHIM_OUT=$(mktemp); export SHIM_OUT
 cat > "$SHIM/claude" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$SHIM_OUT"
