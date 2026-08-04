@@ -137,10 +137,28 @@ export MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1
 out=$(HOME="$TMP/home" ORIGINAL_HOME_FOR_STUB="$TMP/home" MRA_REVIEW_MODEL_HOME="$TMP/model-home" MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 MRA_CODEX_AUTH_FILE_TTL_SECONDS=0 CODEX_STUB_AUTH_CHECK_DELAY=1 GH_TOKEN=secret GITHUB_TOKEN=secret2 MRA_CODEX_BIN="$BIN/codex" review_call_model review codex "PROMPT-C" "" "$TMP/project" "$add_dirs" 6 "$TMP/reviewer.md")
 [[ "$out" == "<codex-output>" ]] && pass "codex output returned" || fail "codex output wrong: $out"
 rec=$(cat "$REC")
-case "$rec" in *"exec --sandbox read-only --cd "*"mra-review-trusted."*" --skip-git-repo-check --ephemeral "*"--add-dir "*"mra-review-snapshot."*) pass "codex uses trusted cwd and sanitized snapshot" ;; *) fail "codex args missing trusted sandbox: $rec" ;; esac
+case "$rec" in *"exec "*"--cd "*"mra-review-trusted."*" --skip-git-repo-check --ephemeral "*"--add-dir "*"mra-review-snapshot."*) pass "codex uses trusted cwd and sanitized snapshot" ;; *) fail "codex args missing trusted sandbox: $rec" ;; esac
 case "$rec" in *"--ignore-user-config --ignore-rules --output-last-message "*" -c shell_environment_policy.inherit=none"*) pass "codex model shell inherits no credential environment and captures final message" ;; *) fail "codex missing shell environment isolation/final capture: $rec" ;; esac
 case "$rec" in *"shell_environment_policy.set.PATH="*"/usr/bin:/bin"* ) pass "codex receives deterministic tool PATH" ;; *) fail "codex missing deterministic tool PATH: $rec" ;; esac
 case "$rec" in *'model_provider="Corp"'*'model_providers.Corp.base_url="https://codex.example.test:2880"'*'model_providers.Corp.wire_api="responses"'*'model_providers.Corp.requires_openai_auth=true'*) pass "codex receives only validated provider transport overrides" ;; *) fail "codex missing sanitized provider config: $rec" ;; esac
+# codex must be sandboxed by exactly one layer. It applies a deny-default
+# seatbelt profile per tool command, which macOS refuses inside an existing
+# sandbox, so where mra wraps it in sandbox-exec codex has to stand down —
+# otherwise every command the model runs fails and the review silently degrades
+# to whatever is in the prompt. Where mra cannot wrap it, codex must sandbox
+# itself. Neither-of-the-two is the failure this pins.
+if command -v sandbox-exec >/dev/null 2>&1; then
+  case "$rec" in
+    *"--dangerously-bypass-approvals-and-sandbox"*) pass "codex defers sandboxing to mra's outer sandbox-exec" ;;
+    *) fail "codex still nests its own sandbox inside mra's — every tool command will fail: $rec" ;;
+  esac
+else
+  case "$rec" in
+    *"--sandbox read-only"*) pass "codex sandboxes itself when mra cannot" ;;
+    *) fail "no sandbox on either layer: $rec" ;;
+  esac
+fi
+
 case "$rec" in *"env_key="*) fail "codex received env_key credential config: $rec" ;; *) pass "codex does not receive credential env_key config" ;; esac
 case "$rec" in *"/untrusted"*) fail "codex inherited project trust config" ;; *) pass "codex does not inherit project trust config" ;; esac
 case "$rec" in *"proxy-token=unset"*) pass "codex parent does not receive proxy token env" ;; *) fail "codex parent received proxy token env: $rec" ;; esac
