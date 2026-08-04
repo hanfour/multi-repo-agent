@@ -76,6 +76,15 @@ if command -v sandbox-exec >/dev/null 2>&1; then
 
   sandbox-exec -f "$PROFILE" /bin/sh -c "head -c1 '$SCRIPT_DIR/README.md' >/dev/null" 2>/dev/null \
     && ok "source files remain readable" || fail "reading source is blocked — reviews need it"
+
+  # codex runs shell commands through a pseudo-terminal. Denying /dev/ptmx does
+  # not merely lose colour — the process cannot be created at all ("Failed to
+  # create unified exec process"), so every command the model runs fails. That
+  # is the same symptom the nested sandbox produced, from a different cause, and
+  # the first write-denying profile reintroduced it.
+  sandbox-exec -f "$PROFILE" /bin/sh -c 'exec 3<>/dev/ptmx' 2>/dev/null \
+    && ok "a pty can be allocated" \
+    || fail "/dev/ptmx is blocked — codex cannot create a process to run anything"
 else
   ok "sandbox-exec absent — behavioural checks skipped"
 fi
