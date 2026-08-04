@@ -74,21 +74,21 @@ _doctor_db_rows() {
   ' "$1"
 }
 
-# _doctor_db_schema_rows <db.json> <db-name>
-# One US-separated row per schema of that database, in `keys[]` order:
-#   schema name, source // ""
+# _doctor_project_types <dep-graph.json>
+# One US-separated row per project: name, type // "unknown".
 #
-# Replaces a length probe, a keys[] listing and one source lookup per schema —
-# 2 + N forks per database — with a single pass. Emits nothing when the
-# database uses the single-schema format, so callers test row count where they
-# used to test the length probe.
-_doctor_db_schema_rows() {
-  jq -r --arg n "$2" '
-    .databases[$n].schemas // {} | keys[] as $s | [
-      $s,
-      ((.[$s].source // "") | tostring)
+# Built once and looked up from an associative array, replacing one jq fork per
+# project inside the check loop (#37). Renders exactly what the per-project
+# `jq -r '.projects[$p].type // "unknown"'` rendered, including "unknown" for a
+# null or absent type, so the caller's fallback to detect_project_type triggers
+# on the same inputs. A missing or unreadable graph emits nothing and succeeds.
+_doctor_project_types() {
+  jq -r '
+    .projects // {} | keys[] as $k | [
+      $k,
+      ((.[$k].type // "unknown") | tostring)
     ] | join("\u001f")
-  ' "$1" 2>/dev/null
+  ' "$1" 2>/dev/null || true
 }
 
 doctor_databases() {
@@ -120,8 +120,9 @@ doctor_databases() {
 
   local db_row
   for db_row in "${db_rows[@]}"; do
-    local db_name engine version port password container_name
-    IFS=$'\037' read -r db_name engine version port password <<<"$db_row"
+    local db_name engine version password container_name
+    # port is present in the row but unused here; `_` keeps the field aligned.
+    IFS=$'\037' read -r db_name engine version _ password <<<"$db_row"
     container_name="mra-db-$db_name"
 
     # --- Container running? ---
@@ -168,7 +169,7 @@ doctor_databases() {
     while IFS= read -r schema_row; do
       [[ -z "$schema_row" ]] && continue
       schema_rows+=("$schema_row")
-    done < <(_doctor_db_schema_rows "$db_json_path" "$db_name")
+    done < <(_db_schema_rows "$db_json_path" "$db_name")
 
     if [[ ${#schema_rows[@]} -gt 0 ]]; then
       # Multi-schema format: iterate each schema
@@ -324,6 +325,14 @@ doctor_projects() {
     return 0
   fi
 
+  # Project types in one pass, then looked up per project.
+  local -A _doctor_proj_types=()
+  local _pt_name _pt_type
+  while IFS=$'\037' read -r _pt_name _pt_type; do
+    [[ -z "$_pt_name" ]] && continue
+    _doctor_proj_types["$_pt_name"]="$_pt_type"
+  done < <(_doctor_project_types "$graph_file")
+
   for proj in "${projects[@]}"; do
     local proj_dir="$workspace/$proj"
 
@@ -337,9 +346,8 @@ doctor_projects() {
       continue
     fi
 
-    # Determine project type
-    local proj_type
-    proj_type=$(jq -r --arg p "$proj" '.projects[$p].type // "unknown"' "$graph_file" 2>/dev/null || echo "unknown")
+    # Determine project type — looked up from the map built once above.
+    local proj_type="${_doctor_proj_types[$proj]:-unknown}"
     if [[ -z "$proj_type" || "$proj_type" == "null" ]]; then
       proj_type=$(detect_project_type "$proj_dir")
     fi

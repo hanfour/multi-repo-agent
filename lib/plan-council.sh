@@ -65,7 +65,8 @@ TEMPLATE
 }
 
 run_plan_council() {
-  local project="$1" project_dir="$2" task="$3" personas="$4" model="$5"
+  # _project is bound for signature clarity; this runner uses project_dir only.
+  local _project="$1" project_dir="$2" task="$3" personas="$4" model="$5"
   local claude_add_dirs="$6" pkb_context="${7:-}" lang_directive="${8:-}" dual="${9:-false}"
 
   local providers=("claude")

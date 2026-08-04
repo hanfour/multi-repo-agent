@@ -109,7 +109,8 @@ eval_review() {
   # Save report
   local report_dir="$workspace/.collab/eval"
   mkdir -p "$report_dir"
-  local report_file="$report_dir/${project}_pr${pr_number}_$(date +%Y%m%d_%H%M%S).json"
+  local report_file
+  report_file="$report_dir/${project}_pr${pr_number}_$(date +%Y%m%d_%H%M%S).json"
 
   jq -n \
     --arg project "$project" \

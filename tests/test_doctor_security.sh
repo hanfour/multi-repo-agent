@@ -6,6 +6,9 @@ set -euo pipefail
 
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$MRA_DIR/lib/colors.sh"
+# doctor.sh calls _db_schema_rows, which lives in db.sh (loaded first by
+# bin/mra.sh); source it here so the dependency is explicit.
+source "$MRA_DIR/lib/db.sh"
 source "$MRA_DIR/lib/doctor.sh"
 
 errors=0

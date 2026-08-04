@@ -18,7 +18,7 @@ detect_test_command() {
 # Run tests for a project inside Docker
 run_project_tests() {
   local workspace="$1" project="$2"
-  local test_type="${3:-auto}"  # auto, unit, integration
+  local _test_type="${3:-auto}"  # auto, unit, integration — accepted, not yet honoured
   local graph_file="$workspace/.collab/dep-graph.json"
 
   # Determine project type

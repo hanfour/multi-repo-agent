@@ -115,7 +115,7 @@ unset MRA_CLAUDE_BIN SHIM_OUT
 ok() { echo "PASS: $1"; }
 
 # --- greenfield: _launch_interactive with ZERO projects (empty-array safe) ---
-SHIM3=$(mktemp -d); export SHIM_OUT3=$(mktemp)
+SHIM3=$(mktemp -d); SHIM_OUT3=$(mktemp); export SHIM_OUT3
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "$SHIM_OUT3"\n' > "$SHIM3/claude"; chmod +x "$SHIM3/claude"
 WS3=$(mktemp -d); printf '{}' > "$WS3/g.json"
 config_get() { echo ""; }; display_deps() { :; }
