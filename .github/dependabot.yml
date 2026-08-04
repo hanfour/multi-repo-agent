@@ -10,3 +10,22 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
+    groups:
+      # configure-pages, upload-pages-artifact and deploy-pages are a coordinated
+      # set — the artifact format one produces is what the next one consumes.
+      # Bumping them in separate PRs means merging half a set and leaving main
+      # on an untested combination, so they move together or not at all.
+      github-pages:
+        patterns:
+          - "actions/configure-pages"
+          - "actions/upload-pages-artifact"
+          - "actions/deploy-pages"
+      # Everything else in one PR: fewer review surfaces, and these are all
+      # first-party actions whose bumps are exercised by repo-tests.yml.
+      actions:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "actions/configure-pages"
+          - "actions/upload-pages-artifact"
+          - "actions/deploy-pages"

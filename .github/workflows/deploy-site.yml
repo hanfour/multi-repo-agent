@@ -6,12 +6,23 @@ on:
     paths:
       - 'site/**'
       - '.github/workflows/deploy-site.yml'
+  # Build (never deploy) on PRs so the Pages actions are actually exercised
+  # before a change to them is merged. Without this the only workflow running on
+  # pull_request was repo-tests.yml, which uses none of them — so a Dependabot
+  # bump of configure-pages / upload-pages-artifact / deploy-pages showed a green
+  # check that had told us nothing about it, and would first be tested against
+  # the live site on main.
+  pull_request:
+    paths:
+      - 'site/**'
+      - '.github/workflows/deploy-site.yml'
   workflow_dispatch:
 
+# Least privilege per job: the build needs to read the repo, only the deploy
+# needs to write Pages and mint an OIDC token. A pull_request build must never
+# hold those.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -25,6 +36,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: site
@@ -53,7 +66,13 @@ jobs:
 
   deploy:
     needs: build
+    # Pull requests validate the build only — deploying from a PR would publish
+    # unreviewed content to the live site.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

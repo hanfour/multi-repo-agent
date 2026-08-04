@@ -44,5 +44,39 @@ else
   fail "no dependabot config for github-actions — pins will rot"
 fi
 
+# --- every action must be exercised by a workflow that runs on pull_request --
+# A Dependabot bump is reviewed against a green check. If no pull_request-
+# triggered workflow uses the action being bumped, that green says nothing about
+# it and the first real test is against main. That is what happened to the three
+# GitHub Pages actions: they appear only in deploy-site.yml, which used to run on
+# push only.
+pr_workflows=()
+for wf in "$SCRIPT_DIR"/.github/workflows/*.yml; do
+  # `pull_request:` as a trigger key, not a mention inside a run block.
+  if awk '/^on:/{i=1;next} /^[a-z]/{i=0} i && /^  pull_request:?$/{found=1} END{exit !found}' "$wf"; then
+    pr_workflows+=("$wf")
+  fi
+done
+
+[[ ${#pr_workflows[@]} -gt 0 ]] && ok "found ${#pr_workflows[@]} pull_request-triggered workflow(s)" \
+                                || fail "no workflow runs on pull_request — no bump can be validated"
+
+unexercised=()
+for ref in "${refs[@]}"; do
+  case "$ref" in ./*) continue ;; esac
+  action="${ref%@*}"
+  covered=false
+  for wf in "${pr_workflows[@]}"; do
+    grep -q "$action@" "$wf" && { covered=true; break; }
+  done
+  $covered || unexercised+=("$action")
+done
+
+if [[ ${#unexercised[@]} -eq 0 ]]; then
+  ok "every third-party action is exercised on pull_request"
+else
+  fail "bumping these would be reviewed against a green check that never ran them: ${unexercised[*]}"
+fi
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
