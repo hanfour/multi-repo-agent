@@ -192,7 +192,26 @@ review_project() {
     return 0
   fi
 
-  if [[ "$explicit_range" == "true" && "$changed_count" -eq 0 ]]; then
+  # An empty diff is not a reviewable state — it must never reach a model.
+  #
+  # The default range is "<base>...HEAD", which assumes the checkout IS the
+  # revision under review. A PR number does not establish that: reviewing
+  # `--pr N` from a checkout that does not contain the PR head yields an empty
+  # diff. Observed against a real 25-file pull request — the prompt carried
+  # "(diff unavailable)" and no changed files, and the model returned a
+  # well-formed `APPROVED` sentinel, which the completeness firewall correctly
+  # accepted because the review HAD completed. It just had nothing to review.
+  # The same empty input returned CHANGES_REQUESTED on another run; the verdict
+  # is arbitrary because there is no input to derive one from.
+  #
+  # For --pr this is an operator error worth failing loudly on, since the PR
+  # demonstrably has changes the checkout cannot see. For a plain branch review
+  # "no changes" is a legitimate answer.
+  if [[ "$changed_count" -eq 0 ]]; then
+    if [[ -n "$pr_number" && "$explicit_range" != "true" ]]; then
+      log_error "review: PR #$pr_number has no changes visible in '$range_expr' — this checkout does not contain the PR head, so there is nothing to review. Check out the PR first (gh pr checkout $pr_number) and re-run." "review"
+      return 1
+    fi
     log_info "review: no changes in '$range_expr' — nothing to review" "review"
     return 0
   fi

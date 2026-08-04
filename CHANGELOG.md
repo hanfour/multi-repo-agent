@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-08-04
+
+### Security
+- `mra review --pr N` refuses an empty diff instead of reviewing it. The range is `<base>...HEAD`, which assumes the checkout **is** the revision under review — a PR number does not establish that. Run from a checkout lacking the PR head and the prompt carried `(diff unavailable)` with no changed files, and the review ran anyway. Observed against a real 25-file, +940/-103 pull request: the model returned a well-formed, nonce-bearing `APPROVED` sentinel with an empty comment list, which the completeness firewall correctly accepted — the review *had* completed, it simply had nothing to review. Under the default post mode that is an approval posted to a pull request nothing examined. A second run on the same empty input returned `CHANGES_REQUESTED`, so the failure was not even consistently fail-closed. `lib/review.sh` already guarded this for `--working` and for an explicit `--range`/`--head`, and its own comment read "never a silent empty review"; the default path `--pr` uses was the only one uncovered. Now an error naming the remedy for `--pr`, while a plain branch review with no changes still exits 0 (GHSA-x5r4-rq7p-4q34).
+
+### Fixed
+- Failing tests keep their logs under `.mra-test-logs/` and every inline failure line carries the test name, so a failure that scrolls past or gets filtered can still be diagnosed. Logs are redacted (`gh[pousr]_`, `github_pat_`, `sk-`) before being kept or echoed — the credential-isolation test prints the environment it asserts about, so preservation alone wrote a live token to disk. `make test-repeat` (REPEAT=20) hunts a flake deliberately (#52).
+- `tests/test_review_provider.sh` owns its credential environment instead of inheriting the developer's. It invokes the review path with a `GH_TOKEN=secret …` command prefix, and bash treats a prefix assignment on a function call as a temporary binding — `unset` inside then reveals the outer exported value rather than clearing it, so the isolation assertion failed on any machine with `GH_TOKEN` exported. Production is unaffected; nothing there passes `GH_TOKEN` as a command prefix (#52).
+
+### Changed
+- `bin/mra.sh` is 171 lines, down from 803. The 42-branch `case "$command"` is gone: `mra <name>` runs `mra_cmd_<name>` (dashes to underscores) and anything with no handler falls through to the project-launch path, so adding a command means adding a function to a `lib/cmd-*.sh` rather than editing the entry point. The 46 branch bodies moved into five domain modules. Verified by the dispatch smoke net across all 40 commands — routing, first arg-parse and exit codes byte-identical to the golden — with the branch partition checked by line multiset beforehand (#39).
+- Database configuration is read in one `jq` pass per operation throughout: per-iteration forks are now zero in `lib/doctor.sh` and two in `lib/db.sh`, both of which build JSON from interactive input rather than re-parsing a document. `lib/doctor.sh` shares `lib/db.sh`'s schema-row helper instead of keeping a second copy (#37).
+- The shellcheck backlog is clear and both the local and CI gates move from `-S error` to `-S warning` so it cannot regrow; `make lint-all` now reports `-S style`. The sweep removed genuine dead code and two real defects — a `find | xargs` that breaks on whitespace in filenames, and ten `local x=$(cmd)` sites that masked the command's exit status (#50).
+
+
 ## [3.1.0] - 2026-08-03
 
 ### Security
@@ -131,6 +146,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed confidential design documents that did not belong to this tool from the
   repository **and its git history**.
 
-[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.1.1...HEAD
+[3.1.1]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.1.1
 [3.1.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.1.0
 [2.3.0]: https://github.com/hanfour/multi-repo-agent/commits/main
