@@ -217,6 +217,15 @@ _review_write_codex_sandbox_profile() {
     # the model runs fails on its own stdout.
     echo '(allow file-write-data (literal "/dev/null") (literal "/dev/zero") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/tty"))'
     echo '(allow file-write* (regex #"^/dev/fd/"))'
+    # codex runs shell commands through a pseudo-terminal, which needs
+    # /dev/ptmx opened read-write and the allocated /dev/ttysNNN. Denying them
+    # does not merely lose colour: the process cannot be created at all
+    # ("Failed to create unified exec process: No such file or directory"), so
+    # every command the model runs fails — the same symptom the nested sandbox
+    # produced, from a different cause.
+    echo '(allow file-write* (literal "/dev/ptmx"))'
+    echo '(allow file-write* (regex #"^/dev/ttys[0-9]+$"))'
+    echo '(allow pseudo-tty)'
   } > "$profile"
   chmod 600 "$profile"
 }
