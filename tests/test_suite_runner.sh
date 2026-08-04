@@ -106,5 +106,41 @@ esac
 
 rm -rf "$FTMP"
 
+# --- preserved logs must not carry credentials ------------------------------
+# Persisting failure logs (#52) means anything a test prints now lands on disk.
+# tests/test_review_provider.sh prints the credential environment it is
+# asserting about, so a developer with GH_TOKEN exported wrote a live token
+# into .mra-test-logs/. Gitignored is not the same as safe.
+STMP=$(mktemp -d)
+mkdir -p "$STMP/tests"
+cp "$SCRIPT_DIR/test.sh" "$STMP/test.sh"
+cat > "$STMP/tests/test_leaky.sh" <<'INNER'
+#!/usr/bin/env bash
+echo "gh=gho_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+echo "pat=github_pat_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+echo "openai=sk-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+echo "keep-this-line"
+exit 1
+INNER
+sout=$(bash "$STMP/test.sh" 2>&1)
+slog="$STMP/.mra-test-logs/test_leaky.log"
+
+for pat in gho_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA            github_pat_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB            sk-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC; do
+  short="${pat:0:12}…"
+  if grep -q "$pat" "$slog" 2>/dev/null; then
+    fail "preserved log kept a credential ($short)"
+  else
+    ok "preserved log redacts $short"
+  fi
+  case "$sout" in *"$pat"*) fail "inline output kept a credential ($short)" ;;
+                  *) ok "inline output redacts $short" ;; esac
+done
+
+grep -q 'keep-this-line' "$slog" 2>/dev/null \
+  && ok "redaction leaves ordinary output intact" \
+  || fail "redaction destroyed non-credential output"
+
+rm -rf "$STMP"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
