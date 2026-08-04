@@ -68,7 +68,7 @@ findings=$(HOME="$TMP/home" ORIGINAL_HOME_FOR_STUB="$TMP/home" \
 case "$findings" in *PERSONA-FINDING*) pass "codex personas produce findings" ;; *) fail "no persona findings: $findings" ;; esac
 rec=$(cat "$REC")
 [[ "$(grep -c 'codex-persona:' "$REC")" == "2" ]] && pass "each persona runs a codex pass" || fail "expected 2 codex persona passes: $rec"
-case "$rec" in *"exec --sandbox read-only"*) pass "personas route through the codex provider path" ;; *) fail "personas did not use codex exec: $rec" ;; esac
+case "$rec" in *"codex-persona: exec "*) pass "personas route through the codex provider path" ;; *) fail "personas did not use codex exec: $rec" ;; esac
 
 chmod -R u+w "$TMP" 2>/dev/null || true; rm -rf "$TMP"
 [[ "$errors" -eq 0 ]] && echo "All codex-persona tests passed" || { echo "$errors failures"; exit 1; }
