@@ -38,6 +38,45 @@ _db_instance_rows() {
   ' "$1"
 }
 
+# _db_schema_rows <db.json> <instance>
+# One US-separated row per schema of that instance, in `keys[]` order:
+#   schema name, source // ""
+#
+# Replaces a `has("schemas")` probe, a keys[] listing and one source lookup per
+# schema — 2 + N forks — with a single pass. Emits nothing for a single-schema
+# instance, so callers test row count where they tested the probe (#37).
+# lib/doctor.sh calls this too rather than keeping a second copy: a rendering
+# rule duplicated across modules is exactly what drifts.
+_db_schema_rows() {
+  jq -r --arg n "$2" '
+    .databases[$n].schemas // {} | keys[] as $s | [
+      $s,
+      ((.[$s].source // "") | tostring)
+    ] | join("\u001f")
+  ' "$1" 2>/dev/null
+}
+
+# _db_find_schema_owner <db.json> <schema>
+# The first instance (in `keys[]` order) that declares this schema WITH a
+# source, as one US-separated row: instance, source, engine, password.
+# Empty when no instance owns it.
+#
+# Replaces one probe per instance plus two more lookups on the match with a
+# single pass. The `source != null` condition preserves the legacy behaviour of
+# `.source // "null"`: a schema present but carrying no source was skipped,
+# indistinguishable from a missing one.
+_db_find_schema_owner() {
+  jq -r --arg s "$2" '
+    .databases | keys[] as $k
+    | select((.[$k].schemas[$s].source // null) != null)
+    | [$k,
+       (.[$k].schemas[$s].source | tostring),
+       (.[$k].engine | tostring),
+       ((.[$k].password // "mra_password") | tostring)]
+    | join("\u001f")
+  ' "$1" 2>/dev/null | head -1
+}
+
 get_db_json_path() {
   local workspace="$1"
   echo "$workspace/.collab/db.json"
@@ -451,8 +490,8 @@ setup_all_databases() {
 
   local instance_row
   for instance_row in "${instance_rows[@]}"; do
-    local instance_name engine version port password platform
-    IFS=$'\037' read -r instance_name engine version port password platform _ _ <<<"$instance_row"
+    local instance_name engine version port password platform has_schemas
+    IFS=$'\037' read -r instance_name engine version port password platform has_schemas _ <<<"$instance_row"
 
     log_progress "setting up instance: $instance_name ($engine:$version)" "db"
 
@@ -472,22 +511,19 @@ setup_all_databases() {
 
     local container_name="mra-db-$instance_name"
 
-    # Check if this instance uses schemas (multi-db) or single-db format
-    local has_schemas
-    has_schemas=$(jq -r --arg n "$instance_name" '.databases[$n] | has("schemas")' "$db_json_path")
-
+    # has_schemas came out of the instance row above — no second probe needed.
     if [[ "$has_schemas" == "true" ]]; then
       # Multi-schema: iterate each schema, create DB, import dump
-      local schema_names=()
-      while IFS= read -r s; do
-        [[ -z "$s" ]] && continue
-        schema_names+=("$s")
-      done < <(jq -r --arg n "$instance_name" '.databases[$n].schemas | keys[]' "$db_json_path")
+      local schema_rows=()
+      while IFS= read -r schema_row; do
+        [[ -z "$schema_row" ]] && continue
+        schema_rows+=("$schema_row")
+      done < <(_db_schema_rows "$db_json_path" "$instance_name")
 
-      for schema_name in "${schema_names[@]}"; do
-        local source
-        source=$(jq -r --arg n "$instance_name" --arg s "$schema_name" \
-          '.databases[$n].schemas[$s].source // ""' "$db_json_path")
+      local schema_row
+      for schema_row in "${schema_rows[@]}"; do
+        local schema_name source
+        IFS=$'\037' read -r schema_name source <<<"$schema_row"
 
         # Create database if it doesn't exist
         log_progress "creating database: $schema_name" "db"
@@ -582,13 +618,12 @@ reimport_database() {
     has_schemas=$(jq -r --arg n "$target" '.databases[$n] | has("schemas")' "$db_json_path")
 
     if [[ "$has_schemas" == "true" ]]; then
-      while IFS= read -r schema_name; do
-        [[ -z "$schema_name" ]] && continue
-        local source
-        source=$(jq -r --arg n "$target" --arg s "$schema_name" \
-          '.databases[$n].schemas[$s].source // ""' "$db_json_path")
+      while IFS= read -r schema_row; do
+        [[ -z "$schema_row" ]] && continue
+        local schema_name source
+        IFS=$'\037' read -r schema_name source <<<"$schema_row"
         _import_if_source "$engine" "$container_name" "$schema_name" "$source" "$password" "$workspace"
-      done < <(jq -r --arg n "$target" '.databases[$n].schemas | keys[]' "$db_json_path")
+      done < <(_db_schema_rows "$db_json_path" "$target")
     else
       local source
       source=$(jq -r --arg n "$target" '.databases[$n].source // ""' "$db_json_path")
@@ -598,23 +633,17 @@ reimport_database() {
   fi
 
   # Otherwise search for target as a schema name inside any instance
-  local found=false
-  while IFS= read -r instance_name; do
-    [[ -z "$instance_name" ]] && continue
-    local schema_source
-    schema_source=$(jq -r --arg n "$instance_name" --arg s "$target" \
-      '.databases[$n].schemas[$s].source // "null"' "$db_json_path" 2>/dev/null)
-
-    if [[ "$schema_source" != "null" ]]; then
-      local engine password
-      engine=$(jq -r --arg n "$instance_name" '.databases[$n].engine' "$db_json_path")
-      password=$(jq -r --arg n "$instance_name" '.databases[$n].password // "mra_password"' "$db_json_path")
-      local container_name="mra-db-$instance_name"
-      _import_if_source "$engine" "$container_name" "$target" "$schema_source" "$password" "$workspace"
-      found=true
-      break
-    fi
-  done < <(jq -r '.databases | keys[]' "$db_json_path")
+  # One pass finds the owning instance and everything needed to import into it,
+  # replacing a probe per instance plus two more lookups on the match.
+  local found=false owner
+  owner=$(_db_find_schema_owner "$db_json_path" "$target")
+  if [[ -n "$owner" ]]; then
+    local instance_name schema_source engine password container_name
+    IFS=$'\037' read -r instance_name schema_source engine password <<<"$owner"
+    container_name="mra-db-$instance_name"
+    _import_if_source "$engine" "$container_name" "$target" "$schema_source" "$password" "$workspace"
+    found=true
+  fi
 
   if [[ "$found" == "false" ]]; then
     log_error "'$target' not found in db.json (not an instance or schema)" "db"
