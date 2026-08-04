@@ -146,6 +146,36 @@ review_project() {
     fi
   fi
 
+  # --- For --pr, the checkout MUST be the PR head -----------------------------
+  # The range below is "<base>...HEAD", so reviewing a PR from a checkout that
+  # is not its head reviews whatever that checkout happens to contain. Observed
+  # live: `--pr 4915` from an unrelated feature branch diffed 3 files of
+  # someone's unfinished work against a PR touching a different set entirely.
+  # The diff was not empty, so the empty-diff guard did not fire, and the
+  # resulting review reads as a perfectly ordinary one.
+  #
+  # lib/review-post.sh refuses to POST on a head mismatch, but only after the
+  # model has run — the tokens are spent, and on any path that does not post
+  # (terminal output, MRA_REVIEW_POST_MODE=none) nothing catches it at all.
+  #
+  # Fails open when the PR head cannot be determined (no gh, no network, no
+  # remote): the post-time check still backstops, and refusing to review
+  # offline would be worse than the risk.
+  if [[ -n "$pr_number" && -d "$project_dir/.git" ]]; then
+    local _pr_remote_url _pr_slug _pr_head _local_head
+    _pr_remote_url=$(git -C "$project_dir" remote get-url origin 2>/dev/null || true)
+    _pr_slug=$(printf '%s' "$_pr_remote_url" | sed 's|\.git$||' | sed 's|.*[:/]\([^/]*/[^/]*\)$|\1|')
+    _pr_head=""
+    [[ -n "$_pr_slug" ]] && _pr_head=$(gh api "repos/$_pr_slug/pulls/$pr_number" --jq '.head.sha' 2>/dev/null || true)
+    _local_head=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || true)
+    if [[ -z "$_pr_head" ]]; then
+      log_warn "could not read the head of PR #$pr_number — reviewing whatever '$project_dir' is checked out at" "review"
+    elif [[ "$_pr_head" != "$_local_head" ]]; then
+      log_error "review: $project is checked out at ${_local_head:0:7}, but PR #$pr_number's head is ${_pr_head:0:7} — reviewing it now would review different code and report it as this PR. Run 'gh pr checkout $pr_number' in $project_dir first." "review"
+      return 1
+    fi
+  fi
+
   # --- Resolve diff mode + range expression (single decision point) ---
   local mode="range" range_expr="${resolved_base}...HEAD" explicit_range=false
   if [[ "$working" == "true" ]]; then
