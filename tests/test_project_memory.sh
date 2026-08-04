@@ -27,12 +27,16 @@ unset $VAR; write_config '{"autoScan": true}'; apply_project_memory_env
 export $VAR=1; write_config '{"loadProjectMemory": false}'; apply_project_memory_env
 [[ -z "${!VAR+x}" ]] || fail "OFF-global: mra must unset a globally-exported var"
 
-# Case 5: ordering guard — the call must precede `case "$command"` dispatch
+# Case 5: ordering guard — project-memory env must be applied BEFORE any
+# command handler runs, or a command sees the wrong environment. The dispatch
+# used to be a `case "$command"` block and is now a handler invocation (#39);
+# the invariant is the same, so anchor on the dispatch itself rather than on
+# the syntax that happened to implement it.
 mra_main="$SCRIPT_DIR/bin/mra.sh"
 call_line=$(grep -n '^[[:space:]]*apply_project_memory_env' "$mra_main" | head -1 | cut -d: -f1)
-case_line=$(grep -n 'case "\$command" in' "$mra_main" | head -1 | cut -d: -f1)
-[[ -n "$call_line" && -n "$case_line" && "$call_line" -lt "$case_line" ]] \
-  || fail "ordering: call (line ${call_line:-none}) must precede case (line ${case_line:-none})"
+dispatch_line=$(grep -n '^[[:space:]]*"\$handler" "\$@"' "$mra_main" | head -1 | cut -d: -f1)
+[[ -n "$call_line" && -n "$dispatch_line" && "$call_line" -lt "$dispatch_line" ]] \
+  || fail "ordering: call (line ${call_line:-none}) must precede dispatch (line ${dispatch_line:-none})"
 
 # Case 6: config_handle project-memory on/off flips loadProjectMemory
 write_config '{}'
