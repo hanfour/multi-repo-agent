@@ -30,6 +30,8 @@ MRA_LIBS=(
 )
 
 for _mra_lib in "${MRA_LIBS[@]}"; do
+  # Path is built from the list above, not from input.
+  # shellcheck source=/dev/null
   source "$MRA_DIR/lib/${_mra_lib}.sh"
 done
 unset _mra_lib

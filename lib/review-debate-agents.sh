@@ -9,9 +9,11 @@
 # mid-exploration before it emits findings — the original false-green trigger.
 # -----------------------------------------------------------------------
 run_agent_a() {
-  local project="$1" project_dir="$2" diff="$3" changed_files="$4"
+  # _-prefixed positionals are bound to keep the signature readable against the
+  # other agent runners, which take the same argument list.
+  local _project="$1" _project_dir="$2" diff="$3" changed_files="$4"
   local consumers="$5" lang_directive="$6" model="$7"
-  local claude_add_dirs="$8" mra_dir="$9" pkb_context="${10:-}"
+  local claude_add_dirs="$8" _mra_dir="$9" pkb_context="${10:-}"
 
   local consumer_note=""
   if [[ -n "$consumers" ]]; then
@@ -92,9 +94,9 @@ PROMPT
 # the last one adversarial. Gated by MRA_REVIEW_VERIFY_APPROVE (default on).
 # -----------------------------------------------------------------------
 run_agent_verify() {
-  local project="$1" project_dir="$2" diff="$3" changed_files="$4"
+  local _project="$1" _project_dir="$2" diff="$3" changed_files="$4"
   local lang_directive="$5" model="$6"
-  local claude_add_dirs="$7" mra_dir="$8" pkb_context="${9:-}"
+  local claude_add_dirs="$7" _mra_dir="$8" pkb_context="${9:-}"
 
   local pkb_section=""
   if [[ -n "$pkb_context" ]]; then
@@ -165,9 +167,9 @@ PROMPT
 # mid-exploration before it emits findings — the original false-green trigger.
 # -----------------------------------------------------------------------
 run_agent_b() {
-  local project="$1" project_dir="$2" diff="$3" changed_files="$4"
+  local _project="$1" _project_dir="$2" diff="$3" changed_files="$4"
   local project_type="$5" lang_directive="$6" model="$7"
-  local claude_add_dirs="$8" mra_dir="$9" pkb_context="${10:-}"
+  local claude_add_dirs="$8" _mra_dir="$9" pkb_context="${10:-}"
 
   local pkb_section=""
   if [[ -n "$pkb_context" ]]; then
@@ -246,10 +248,10 @@ PROMPT
 # max-turns: 5 (down from 10+10)
 # -----------------------------------------------------------------------
 run_critique_and_refine() {
-  local project_dir="$1" diff="$2"
+  local _project_dir="$1" diff="$2"
   local own_findings="$3" target_findings="$4" target_name="$5"
   local lang_directive="$6" model="$7"
-  local claude_add_dirs="$8" mra_dir="$9" pkb_context="${10:-}"
+  local claude_add_dirs="$8" _mra_dir="$9" pkb_context="${10:-}"
 
   local pkb_section=""
   if [[ -n "$pkb_context" ]]; then
@@ -317,9 +319,9 @@ PROMPT
 # max-turns: 3
 # -----------------------------------------------------------------------
 run_vote() {
-  local project_dir="$1" diff="$2" pool="$3" agent_name="$4"
+  local _project_dir="$1" diff="$2" pool="$3" agent_name="$4"
   local lang_directive="$5" model="$6"
-  local claude_add_dirs="$7" mra_dir="$8" pkb_context="${9:-}"
+  local claude_add_dirs="$7" _mra_dir="$8" pkb_context="${9:-}"
 
   local pkb_section=""
   if [[ -n "$pkb_context" ]]; then
@@ -371,10 +373,12 @@ PROMPT
 # max-turns: 3
 # -----------------------------------------------------------------------
 run_synthesize() {
-  local project="$1" project_dir="$2" diff="$3" changed_files="$4"
+  # _-prefixed positionals are bound to keep the signature readable against the
+  # other agent runners, which take the same argument list.
+  local _project="$1" _project_dir="$2" diff="$3" changed_files="$4"
   local findings_a="$5" findings_b="$6"
-  local consumers="$7" has_api_change="$8"
-  local lang_directive="$9" model="${10}" claude_add_dirs="${11}" mra_dir="${12}"
+  local consumers="$7" _has_api_change="$8"
+  local lang_directive="$9" model="${10}" claude_add_dirs="${11}" _mra_dir="${12}"
 
   local prompt
   prompt=$(cat <<'PROMPT_START'

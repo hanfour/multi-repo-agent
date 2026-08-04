@@ -209,16 +209,10 @@ run_in_docker() {
     env_args+=(-e "RAILS_ENV=test")
   fi
 
-  # Read platform from db.json if available
-  local db_json="$workspace/.collab/db.json"
-  local platform=""
-  if [[ -f "$db_json" ]]; then
-    platform=$(jq -r '.databases | to_entries[0].value.platform // ""' "$db_json" 2>/dev/null)
-  fi
-
-  local platform_args=()
-  # Note: platform for docker compose run is set in the compose file, not as a flag
-  # We don't add --platform here
+  # No --platform flag here: for `docker compose run` the platform belongs in
+  # the compose file. This used to read db.json to populate a `platform`
+  # variable and an empty `platform_args` array that were never used — a jq
+  # fork per invocation for a value nothing consumed.
 
   # Run the command
   docker compose -f "$compose_file" run --rm \

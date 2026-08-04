@@ -120,8 +120,9 @@ doctor_databases() {
 
   local db_row
   for db_row in "${db_rows[@]}"; do
-    local db_name engine version port password container_name
-    IFS=$'\037' read -r db_name engine version port password <<<"$db_row"
+    local db_name engine version password container_name
+    # port is present in the row but unused here; `_` keeps the field aligned.
+    IFS=$'\037' read -r db_name engine version _ password <<<"$db_row"
     container_name="mra-db-$db_name"
 
     # --- Container running? ---

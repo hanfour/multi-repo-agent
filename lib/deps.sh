@@ -46,7 +46,7 @@ resolve_with_deps() {
       # Add deps
       while IFS= read -r dep; do
         [[ -z "$dep" ]] && continue
-        if [[ ! " $visited " =~ " $dep " ]]; then
+        if [[ " $visited " != *" $dep "* ]]; then
           new_projects+=("$dep")
           visited="$visited $dep"
         fi
@@ -55,7 +55,7 @@ resolve_with_deps() {
       # Add consumers
       while IFS= read -r consumer; do
         [[ -z "$consumer" ]] && continue
-        if [[ ! " $visited " =~ " $consumer " ]]; then
+        if [[ " $visited " != *" $consumer "* ]]; then
           new_projects+=("$consumer")
           visited="$visited $consumer"
         fi

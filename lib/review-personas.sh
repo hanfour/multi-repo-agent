@@ -53,7 +53,7 @@ TEMPLATE
 }
 
 run_persona_review() {
-  local project="$1" project_dir="$2" diff="$3" changed_files="$4"
+  local _project="$1" project_dir="$2" diff="$3" changed_files="$4"
   local personas="$5" consumers="$6" lang_directive="$7" model="$8"
   local claude_add_dirs="$9" pkb_context="${10:-}"
   local provider="${11:-claude}"

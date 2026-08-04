@@ -456,10 +456,9 @@ setup_all_databases() {
 
     log_progress "setting up instance: $instance_name ($engine:$version)" "db"
 
-    # Start container (use instance name, first schema as default DB)
-    local first_schema
-    first_schema=$(jq -r --arg n "$instance_name" '.databases[$n].schemas // {} | keys[0] // $n' "$db_json_path")
-
+    # Start container. The default DB is the instance name — start_db_container
+    # takes no schema argument, so the "first schema as default DB" this used to
+    # compute was never passed anywhere.
     if ! start_db_container "$instance_name" "$engine" "$version" "$port" "$password" "$platform"; then
       log_error "failed to start container for $instance_name" "db"
       continue

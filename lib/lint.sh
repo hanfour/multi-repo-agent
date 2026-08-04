@@ -192,7 +192,7 @@ lint_project() {
     log_error "$project: $total_violations violation(s) found ($blocker_violations blocker)" "lint"
   fi
 
-  return $([[ $blocker_violations -eq 0 ]] && echo 0 || echo 1)
+  (( blocker_violations == 0 ))
 }
 
 lint_all_projects() {

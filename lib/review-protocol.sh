@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-MRA_REVIEW_PROTOCOL_SCHEMA="io.mra.integration.review/v1"
-
 _review_protocol_hash_file() {
   shasum -a 256 "$1" 2>/dev/null | awk '{print $1}' \
     || sha256sum "$1" 2>/dev/null | awk '{print $1}'

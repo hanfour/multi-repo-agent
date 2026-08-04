@@ -43,6 +43,9 @@ _launch_interactive() {
   # Restrict settings to user+project scope so the orchestrator keeps the
   # operator's global settings.json but never loads each --add-dir repo's
   # gitignored CLAUDE.local.md (local scope) when project-memory is on.
+  # Not a list of array elements — `user,project` is one comma-separated flag
+  # value that claude parses itself.
+  # shellcheck disable=SC2054
   claude_args+=(--setting-sources user,project)
 
   # Display loaded projects

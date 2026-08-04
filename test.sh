@@ -4,7 +4,7 @@
 set -uo pipefail
 
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$MRA_DIR"
+cd "$MRA_DIR" || exit 1
 
 SHELL_PASS=0
 SHELL_FAIL=0
