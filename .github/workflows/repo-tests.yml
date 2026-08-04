@@ -46,8 +46,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: Block on shellcheck errors
-        run: shellcheck -S error lib/*.sh bin/*.sh tests/*.sh test.sh
-      - name: Report shellcheck warnings (non-blocking)
-        continue-on-error: true
+      - name: Block on shellcheck warnings
+        # Raised from -S error once the warning backlog was cleared (#50), so
+        # it cannot regrow. Keep in step with the Makefile's lint target —
+        # tests/test_lint_gate.sh fails if these drift apart.
         run: shellcheck -S warning lib/*.sh bin/*.sh tests/*.sh test.sh

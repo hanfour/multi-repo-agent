@@ -20,10 +20,11 @@ git -C "$WS/a" checkout -b feat/x &>/dev/null
 # b: on main, passed as changed -> selected via changed
 # c: on main, clean, not changed -> NOT selected
 
-out=$(review_targets "$WS" b)
-echo "$out" | grep -qx a || { echo "FAIL: 'a' (off-default) should be a target"; errors=$((errors+1)); }
-echo "$out" | grep -qx b || { echo "FAIL: 'b' (changed) should be a target"; errors=$((errors+1)); }
-if echo "$out" | grep -qx c; then echo "FAIL: 'c' (clean on-default, not changed) should NOT be a target"; errors=$((errors+1)); fi
+# Named apart from review-select.sh's own `out` array (see test_pr_ops.sh).
+targets_out=$(review_targets "$WS" b)
+echo "$targets_out" | grep -qx a || { echo "FAIL: 'a' (off-default) should be a target"; errors=$((errors+1)); }
+echo "$targets_out" | grep -qx b || { echo "FAIL: 'b' (changed) should be a target"; errors=$((errors+1)); }
+if echo "$targets_out" | grep -qx c; then echo "FAIL: 'c' (clean on-default, not changed) should NOT be a target"; errors=$((errors+1)); fi
 
 # no changed args, only off-default selection
 out2=$(review_targets "$WS")

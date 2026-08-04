@@ -8,7 +8,7 @@ source "$SCRIPT_DIR/lib/review-prompt.sh"
 
 errors=0
 TEST_DIR=$(mktemp -d)
-trap "rm -rf '$TEST_DIR'" EXIT
+trap 'rm -rf "$TEST_DIR"' EXIT
 
 git -C "$TEST_DIR" init -b main repo &>/dev/null
 R="$TEST_DIR/repo"

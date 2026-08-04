@@ -8,7 +8,7 @@ source "$SCRIPT_DIR/lib/diff-summary.sh"
 
 errors=0
 TEST_DIR=$(mktemp -d)
-trap "rm -rf '$TEST_DIR'" EXIT
+trap 'rm -rf "$TEST_DIR"' EXIT
 
 mkdir -p "$TEST_DIR/.collab"
 cat > "$TEST_DIR/.collab/dep-graph.json" <<'EOF'

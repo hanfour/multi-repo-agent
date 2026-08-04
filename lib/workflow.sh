@@ -78,7 +78,8 @@ mra_log() {
     return 1
   fi
   local log_dir="$workspace/.collab/logs"
-  local log_file="$log_dir/$(date +%Y%m%d-%H%M%S)-$project.log"
+  local log_file
+  log_file="$log_dir/$(date +%Y%m%d-%H%M%S)-$project.log"
   mkdir -p "$log_dir"
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $message" >> "$log_file"
   echo "$log_file"

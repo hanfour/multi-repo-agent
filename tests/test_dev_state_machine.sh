@@ -23,7 +23,7 @@ assert_eq "prose 'done' is not DONE" "BLOCKED:no sentinel" "$(_dev_parse_sentine
 
 # --- loop transitions (source dev.sh; stub side-effects) ---
 source "$SCRIPT_DIR/lib/dev.sh"
-export MRA_REVIEW_RESULT_FILE="$(mktemp)"
+MRA_REVIEW_RESULT_FILE="$(mktemp)"; export MRA_REVIEW_RESULT_FILE
 DEV_BASE="origin/main"; DEV_MAX_ROUNDS=3; DEV_RETRY_CAP=2; DEV_GLOBAL_CAP=12
 DEV_NO_PR=true; DEV_AUTO_APPROVE=false; DEV_RESUME=false; DEV_DRY_RUN=false
 
