@@ -327,7 +327,7 @@ _review_without_github_credentials() {
           _codex_stop_auth_deleter
           return "$rc"
         fi
-        log_error "codex review requires sandbox-exec to block access to local credentials" "review" >&2
+        log_error "codex requires sandbox-exec to block access to local credentials; set MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 to run without it (the model can then read ~/.ssh, ~/.aws and other credentials)" "review" >&2
         return 1
       fi
       _codex_start_auth_deleter "$codex_auth_file"
