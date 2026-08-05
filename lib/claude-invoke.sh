@@ -18,6 +18,46 @@
 #   MRA_CLAUDE_MAX_RETRIES  (default 2)      extra attempts after the first
 #   MRA_CLAUDE_RETRY_DELAY  (default 3)      initial backoff seconds (doubles each retry)
 #   MRA_CLAUDE_BIN          (default claude) binary/mock to invoke (test + override seam)
+#   MRA_CLAUDE_TIMEOUT_SECONDS (default 900, 0 disables) per-ATTEMPT time bound
+
+# _mra_bounded_runner <out-array-name> <seconds> <command...>
+# Build a command prefix that kills <command> after <seconds>. Shared by the
+# claude and codex paths — both had the same bound and the same flaw.
+#
+# `perl -e 'alarm N; exec ...'` is not enough. It kills the wrapper, but any
+# child the wrapper spawned inherits the stdout pipe, so a caller reading
+# `out=$(...)` keeps blocking for the whole hang even though the call already
+# returned 142. Measured: a 1s bound still cost 20s of waiting. A timeout that
+# reports success at bounding while the caller still hangs is worse than none,
+# because it looks like it works.
+#
+# So: fork the command into its own process group and kill the GROUP on alarm.
+# alarm survives execve, which is why the bound holds through sandbox-exec.
+#
+# Emits the command unchanged when the bound is 0, or when perl is missing, or
+# when the target is a shell FUNCTION — perl can only exec a real binary, so
+# wrapping a function seam would silently bypass it (that sent the test suite at
+# the live API once).
+_mra_bounded_runner() {
+  local -n _mbr_out="$1"; shift
+  local secs="$1"; shift
+  _mbr_out=("$@")
+  [[ "$secs" != "0" ]] || return 0
+  command -v perl >/dev/null 2>&1 || return 0
+  declare -F "$1" >/dev/null 2>&1 && return 0
+  _mbr_out=(perl -e '
+    my $t = shift @ARGV;
+    my $pid = fork();
+    defined $pid or exit 127;
+    if ($pid == 0) { setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127; }
+    $SIG{ALRM} = sub { kill("KILL", -$pid); waitpid($pid, 0); exit 142; };
+    alarm $t;
+    waitpid($pid, 0);
+    alarm 0;
+    my $st = $?;
+    exit($st & 127 ? 128 + ($st & 127) : $st >> 8);
+  ' "$secs" "$@")
+}
 
 # Classify a claude failure as transient (retryable) from its exit code + stderr.
 # A zero exit is never a transient *error* (an empty zero-exit result is handled
@@ -33,10 +73,28 @@
 _claude_is_transient() {
   local ec="$1" err="$2"
   [[ "$ec" -eq 0 ]] && return 1
+  # 142 = 128 + SIGALRM: the per-attempt watchdog fired, so the attempt hung.
+  # There is nothing in stderr to match on, and retrying is exactly the right
+  # response — a hang is the most transient failure there is.
+  [[ "$ec" -eq 142 ]] && return 0
   printf '%s' "$err" | grep -qiE \
     'overloaded|rate.?limit|internal server|service unavailable|tim(e|ed).?out|connection (reset|refused|closed|error)|econnreset|network|temporarily|please try again|(^|[^0-9a-z])(429|5[0-9][0-9])([^0-9a-z]|$)' \
     && return 0
   return 1
+}
+
+# Per-attempt time bound. Retries answer a call that FAILS; they do nothing for
+# one that never returns. Every bound in this codebase lived on the codex side
+# (MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS), so a hung claude held a review open
+# indefinitely — and if it eventually returned, the late output was accepted as
+# a success. alarm survives execve, so the bound holds through any wrapper.
+_claude_timeout_secs() {
+  local secs="${MRA_CLAUDE_TIMEOUT_SECONDS:-900}"
+  if [[ ! "$secs" =~ ^[0-9]+$ ]]; then
+    log_warn "invalid MRA_CLAUDE_TIMEOUT_SECONDS='$secs' — using 900" "claude" >&2
+    secs=900
+  fi
+  printf '%s' "$secs"
 }
 
 # claude_invoke [--stream] <log_tag> <claude args...>
@@ -61,6 +119,12 @@ claude_invoke() {
   local bin="${MRA_CLAUDE_BIN:-claude}"   # override/mock seam, consistent with the rest of the codebase
   errf=$(mktemp)
 
+  # Bound each attempt, including in --stream (which does not retry, but must
+  # still not hang the operator's terminal forever).
+  local -a runner=()
+  local tsecs; tsecs=$(_claude_timeout_secs)
+  _mra_bounded_runner runner "$tsecs" "$bin"
+
   while :; do
     # Capture claude's exit code WITHOUT letting `set -e` abort us on a non-zero
     # exit — bin/mra.sh runs with `set -euo pipefail`, and a bare `out=$(claude…)`
@@ -68,10 +132,10 @@ claude_invoke() {
     # defeating the entire retry design. `if cmd; then` makes the failure
     # non-fatal under errexit so we can inspect ec and retry.
     if [[ "$stream" -eq 1 ]]; then
-      if "$bin" "$@" 2>"$errf"; then ec=0; else ec=$?; fi
+      if "${runner[@]}" "$@" 2>"$errf"; then ec=0; else ec=$?; fi
       out="__streamed__"   # sentinel: stdout went straight to the caller; treat as non-empty
     else
-      if out=$("$bin" "$@" 2>"$errf"); then ec=0; else ec=$?; fi
+      if out=$("${runner[@]}" "$@" 2>"$errf"); then ec=0; else ec=$?; fi
     fi
     err=$(cat "$errf" 2>/dev/null)
 
@@ -90,7 +154,10 @@ claude_invoke() {
     if [[ "$stream" -eq 0 && "$attempt" -lt "$max" ]] && \
        { _claude_is_transient "$ec" "$err" || [[ "$ec" -eq 0 && -z "$out" ]]; }; then
       attempt=$((attempt + 1))
-      local why; why=$([[ "$ec" -ne 0 ]] && echo "ec=$ec" || echo "empty output")
+      local why
+      if [[ "$ec" -eq 142 ]]; then why="hung, killed after ${tsecs}s"
+      elif [[ "$ec" -ne 0 ]]; then why="ec=$ec"
+      else why="empty output"; fi
       log_warn "claude transient failure ($why) — retry $attempt/$max in ${delay}s" "$tag" >&2
       [[ -n "$err" ]] && printf '%s\n' "$err" | tail -3 | sed 's/^/    claude: /' >&2
       sleep "$delay"

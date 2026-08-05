@@ -160,6 +160,46 @@ else
   fail_test "set -e retry: out='$out' rc=$rc calls=$calls (want OK-RESULT/0/3)"
 fi
 
+# --- per-attempt time bound -------------------------------------------------
+# Retries answer a call that FAILS. They do nothing for one that never returns:
+# a hung claude held the review forever, because every bound in this codebase
+# (MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS) was on the codex side. The same
+# perl-alarm idiom applies here — alarm survives execve, so it still fires
+# through any wrapper.
+HANG_BIN="$TMP/claude-hang"
+cat > "$HANG_BIN" <<'STUB'
+#!/usr/bin/env bash
+echo "attempt" >> "$HANG_REC"
+sleep 30
+echo "<never-reached>"
+STUB
+chmod +x "$HANG_BIN"
+export HANG_REC="$TMP/hang-rec"
+
+: > "$HANG_REC"
+start=$SECONDS
+out=$(MRA_CLAUDE_BIN="$HANG_BIN" MRA_CLAUDE_TIMEOUT_SECONDS=1 MRA_CLAUDE_MAX_RETRIES=1       claude_invoke hangtest -p x 2>/dev/null); rc=$?
+elapsed=$((SECONDS - start))
+
+if (( elapsed < 20 )); then
+  pass_test "a hung claude is abandoned rather than waited out (${elapsed}s)"
+else
+  fail_test "claude_invoke waited ${elapsed}s for a hung call — unbounded"
+fi
+[[ "$rc" -ne 0 ]] && pass_test "a timed-out call reports failure"                   || fail_test "a timed-out call reported success (rc=$rc, out=$out)"
+attempts=$(grep -c attempt "$HANG_REC" 2>/dev/null || echo 0)
+if [[ "$attempts" -ge 2 ]]; then
+  pass_test "a timeout is treated as transient and retried ($attempts attempts)"
+else
+  fail_test "a timeout was not retried ($attempts attempt(s)) — a single hang still loses the run"
+fi
+
+# 0 disables the bound, for anyone who would rather wait than lose a long call.
+: > "$HANG_REC"
+grep -q 'MRA_CLAUDE_TIMEOUT_SECONDS' "$MRA_DIR/lib/claude-invoke.sh" \
+  && pass_test "the bound is documented as a tunable" \
+  || fail_test "no MRA_CLAUDE_TIMEOUT_SECONDS knob"
+
 echo "---"
 echo "Passed: $pass"
 echo "Failed: $errors"
