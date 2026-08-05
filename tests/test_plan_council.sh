@@ -6,6 +6,27 @@ source "$SCRIPT_DIR/lib/colors.sh"
 source "$SCRIPT_DIR/lib/personas.sh"
 source "$SCRIPT_DIR/lib/plan-council.sh"
 source "$SCRIPT_DIR/lib/args.sh"
+# call_model routes through the review path's credential isolation, which
+# lives in review-provider.sh (loaded first by bin/mra.sh). State the
+# dependency here rather than inherit it from load order.
+# call_model copies the operator's codex credential and reads their
+# config.toml to learn the provider transport. Without an isolated HOME this
+# file would run against the real ones — and on failure would print the
+# internal relay host into the log it keeps. Give it a fixture instead.
+FAKE_HOME=$(mktemp -d)
+mkdir -p "$FAKE_HOME/.codex"
+printf '{"OPENAI_API_KEY":"plan-council-test-key"}\n' > "$FAKE_HOME/.codex/auth.json"
+cat > "$FAKE_HOME/.codex/config.toml" <<'TOML'
+model_provider = "TestProvider"
+[model_providers.TestProvider]
+name = "TestProvider"
+base_url = "https://relay.example.test:2880"
+wire_api = "responses"
+requires_openai_auth = true
+TOML
+export HOME="$FAKE_HOME" CODEX_HOME="$FAKE_HOME/.codex"
+
+source "$SCRIPT_DIR/lib/review-provider.sh"
 source "$SCRIPT_DIR/lib/model-provider.sh"
 
 errors=0
@@ -76,7 +97,14 @@ case "$(cat "$MP_REC")" in *"--max-turns 4"*) : ;; *) echo "FAIL: claude should 
 out=$(MRA_CODEX_BIN="$MP_DIR/codex" call_model codex "PROMPT-B" sonnet "$MP_DIR" "" 6)
 [[ "$out" == "<codex-output>" ]] || { echo "FAIL: call_model codex output: $out"; errors=$((errors+1)); }
 rec=$(cat "$MP_REC")
-case "$rec" in *"exec -s read-only"*) : ;; *) echo "FAIL: codex missing 'exec -s read-only': $rec"; errors=$((errors+1)) ;; esac
+# Sandboxing must land on exactly one layer: codex stands down where mra's
+# sandbox-exec wraps it (nesting a deny-default profile is refused by macOS and
+# would make every command fail), and sandboxes itself where mra cannot.
+if command -v sandbox-exec >/dev/null 2>&1; then
+  case "$rec" in *"--dangerously-bypass-approvals-and-sandbox"*) : ;; *) echo "FAIL: codex nests its own sandbox inside mra's: $rec"; errors=$((errors+1)) ;; esac
+else
+  case "$rec" in *"-s read-only"*) : ;; *) echo "FAIL: no sandbox on either layer: $rec"; errors=$((errors+1)) ;; esac
+fi
 case "$rec" in *"cwd=$MP_DIR"*) : ;; *) echo "FAIL: codex cwd should be project_dir: $rec"; errors=$((errors+1)) ;; esac
 
 # 3. unknown provider -> non-zero
@@ -113,7 +141,11 @@ out=$(MRA_CLAUDE_BIN="$RC_DIR/claude" MRA_CODEX_BIN="$RC_DIR/codex" \
 case "$out" in *"<claude-output>"*) : ;; *) echo "FAIL: dual run should return synth (claude) output: $out"; errors=$((errors+1)) ;; esac
 rec=$(cat "$RC_REC")
 case "$rec" in *"--max-turns 6"*) : ;; *) echo "FAIL: dual missing expert claude --max-turns 6: $rec"; errors=$((errors+1)) ;; esac
-case "$rec" in *"exec -s read-only"*) : ;; *) echo "FAIL: dual missing codex expert call: $rec"; errors=$((errors+1)) ;; esac
+if command -v sandbox-exec >/dev/null 2>&1; then
+  case "$rec" in *"--dangerously-bypass-approvals-and-sandbox"*) : ;; *) echo "FAIL: dual missing codex expert call: $rec"; errors=$((errors+1)) ;; esac
+else
+  case "$rec" in *"-s read-only"*) : ;; *) echo "FAIL: dual missing codex expert call: $rec"; errors=$((errors+1)) ;; esac
+fi
 case "$rec" in *"--max-turns 4"*) : ;; *) echo "FAIL: dual missing synth claude --max-turns 4: $rec"; errors=$((errors+1)) ;; esac
 case "$rec" in *"[claude]"*) : ;; *) echo "FAIL: synth input missing [claude] tag: $rec"; errors=$((errors+1)) ;; esac
 case "$rec" in *"[codex]"*) : ;; *) echo "FAIL: synth input missing [codex] tag: $rec"; errors=$((errors+1)) ;; esac
