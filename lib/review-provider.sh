@@ -155,6 +155,39 @@ _review_sandbox_canonical_path() {
   fi
 }
 
+# _review_codex_provider_overrides <out-array-name>
+# The validated `-c ...` transport overrides codex needs when it runs with an
+# isolated CODEX_HOME, which has no config.toml of its own. MUST be called
+# BEFORE the isolation redirects CODEX_HOME — it reads the operator's real
+# config to learn where their relay is.
+#
+# Without these codex silently falls back to api.openai.com and every call comes
+# back 401 with a key that is perfectly valid for the relay it never reached.
+# Shared by the review and plan paths: a second copy of this parsing would
+# drift, and the values are security-relevant (they decide where the prompt is
+# sent), so each is pattern-validated before being spliced into TOML.
+_review_codex_provider_overrides() {
+  local -n _rcpo_out="$1"
+  local codex_config provider_name base_url wire_api requires_openai_auth
+  codex_config="${CODEX_HOME:-${HOME:-}/.codex}/config.toml"
+  provider_name=$(_review_toml_string_value "$codex_config" "" model_provider)
+  [[ "$provider_name" =~ ^[A-Za-z0-9._-]+$ ]] || provider_name="OpenAI"
+  base_url=$(_review_toml_string_value "$codex_config" "model_providers.$provider_name" base_url)
+  wire_api=$(_review_toml_string_value "$codex_config" "model_providers.$provider_name" wire_api)
+  requires_openai_auth=$(_review_toml_string_value "$codex_config" "model_providers.$provider_name" requires_openai_auth)
+  [[ "$base_url" =~ ^https://[A-Za-z0-9._:/-]+$ ]] || base_url="https://api.openai.com/v1"
+  [[ "$wire_api" =~ ^(responses|chat)$ ]] || wire_api="responses"
+  _rcpo_out=(
+    -c "model_provider=\"$provider_name\""
+    -c "model_providers.$provider_name.name=\"$provider_name\""
+    -c "model_providers.$provider_name.base_url=\"$base_url\""
+    -c "model_providers.$provider_name.wire_api=\"$wire_api\""
+  )
+  if [[ "$requires_openai_auth" == "true" || "$requires_openai_auth" == "false" ]]; then
+    _rcpo_out+=(-c "model_providers.$provider_name.requires_openai_auth=$requires_openai_auth")
+  fi
+}
+
 # _review_write_codex_sandbox_profile <profile> <original-home> <model-home> <writable-root>...
 #
 # mra is the ONLY sandbox around codex, so this profile has to carry the write
@@ -457,14 +490,12 @@ _review_call_one_provider() {
       codex_stdout=$(mktemp "${TMPDIR:-/tmp}/mra-codex-stdout.XXXXXX") || { rm -f "$codex_last"; chmod -R u+w "$snapshot" 2>/dev/null || true; rm -rf "$snapshot" "$trusted_cwd"; return 1; }
       chmod 600 "$codex_last" "$codex_stdout"
       chmod 700 "$trusted_cwd"
+      # Still needed after the transport overrides moved into a helper:
+      # _review_codex_runtime_overrides below reads the same file for the knobs
+      # --ignore-user-config would otherwise drop (#19).
       codex_config="${CODEX_HOME:-${HOME:-}/.codex}/config.toml"
-      provider_name=$(_review_toml_string_value "$codex_config" "" model_provider)
-      [[ "$provider_name" =~ ^[A-Za-z0-9._-]+$ ]] || provider_name="OpenAI"
-      base_url=$(_review_toml_string_value "$codex_config" "model_providers.$provider_name" base_url)
-      wire_api=$(_review_toml_string_value "$codex_config" "model_providers.$provider_name" wire_api)
-      requires_openai_auth=$(_review_toml_string_value "$codex_config" "model_providers.$provider_name" requires_openai_auth)
-      [[ "$base_url" =~ ^https://[A-Za-z0-9._:/-]+$ ]] || base_url="https://api.openai.com/v1"
-      [[ "$wire_api" =~ ^(responses|chat)$ ]] || wire_api="responses"
+      local -a _provider_overrides=()
+      _review_codex_provider_overrides _provider_overrides
       # codex sandboxes each tool command by applying a deny-default seatbelt
       # profile, which macOS refuses inside an existing sandbox. Where mra
       # supplies that outer sandbox, codex must not try to nest its own — the
@@ -482,14 +513,8 @@ _review_call_one_provider() {
         --output-last-message "$codex_last"
         -c shell_environment_policy.inherit=none
         -c 'shell_environment_policy.set.PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"'
-        --add-dir "$snapshot"
-        -c "model_provider=\"$provider_name\""
-        -c "model_providers.$provider_name.name=\"$provider_name\""
-        -c "model_providers.$provider_name.base_url=\"$base_url\""
-        -c "model_providers.$provider_name.wire_api=\"$wire_api\"")
-      if [[ "$requires_openai_auth" == "true" || "$requires_openai_auth" == "false" ]]; then
-        args+=(-c "model_providers.$provider_name.requires_openai_auth=$requires_openai_auth")
-      fi
+        --add-dir "$snapshot")
+      args+=("${_provider_overrides[@]}")
       local runtime_override
       while IFS= read -r runtime_override; do
         if [[ -n "$runtime_override" ]]; then args+=(-c "$runtime_override"); fi
