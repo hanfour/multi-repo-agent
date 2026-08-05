@@ -526,13 +526,10 @@ _review_call_one_provider() {
       args+=("$prompt")
       local watchdog_secs
       watchdog_secs=$(_review_codex_watchdog_secs)
-      local -a codex_cmd=("${MRA_CODEX_BIN:-codex}")
-      if [[ "$watchdog_secs" != "0" ]]; then
-        if command -v perl >/dev/null 2>&1; then
-          codex_cmd=(perl -e 'my $t = shift @ARGV; alarm $t; exec { $ARGV[0] } @ARGV or exit 127;' "$watchdog_secs" "${codex_cmd[@]}")
-        else
-          log_warn "perl not found — codex watchdog disabled, invocation is unbounded" "review" >&2
-        fi
+      local -a codex_cmd=()
+      _mra_bounded_runner codex_cmd "$watchdog_secs" "${MRA_CODEX_BIN:-codex}"
+      if [[ "$watchdog_secs" != "0" && "${codex_cmd[0]}" != "perl" ]]; then
+        log_warn "perl not found — codex watchdog disabled, invocation is unbounded" "review" >&2
       fi
       # </dev/null: codex reads "additional input" from an inherited non-tty
       # stdin and blocks until EOF the caller may never send (issue #18's
