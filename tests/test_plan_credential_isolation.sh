@@ -74,7 +74,32 @@ case "$rec" in
 esac
 
 # --- codex branch -----------------------------------------------------------
+# The sandbox is what denies the model ~/.ssh, ~/.aws and ~/.codex. Where it is
+# unavailable the isolation refuses to run codex at all rather than hand it the
+# operator's credentials with only the env stripped — the same contract the
+# review path has had, now shared. Linux CI exercises this branch; macOS the
+# other.
 rec=$(run_with_creds codex)
+
+if ! command -v sandbox-exec >/dev/null 2>&1; then
+  [[ -z "$rec" ]] && ok "codex is refused where no sandbox can be applied" \
+                  || fail "codex ran unsandboxed with the operator's credentials: $rec"
+  : > "$REC"
+  out=$(GH_TOKEN=plan-secret HOME="$TMP/home" MRA_CODEX_BIN="$TMP/bin/codex" \
+        MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 \
+        call_model codex "PROMPT" sonnet "$TMP/proj" "" 4 2>&1 || true)
+  esc=$(cat "$REC")
+  case "$esc" in
+    *"gh=unset"*) ok "the explicit escape hatch still strips the tokens" ;;
+    "") fail "the escape hatch did not run codex at all: $out" ;;
+    *) fail "the escape hatch leaked GitHub credentials: $esc" ;;
+  esac
+  grep -q 'watchdog\|alarm' "$SCRIPT_DIR/lib/model-provider.sh" \
+    && ok "the plan path bounds its model call" \
+    || fail "an unbounded model call can hang the plan indefinitely (#18's family)"
+  echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
+  exit $((errors > 0 ? 1 : 0))
+fi
 case "$rec" in
   *"gh=unset github=unset"*) ok "codex child cannot read GitHub credentials" ;;
   *) fail "codex child inherited GitHub credentials: $rec" ;;
