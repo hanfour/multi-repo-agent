@@ -25,6 +25,11 @@ wire_api = "responses"
 requires_openai_auth = true
 TOML
 export HOME="$FAKE_HOME" CODEX_HOME="$FAKE_HOME/.codex"
+# This file tests call_model's dispatch shape, not the sandbox policy. Where
+# sandbox-exec is unavailable — Linux — the isolation refuses codex outright
+# (tests/test_plan_credential_isolation.sh is what asserts that, per platform),
+# so opt in explicitly here to keep the dispatch reachable everywhere.
+export MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1
 
 source "$SCRIPT_DIR/lib/review-provider.sh"
 source "$SCRIPT_DIR/lib/model-provider.sh"
