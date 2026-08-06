@@ -35,6 +35,9 @@ export HOME="$FAKE_HOME" CODEX_HOME="$FAKE_HOME/.codex"
 # so opt in explicitly here to keep the dispatch reachable everywhere.
 export MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1
 
+# call_model now routes claude through claude_invoke (retry + time bound +
+# diagnosable failure), so that library is a dependency too.
+source "$SCRIPT_DIR/lib/claude-invoke.sh"
 source "$SCRIPT_DIR/lib/review-provider.sh"
 source "$SCRIPT_DIR/lib/model-provider.sh"
 
@@ -94,7 +97,9 @@ rec=$(cat "$MP_REC")
 case "$rec" in *"-p"*) : ;; *) echo "FAIL: claude missing -p: $rec"; errors=$((errors+1)) ;; esac
 case "$rec" in *"--disallowedTools Write,Edit,NotebookEdit"*) : ;; *) echo "FAIL: claude missing disallowedTools: $rec"; errors=$((errors+1)) ;; esac
 case "$rec" in *"--model sonnet"*) : ;; *) echo "FAIL: claude missing --model: $rec"; errors=$((errors+1)) ;; esac
-case "$rec" in *"--max-turns 6"*) : ;; *) echo "FAIL: claude missing --max-turns 6: $rec"; errors=$((errors+1)) ;; esac
+# This one passes 6 explicitly — it asserts call_model FORWARDS the cap it was
+# given, not what the council chooses.
+case "$rec" in *"--max-turns 6"*) : ;; *) echo "FAIL: call_model did not forward the given max-turns: $rec"; errors=$((errors+1)) ;; esac
 case "$rec" in *"--setting-sources project"*) : ;; *) echo "FAIL: claude missing --setting-sources project: $rec"; errors=$((errors+1)) ;; esac
 # max_turns is a real parameter (4 for the synthesizer)
 : > "$MP_REC"
@@ -115,6 +120,16 @@ else
   case "$rec" in *"-s read-only"*) : ;; *) echo "FAIL: no sandbox on either layer: $rec"; errors=$((errors+1)) ;; esac
 fi
 case "$rec" in *"cwd=$MP_DIR"*) : ;; *) echo "FAIL: codex cwd should be project_dir: $rec"; errors=$((errors+1)) ;; esac
+
+# 2b. Turn caps: the expert cap was hardcoded 6 and real experts hit it
+# ("Error: Reached max turns (6)" x3 in a live `mra plan --dual`). It must clear
+# the review path's measured requirement, and stay overridable.
+[[ "$(_plan_expert_max_turns)" -ge 10 ]] \
+  || { echo "FAIL: expert cap $(_plan_expert_max_turns) is below what a real expert needed"; errors=$((errors+1)); }
+[[ "$(MRA_PLAN_EXPERT_MAX_TURNS=7 _plan_expert_max_turns)" == "7" ]] \
+  || { echo "FAIL: MRA_PLAN_EXPERT_MAX_TURNS ignored"; errors=$((errors+1)); }
+[[ "$(MRA_PLAN_SYNTH_MAX_TURNS=9 _plan_synth_max_turns)" == "9" ]] \
+  || { echo "FAIL: MRA_PLAN_SYNTH_MAX_TURNS ignored"; errors=$((errors+1)); }
 
 # 3. unknown provider -> non-zero
 if call_model bogus "P" sonnet "$MP_DIR" "" 6 >/dev/null 2>&1; then echo "FAIL: unknown provider should fail"; errors=$((errors+1)); fi
@@ -149,7 +164,7 @@ out=$(MRA_CLAUDE_BIN="$RC_DIR/claude" MRA_CODEX_BIN="$RC_DIR/codex" \
   run_plan_council proj "$RC_PROJ" "do a thing" "security-auditor" sonnet "" "" "" true)
 case "$out" in *"<claude-output>"*) : ;; *) echo "FAIL: dual run should return synth (claude) output: $out"; errors=$((errors+1)) ;; esac
 rec=$(cat "$RC_REC")
-case "$rec" in *"--max-turns 6"*) : ;; *) echo "FAIL: dual missing expert claude --max-turns 6: $rec"; errors=$((errors+1)) ;; esac
+case "$rec" in *"--max-turns $(_plan_expert_max_turns)"*) : ;; *) echo "FAIL: dual expert claude cap should match _plan_expert_max_turns: $rec"; errors=$((errors+1)) ;; esac
 if command -v sandbox-exec >/dev/null 2>&1; then
   case "$rec" in *"--dangerously-bypass-approvals-and-sandbox"*) : ;; *) echo "FAIL: dual missing codex expert call: $rec"; errors=$((errors+1)) ;; esac
 else
@@ -165,7 +180,7 @@ out=$(MRA_CLAUDE_BIN="$RC_DIR/claude" MRA_CODEX_BIN="$RC_DIR/codex" \
   run_plan_council proj "$RC_PROJ" "do a thing" "security-auditor" sonnet "" "" "" false)
 rec=$(cat "$RC_REC")
 if printf '%s' "$rec" | grep -q 'codex:'; then echo "FAIL: non-dual must NOT call codex: $rec"; errors=$((errors+1)); fi
-case "$rec" in *"--max-turns 6"*) : ;; *) echo "FAIL: non-dual missing expert --max-turns 6: $rec"; errors=$((errors+1)) ;; esac
+case "$rec" in *"--max-turns $(_plan_expert_max_turns)"*) : ;; *) echo "FAIL: non-dual expert cap should match _plan_expert_max_turns: $rec"; errors=$((errors+1)) ;; esac
 case "$rec" in *"--max-turns 4"*) : ;; *) echo "FAIL: non-dual missing synth --max-turns 4: $rec"; errors=$((errors+1)) ;; esac
 if printf '%s' "$rec" | grep -q '\[codex\]'; then echo "FAIL: non-dual synth input must not carry provider tags: $rec"; errors=$((errors+1)); fi
 

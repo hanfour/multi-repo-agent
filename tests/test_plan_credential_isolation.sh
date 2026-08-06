@@ -99,7 +99,35 @@ if ! command -v sandbox-exec >/dev/null 2>&1; then
   grep -q 'watchdog\|alarm' "$SCRIPT_DIR/lib/model-provider.sh" \
     && ok "the plan path bounds its model call" \
     || fail "an unbounded model call can hang the plan indefinitely (#18's family)"
-  echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
+  # --- the plan path must get the same resilience as the review path ----------
+# call_model invoked claude directly, so the plan council had no retry, no
+# per-attempt time bound, and no failure diagnostics. Two experts failed in a
+# real `mra plan --dual` run with rc=1 and empty stderr, and the reason was
+# unrecoverable — claude reports some failures on stdout, and only
+# claude_invoke knows to look there.
+grep -q 'claude_invoke' "$SCRIPT_DIR/lib/model-provider.sh" \
+  && ok "the plan path routes claude through claude_invoke" \
+  || fail "claude is invoked directly — no retry, no time bound, no diagnosable failure"
+
+# Behavioural: a transient failure must be retried, exactly as in a review.
+RETRY_BIN="$TMP/claude-flaky"; RETRY_REC="$TMP/flaky-rec"; : > "$RETRY_REC"
+cat > "$RETRY_BIN" <<'STUB'
+#!/usr/bin/env bash
+n=$(( $(cat "$RETRY_REC" 2>/dev/null | wc -l) ))
+echo "call" >> "$RETRY_REC"
+if [[ "$n" -lt 1 ]]; then echo "overloaded_error: server overloaded" >&2; exit 1; fi
+echo "<recovered>"
+STUB
+chmod +x "$RETRY_BIN"
+out=$(RETRY_REC="$RETRY_REC" MRA_CLAUDE_BIN="$RETRY_BIN" MRA_CLAUDE_RETRY_DELAY=0       HOME="$TMP/home" call_model claude "P" sonnet "$TMP/proj" "" 4 2>/dev/null)
+calls=$(wc -l < "$RETRY_REC" | tr -d ' ')
+if [[ "$out" == *"<recovered>"* && "$calls" -ge 2 ]]; then
+  ok "a transient claude failure is retried on the plan path ($calls calls)"
+else
+  fail "no retry on the plan path (out=$out calls=$calls)"
+fi
+
+echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
   exit $((errors > 0 ? 1 : 0))
 fi
 case "$rec" in
@@ -132,6 +160,34 @@ fi
 grep -q 'watchdog\|alarm' "$SCRIPT_DIR/lib/model-provider.sh" \
   && ok "the plan path bounds its model call" \
   || fail "an unbounded model call can hang the plan indefinitely (#18's family)"
+
+# --- the plan path must get the same resilience as the review path ----------
+# call_model invoked claude directly, so the plan council had no retry, no
+# per-attempt time bound, and no failure diagnostics. Two experts failed in a
+# real `mra plan --dual` run with rc=1 and empty stderr, and the reason was
+# unrecoverable — claude reports some failures on stdout, and only
+# claude_invoke knows to look there.
+grep -q 'claude_invoke' "$SCRIPT_DIR/lib/model-provider.sh" \
+  && ok "the plan path routes claude through claude_invoke" \
+  || fail "claude is invoked directly — no retry, no time bound, no diagnosable failure"
+
+# Behavioural: a transient failure must be retried, exactly as in a review.
+RETRY_BIN="$TMP/claude-flaky"; RETRY_REC="$TMP/flaky-rec"; : > "$RETRY_REC"
+cat > "$RETRY_BIN" <<'STUB'
+#!/usr/bin/env bash
+n=$(( $(cat "$RETRY_REC" 2>/dev/null | wc -l) ))
+echo "call" >> "$RETRY_REC"
+if [[ "$n" -lt 1 ]]; then echo "overloaded_error: server overloaded" >&2; exit 1; fi
+echo "<recovered>"
+STUB
+chmod +x "$RETRY_BIN"
+out=$(RETRY_REC="$RETRY_REC" MRA_CLAUDE_BIN="$RETRY_BIN" MRA_CLAUDE_RETRY_DELAY=0       HOME="$TMP/home" call_model claude "P" sonnet "$TMP/proj" "" 4 2>/dev/null)
+calls=$(wc -l < "$RETRY_REC" | tr -d ' ')
+if [[ "$out" == *"<recovered>"* && "$calls" -ge 2 ]]; then
+  ok "a transient claude failure is retried on the plan path ($calls calls)"
+else
+  fail "no retry on the plan path (out=$out calls=$calls)"
+fi
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
