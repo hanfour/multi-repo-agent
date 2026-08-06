@@ -64,6 +64,24 @@ TEMPLATE
   printf '%s\n' "$template"
 }
 
+# Turn caps for the council.
+#
+# The expert cap was hardcoded 6, and real experts hit it: a `mra plan --dual`
+# against a live Rails repo lost three claude experts to
+# "Error: Reached max turns (6)". The council then synthesised from the
+# survivors and produced a plan that looks complete — the failures are a
+# warning in the log, nothing in the output.
+#
+# 20 matches the review path's standard cap, itself measured against a real PR.
+# A cap only costs anything when it is reached, and a truncated expert costs the
+# same tokens while contributing nothing.
+#
+# The synthesis cap stays at its original 4: no run has been observed hitting
+# it, and raising it on a hunch would be guessing. It is a knob now so that a
+# measurement, not a patch, is what changes it.
+_plan_expert_max_turns() { echo "${MRA_PLAN_EXPERT_MAX_TURNS:-20}"; }
+_plan_synth_max_turns()  { echo "${MRA_PLAN_SYNTH_MAX_TURNS:-4}"; }
+
 run_plan_council() {
   # _project is bound for signature clarity; this runner uses project_dir only.
   local _project="$1" project_dir="$2" task="$3" personas="$4" model="$5"
@@ -86,7 +104,7 @@ run_plan_council() {
       (
         local prompt
         prompt=$(build_plan_prompt "$p" "$task" "$pkb_context" "$lang_directive")
-        call_model "$prov" "$prompt" "$model" "$project_dir" "$claude_add_dirs" 6
+        call_model "$prov" "$prompt" "$model" "$project_dir" "$claude_add_dirs" "$(_plan_expert_max_turns)"
       ) > "$f" 2> "$err" &
       pids+=("$!")
     done
@@ -217,7 +235,7 @@ TEMPLATE
   local synth_out; synth_out=$(mktemp)
   local synth_err; synth_err=$(mktemp)
   rc=0
-  call_model claude "$synth_prompt" "$model" "$project_dir" "$claude_add_dirs" 4 \
+  call_model claude "$synth_prompt" "$model" "$project_dir" "$claude_add_dirs" "$(_plan_synth_max_turns)" \
     >"$synth_out" 2>"$synth_err" || rc=$?
 
   if [[ $rc -ne 0 ]]; then

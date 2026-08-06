@@ -19,10 +19,17 @@ call_model() {
     claude)
       local _ad=()
       expand_add_dir_string _ad "$add_dirs"
+      # Through claude_invoke, not the binary directly. The review path gets
+      # retry on transient failures, a per-attempt time bound, and a failure
+      # message that falls back to stdout when stderr is empty; the plan path
+      # had none of it. A real `mra plan --dual` lost two experts to rc=1 with
+      # empty stderr and the reason was unrecoverable — claude reports some
+      # failures on stdout, and only claude_invoke knows to look there.
+      #
       # </dev/null for the same reason as the codex branch: an inherited
       # non-tty stdin the caller never closes is a freeze waiting to happen.
       MRA_REVIEW_AUTH_PROVIDER=claude _review_without_github_credentials \
-        "${MRA_CLAUDE_BIN:-claude}" -p "$prompt" \
+        claude_invoke plan -p "$prompt" \
         "${_ad[@]}" \
         --model "$model" \
         --max-turns "$max_turns" \
