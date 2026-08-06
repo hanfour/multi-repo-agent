@@ -526,7 +526,7 @@ doctor_security() {
   # `mra` calls into.
   if [[ -n "${MRA_DIR:-}" && -d "$MRA_DIR" ]]; then
     local perms
-    perms=$(stat -f '%Lp' "$MRA_DIR" 2>/dev/null || stat -c '%a' "$MRA_DIR" 2>/dev/null || echo "")
+    perms=$(stat -c '%a' "$MRA_DIR" 2>/dev/null || stat -f '%Lp' "$MRA_DIR" 2>/dev/null || echo "")
     if [[ -n "$perms" && "${perms: -1}" =~ [2367] ]]; then
       log_warn "MRA_DIR ($MRA_DIR) is world-writable (mode $perms); anyone on the host can rewrite mra scripts (TM-010)" "security" >&2
       ((warn++)) || true
