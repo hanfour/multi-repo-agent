@@ -48,6 +48,20 @@ export function validateToolInput(
     }
   }
 
+  // Refuse arguments the tool does not declare rather than dropping them. The
+  // loop below only walks declared properties, so anything else used to vanish
+  // in silence — a client calling mra_diff with {"project": "web"}, a parameter
+  // that tool has never had, received a confident answer about every project
+  // with no sign its filter had been discarded. Found by driving the server
+  // over stdio, not by any test: the tools' own schemas were all satisfied.
+  const unknown = Object.keys(input).filter((k) => !(k in properties));
+  if (unknown.length > 0) {
+    throw new InputValidationError(
+      `${tool.name}: does not accept ${unknown.map((k) => `'${k}'`).join(", ")}` +
+        ` (accepts: ${Object.keys(properties).join(", ")})`,
+    );
+  }
+
   const validated: Record<string, string> = {};
   for (const [key, schema] of Object.entries(properties)) {
     const value = input[key];

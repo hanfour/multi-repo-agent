@@ -14,16 +14,26 @@ function mustFind(name: string) {
   return tool;
 }
 
-test("valid input passes through and keeps only schema-declared keys", () => {
+// Undeclared keys must never reach argv. That was previously achieved by
+// dropping them; it is now achieved by refusing the call, which contains them
+// just as firmly and does not also mislead the caller. See the rejection tests
+// at the end of this file for what dropping cost.
+test("declared input passes through unchanged", () => {
   const tool = mustFind("mra_deps");
   const input = validateToolInput(tool, {
     workspace: "/tmp/ws",
     project: "my-app",
-    extraneous: "dropped",
   });
   assert.equal(input.workspace, "/tmp/ws");
   assert.equal(input.project, "my-app");
-  assert.equal("extraneous" in input, false);
+});
+
+test("an undeclared key never reaches the returned arguments", () => {
+  const tool = mustFind("mra_deps");
+  assert.throws(
+    () => validateToolInput(tool, { workspace: "/tmp/ws", extraneous: "x" }),
+    InputValidationError,
+  );
 });
 
 test("path traversal project name is rejected by the schema pattern", () => {
@@ -86,4 +96,56 @@ test("toolTimeout returns declared timeout or the default", () => {
   assert.equal(toolTimeout(mustFind("mra_ask")), 300000);
   assert.equal(toolTimeout(mustFind("mra_status")), 180000);
   assert.equal(toolTimeout({ timeout: "soon" }), 180000);
+});
+
+// An argument the tool does not declare was silently dropped: the loop only
+// walks declared properties, so anything else in the payload never got looked
+// at. A client calling mra_diff with {"project": "web"} — a parameter that tool
+// has never had — received a successful, authoritative-looking answer about
+// every project, with nothing to indicate its filter was discarded.
+//
+// Found by driving the server over stdio: `mra_diff` with a nonexistent project
+// returned "all projects clean".
+test("an undeclared argument is rejected, not dropped", () => {
+  const tool = {
+    name: "mra_diff",
+    inputSchema: {
+      properties: { workspace: { type: "string" } },
+      required: ["workspace"],
+    },
+  };
+  assert.throws(
+    () => validateToolInput(tool, { workspace: "/ws", project: "web" }),
+    (e: Error) => e.name === "InputValidationError" && /project/.test(e.message),
+    "an argument the tool does not accept must be refused",
+  );
+});
+
+test("the rejection names every unknown argument", () => {
+  const tool = {
+    name: "mra_status",
+    inputSchema: { properties: { workspace: { type: "string" } }, required: [] },
+  };
+  try {
+    validateToolInput(tool, { workspace: "/ws", project: "a", branch: "b" });
+    assert.fail("should have thrown");
+  } catch (e) {
+    const m = (e as Error).message;
+    assert.match(m, /project/);
+    assert.match(m, /branch/);
+  }
+});
+
+test("declared arguments still pass", () => {
+  const tool = {
+    name: "mra_deps",
+    inputSchema: {
+      properties: { workspace: { type: "string" }, project: { type: "string" } },
+      required: ["workspace"],
+    },
+  };
+  assert.deepEqual(validateToolInput(tool, { workspace: "/ws", project: "web" }), {
+    workspace: "/ws",
+    project: "web",
+  });
 });
