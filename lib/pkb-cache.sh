@@ -224,7 +224,7 @@ _pkb_record_mtimes() {
     local full_path="$project_dir/$f"
     if [[ -f "$full_path" ]]; then
       local mtime
-      mtime=$(stat -f %m "$full_path" 2>/dev/null || stat -c %Y "$full_path" 2>/dev/null || echo "0")
+      mtime=$(stat -c %Y "$full_path" 2>/dev/null || stat -f %m "$full_path" 2>/dev/null || echo "0")
       mtimes=$(echo "$mtimes" | jq --arg k "$f" --arg v "$mtime" '. + {($k): ($v | tonumber)}')
     fi
   done
@@ -271,7 +271,7 @@ _pkb_check_mtimes() {
     local full_path="$project_dir/$f"
     if [[ -f "$full_path" ]]; then
       local current_mtime stored_mtime
-      current_mtime=$(stat -f %m "$full_path" 2>/dev/null || stat -c %Y "$full_path" 2>/dev/null || echo "0")
+      current_mtime=$(stat -c %Y "$full_path" 2>/dev/null || stat -f %m "$full_path" 2>/dev/null || echo "0")
       stored_mtime=$(echo "$stored_mtimes" | jq -r --arg k "$f" '.[$k] // 0')
       if [[ "$current_mtime" != "$stored_mtime" ]]; then
         changed="$changed $f"

@@ -160,6 +160,40 @@ else
   fail_test "set -e retry: out='$out' rc=$rc calls=$calls (want OK-RESULT/0/3)"
 fi
 
+# --- a failure whose reason is on stdout must still be reported --------------
+# claude writes "Error: Reached max turns (N)" to STDOUT and exits 1, so the
+# final message read "claude failed (ec=1) ... with no stderr" — technically
+# true and useless. Diagnosing one real occurrence took six rounds of probing
+# to recover a line the process had already printed.
+STDOUT_BIN="$TMP/claude-stdout-fail"
+cat > "$STDOUT_BIN" <<'STUB'
+#!/usr/bin/env bash
+echo "Error: Reached max turns (6)"
+exit 1
+STUB
+chmod +x "$STDOUT_BIN"
+
+err_out=$(MRA_CLAUDE_BIN="$STDOUT_BIN" MRA_CLAUDE_MAX_RETRIES=0           claude_invoke stdouttest -p x 2>&1 >/dev/null)
+case "$err_out" in
+  *"Reached max turns"*) pass_test "a stdout-only failure reason is surfaced" ;;
+  *) fail_test "the reason was on stdout and got dropped: $err_out" ;;
+esac
+case "$err_out" in
+  *"no stderr"*) fail_test "still claims 'no stderr' while stdout held the reason" ;;
+  *) pass_test "does not claim there was nothing to report" ;;
+esac
+
+# A genuinely silent failure should still say so rather than invent detail.
+SILENT_BIN="$TMP/claude-silent"
+printf '#!/usr/bin/env bash
+exit 1
+' > "$SILENT_BIN"; chmod +x "$SILENT_BIN"
+silent_out=$(MRA_CLAUDE_BIN="$SILENT_BIN" MRA_CLAUDE_MAX_RETRIES=0              claude_invoke silenttest -p x 2>&1 >/dev/null)
+case "$silent_out" in
+  *"no stderr"*|*"no output"*) pass_test "a truly silent failure is described as such" ;;
+  *) fail_test "unclear message for a silent failure: $silent_out" ;;
+esac
+
 # --- per-attempt time bound -------------------------------------------------
 # Retries answer a call that FAILS. They do nothing for one that never returns:
 # a hung claude held the review forever, because every bound in this codebase
