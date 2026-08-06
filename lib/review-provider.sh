@@ -583,8 +583,38 @@ _review_call_one_provider() {
       # The outer profile is now the only write boundary, so it has to know
       # which roots codex legitimately writes to. Newline-separated: these are
       # mktemp paths, which never contain newlines.
-      MRA_REVIEW_SANDBOX_WRITABLE_ROOTS="$trusted_cwd"$'\n'"$snapshot"$'\n'"$(dirname "$codex_last")" \
-      MRA_REVIEW_AUTH_PROVIDER=codex _review_without_github_credentials "${codex_cmd[@]}" "${args[@]}" >"$codex_stdout" </dev/null || rc=$?
+      # Retry transient failures, as the claude path does. codex is the DEFAULT
+      # provider and it talks to a single relay endpoint: one 503 there used to
+      # lose the entire review, and escalate any `mra dev` loop depending on it.
+      # Observed live — "unexpected status 503 Service Unavailable", five
+      # codex-internal reconnects, then REVIEW_INCOMPLETE with no retry.
+      #
+      # Classification is shared with claude (_claude_is_transient), so the two
+      # providers cannot disagree about what "transient" means. A non-transient
+      # exit is never retried; the watchdog's 142 is, because a hang is the most
+      # transient failure there is.
+      local codex_err codex_attempt=0
+      local codex_max_retries="${MRA_CODEX_MAX_RETRIES:-${MRA_CLAUDE_MAX_RETRIES:-2}}"
+      local codex_delay="${MRA_CLAUDE_RETRY_DELAY:-3}"
+      codex_err=$(mktemp) || return 1
+      while :; do
+        rc=0
+        MRA_REVIEW_SANDBOX_WRITABLE_ROOTS="$trusted_cwd"$'\n'"$snapshot"$'\n'"$(dirname "$codex_last")" \
+        MRA_REVIEW_AUTH_PROVIDER=codex _review_without_github_credentials "${codex_cmd[@]}" "${args[@]}" \
+          >"$codex_stdout" 2>"$codex_err" </dev/null || rc=$?
+        cat "$codex_err" >&2
+        [[ "$rc" -eq 0 ]] && break
+        [[ "$codex_attempt" -lt "$codex_max_retries" ]] || break
+        _claude_is_transient "$rc" "$(cat "$codex_err" 2>/dev/null)" || break
+        codex_attempt=$((codex_attempt + 1))
+        log_warn "codex transient failure (ec=$rc) — retry $codex_attempt/$codex_max_retries in ${codex_delay}s" "$tag" >&2
+        sleep "$codex_delay"
+        codex_delay=$((codex_delay * 2))
+        # A partial run may have left both files half-written; a retry must not
+        # inherit them.
+        : > "$codex_stdout"; : > "$codex_last"; : > "$codex_err"
+      done
+      rm -f "$codex_err"
       if [[ "$rc" -eq 142 ]]; then
         log_error "codex timed out after ${watchdog_secs}s and was killed (tune MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS; 0 disables the watchdog)" "review" >&2
       fi
