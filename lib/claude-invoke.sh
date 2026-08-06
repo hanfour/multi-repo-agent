@@ -168,10 +168,22 @@ claude_invoke() {
     # Give up: surface whatever stderr we captured so the failure is diagnosable,
     # then return claude's output (possibly empty) and exit code to the caller.
     if [[ "$ec" -ne 0 || -z "$out" ]]; then
+      # claude reports some failures on STDOUT and exits non-zero —
+      # "Error: Reached max turns (N)" is the common one. Reporting only stderr
+      # turned that into "failed (ec=1) with no stderr", which is true and
+      # tells the reader nothing; recovering the line the process had already
+      # printed took six rounds of probing once. Prefer stderr, fall back to
+      # stdout, and only claim silence when both are empty.
+      local detail="" detail_src=""
       if [[ -n "$err" ]]; then
-        log_error "claude failed (ec=$ec) after $((attempt + 1)) attempt(s): $(printf '%s' "$err" | tail -5 | tr '\n' ' ')" "$tag" >&2
+        detail=$(printf '%s' "$err" | tail -5 | tr '\n' ' '); detail_src="stderr"
+      elif [[ "$stream" -eq 0 && -n "$out" ]]; then
+        detail=$(printf '%s' "$out" | tail -5 | tr '\n' ' '); detail_src="stdout"
+      fi
+      if [[ -n "$detail" ]]; then
+        log_error "claude failed (ec=$ec) after $((attempt + 1)) attempt(s) [$detail_src]: $detail" "$tag" >&2
       else
-        log_error "claude failed (ec=$ec) after $((attempt + 1)) attempt(s) with no stderr" "$tag" >&2
+        log_error "claude failed (ec=$ec) after $((attempt + 1)) attempt(s) with no stderr or stdout" "$tag" >&2
       fi
     fi
     # In --stream mode stdout already went to the caller; never echo the sentinel.
