@@ -27,6 +27,8 @@ TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 export MRA_CONFIG="$TMP/config.json"; echo '{"configVersion":2}' > "$MRA_CONFIG"
 mkdir -p "$TMP/bin" "$TMP/proj" "$TMP/home/.codex"
 printf '{"OPENAI_API_KEY":"plan-test-key"}\n' > "$TMP/home/.codex/auth.json"
+mkdir -p "$TMP/home/.claude"
+printf '{"claudeAiOauth":{"accessToken":"test-only-token"}}\n' > "$TMP/home/.claude/.credentials.json"
 REC="$TMP/rec"; export REC
 
 for lib in colors config review-verdict args claude-invoke review-provider model-provider; do
