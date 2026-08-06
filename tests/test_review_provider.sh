@@ -132,6 +132,8 @@ requires_openai_auth = true
 trust_level = "trusted"
 TOML
 printf '{"auth_mode":"api_key","OPENAI_API_KEY":"test-only-key"}\n' > "$TMP/home/.codex/auth.json"
+mkdir -p "$TMP/home/.claude"
+printf '{"claudeAiOauth":{"accessToken":"test-only-token"}}\n' > "$TMP/home/.claude/.credentials.json"
 export HOME="$TMP/home"
 export MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1
 out=$(HOME="$TMP/home" ORIGINAL_HOME_FOR_STUB="$TMP/home" MRA_REVIEW_MODEL_HOME="$TMP/model-home" MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 MRA_CODEX_AUTH_FILE_TTL_SECONDS=0 CODEX_STUB_AUTH_CHECK_DELAY=1 GH_TOKEN=secret GITHUB_TOKEN=secret2 MRA_CODEX_BIN="$BIN/codex" review_call_model review codex "PROMPT-C" "" "$TMP/project" "$add_dirs" 6 "$TMP/reviewer.md")
