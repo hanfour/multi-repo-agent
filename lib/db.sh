@@ -211,6 +211,14 @@ start_db_container() {
     platform_flag=(--platform "$platform")
   fi
 
+  # docker's exit code decides. It used to be ignored, so a `docker run` that
+  # failed — no image for this architecture, port already bound, name taken —
+  # was still followed by a green "container ... started". The next thing the
+  # operator saw was "did not become ready within 60 seconds", which reads as a
+  # slow container rather than one that never existed, and `mra db setup` exited
+  # 0 with nothing running. Measured against real Docker: mysql:5.7 has no
+  # arm64 image.
+  local run_rc=0
   case "$engine" in
     mysql)
       docker run -d \
@@ -219,7 +227,7 @@ start_db_container() {
         -e MYSQL_ROOT_PASSWORD="$password" \
         -e MYSQL_DATABASE="$db_name" \
         -p "${port}:3306" \
-        "mysql:${version}" >/dev/null
+        "mysql:${version}" >/dev/null || run_rc=$?
       ;;
     postgres|postgresql)
       docker run -d \
@@ -228,13 +236,19 @@ start_db_container() {
         -e POSTGRES_PASSWORD="$password" \
         -e POSTGRES_DB="$db_name" \
         -p "${port}:5432" \
-        "postgres:${version}" >/dev/null
+        "postgres:${version}" >/dev/null || run_rc=$?
       ;;
     *)
       log_error "unsupported engine: $engine" "db"
       return 1
       ;;
   esac
+
+  if [[ "$run_rc" -ne 0 ]]; then
+    # docker's own message already went to stderr; name what it means here.
+    log_error "$db_name: docker run failed (exit $run_rc) — container $container_name was not started. If the image has no build for this architecture, set \"platform\" for this database in .collab/db.json." "db"
+    return "$run_rc"
+  fi
 
   log_success "container $container_name started" "db"
 }
@@ -488,6 +502,10 @@ setup_all_databases() {
     return 0
   fi
 
+  # Instances that never came up must make the whole command fail. Both failure
+  # paths below `continue`, so without this `mra db setup` exited 0 having
+  # started nothing — measured against real Docker.
+  local setup_failures=0
   local instance_row
   for instance_row in "${instance_rows[@]}"; do
     local instance_name engine version port password platform has_schemas
@@ -500,12 +518,14 @@ setup_all_databases() {
     # compute was never passed anywhere.
     if ! start_db_container "$instance_name" "$engine" "$version" "$port" "$password" "$platform"; then
       log_error "failed to start container for $instance_name" "db"
+      setup_failures=$((setup_failures + 1))
       continue
     fi
 
     # Wait for health
     if ! _wait_for_db "$instance_name" "$engine" "$port" "$password"; then
       log_error "instance $instance_name did not become healthy" "db"
+      setup_failures=$((setup_failures + 1))
       continue
     fi
 
@@ -554,6 +574,11 @@ setup_all_databases() {
 
     log_success "instance $instance_name ready" "db"
   done
+
+  if [[ "$setup_failures" -gt 0 ]]; then
+    log_error "$setup_failures of ${#instance_rows[@]} database instance(s) did not come up" "db"
+    return 1
+  fi
 }
 
 # Helper: import dump if source is set
