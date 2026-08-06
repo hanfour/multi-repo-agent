@@ -41,7 +41,9 @@ if [[ -s "$DEST/.claude/.credentials.json" ]] && grep -q 'from-file' "$DEST/.cla
 else
   fail "the file source was not copied"
 fi
-perms=$(stat -f '%Lp' "$DEST/.claude/.credentials.json" 2>/dev/null || stat -c '%a' "$DEST/.claude/.credentials.json" 2>/dev/null)
+# GNU first: BSD stat -f is a FORMAT flag, GNU stat -f is filesystem status
+# and succeeds with unrelated output, so a BSD-first probe never falls back.
+perms=$(stat -c '%a' "$DEST/.claude/.credentials.json" 2>/dev/null || stat -f '%Lp' "$DEST/.claude/.credentials.json" 2>/dev/null)
 [[ "$perms" == "600" ]] && ok "copied credential is 0600" || fail "credential is $perms, not 0600"
 
 # --- keychain fallback, used only when there is no file ---------------------
