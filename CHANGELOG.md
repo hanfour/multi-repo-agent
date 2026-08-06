@@ -6,6 +6,101 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-08-06
+
+Everything here was found by running paths that had never been run — against a
+real pull request, a real MCP client, and a real Docker daemon — while the whole
+test suite was green. The suite was green because it exercised the same paths the
+code did. Every fix below ships with a test that fails against the commit before
+it.
+
+The common shape: **a signal was correct and the effect was absent.** A review
+that completed but examined nothing. A provider that was configured but could not
+execute. A timeout that fired but did not free the caller. A container that was
+reported started but never created.
+
+### Security
+- `mra review --pr N` now refuses to run when the local checkout is not the pull
+  request's head. The range is `<base>...HEAD`, so a checkout on some other branch
+  produced a diff of *that* branch's work — and the resulting verdict was posted to
+  the pull request as if it were a review of it. v3.1.1 closed the case where the
+  diff came out empty (GHSA-x5r4-rq7p-4q34); this closes the worse one, where the
+  diff is non-empty but belongs to different code, and so reads as a genuine review
+  all the way through. mra now compares the local HEAD to the PR head before
+  reviewing and fails with the fetch command to run. It fails open when `gh` or the
+  network is unavailable, so an offline checkout is not blocked from reviewing.
+- The `plan` path now gets the credential isolation the `review` path has had.
+  `mra plan` invoked the same models without the isolated `HOME`/`CODEX_HOME` and
+  without unsetting `GH_TOKEN`/`GITHUB_TOKEN`, so a model reasoning over a plan ran
+  holding the operator's GitHub credentials. The review path's isolation is now the
+  single implementation both use.
+
+### Fixed
+- **codex could not execute a single command on macOS.** mra wrapped codex in a
+  `sandbox-exec` profile, and codex applies its own — macOS refuses a nested
+  deny-default sandbox with `sandbox_apply: Operation not permitted`, so every
+  codex invocation died before running anything. The multi-model council was
+  therefore claude-only on macOS for its entire existence. codex is now told the
+  sandbox is already applied instead of being nested inside it.
+- **codex still could not run anything after that fix**, because the write-denying
+  profile blocked `/dev/ptmx` and codex needs a pty to spawn a process. The profile
+  now allows the pty devices and nothing else new. (The probe that "verified" the
+  previous fix used `sh -c echo`, which needs no pty — a verification that proved
+  the wrong thing.)
+- **claude never authenticated on macOS.** The isolated `HOME` was populated by
+  copying `~/.claude/.credentials.json`, which does not exist on macOS — the
+  credential is in the Keychain. So the primary provider failed to authenticate on
+  every review, and the fallback provider was the one broken above. mra now reads
+  the Keychain item when the file is absent, and reports which source it used.
+- **Both invocation timeouts reported success at bounding a run while the caller
+  stayed blocked.** `perl -e 'alarm N; exec ...'` kills only the wrapper; the child
+  inherits the stdout pipe, so `$(...)` still waits for it. Both paths now fork,
+  `setpgrp`, and signal the process group, and both share one runner rather than
+  keeping two copies of the same mistake.
+- `claude` failures whose reason arrived on stdout are no longer reported as an
+  exit code with no explanation. The message now names which stream it came from.
+- The plan council silently lost experts. It capped the pool at 6 with no message,
+  and a failed expert vanished with no recoverable reason — a 9-expert council
+  quietly became a 6-expert one, and the operator could not tell a unanimous vote
+  from a vote three experts never reached. All configured experts now run, and a
+  failure is reported with its cause.
+- codex had no retry for transient failures, so a single 503 ended a run that the
+  claude path would have completed. It now retries on the same terms.
+- The MCP server silently dropped arguments a tool does not declare, then answered
+  the question it had left rather than the one it was asked. Undeclared arguments
+  are now an error naming the tool and the argument.
+- `mra db setup` exited 0 having started nothing. `start_db_container` ignored
+  docker's exit code and ended with `log_success`, so its return value was
+  `log_success`'s 0 and the caller's failure branch could never fire. Found against
+  real Docker, where `mysql:5.7` has no arm64 image: mra printed a green "container
+  started" and then "did not become ready within 60 seconds", which reads as an
+  unhealthy container rather than one that was never created. The error now names
+  the cause and the remedy (`platform` in `db.json`), and `setup` fails when any
+  instance did not come up.
+- File metadata is probed with GNU `stat` first, everywhere. `stat -f` is a FORMAT
+  flag on BSD but *filesystem status* on GNU, so the BSD-first probe succeeded on
+  Linux with unrelated output and the `|| stat -c` fallback never fired — PKB
+  staleness detection and the doctor's permission checks were reading garbage on
+  every Linux run. A test now guards the ordering.
+
+### Changed
+Three fixes change what an existing caller sees, and all three are deliberate:
+- An MCP `tools/call` carrying an argument the tool does not declare now returns an
+  error where it previously succeeded. A call that "succeeded" by ignoring half its
+  input was the defect.
+- The plan council runs every configured expert instead of at most 6, so a council
+  configured with more than 6 now costs and takes proportionally more.
+- The standard review turn cap is raised from 3 to 20. A cap only costs anything
+  when it is reached, and a review truncated at the cap is full cost for no
+  usable output.
+
+### CI
+- The Pages actions are exercised on pull requests. Only `repo-tests.yml` ran on
+  `pull_request`, and it uses none of them — so a Dependabot bump of
+  `configure-pages`/`upload-pages-artifact`/`deploy-pages` showed a green check
+  that had tested nothing about the change, and would first meet the live site on
+  `main`. PRs now build without deploying.
+
 ## [3.1.1] - 2026-08-04
 
 ### Security
@@ -146,7 +241,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed confidential design documents that did not belong to this tool from the
   repository **and its git history**.
 
-[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.1.1...HEAD
+[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.2.0
 [3.1.1]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.1.1
 [3.1.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.1.0
 [2.3.0]: https://github.com/hanfour/multi-repo-agent/commits/main
