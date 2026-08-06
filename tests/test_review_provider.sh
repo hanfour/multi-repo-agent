@@ -285,6 +285,37 @@ dual_json=$(_review_singlepass_body "$out")
 [[ "$(printf '%s' "$dual_json" | jq -r .status)" == "COMMENT" ]] && pass "dual fails closed when either provider is incomplete" || fail "dual incomplete status wrong: $dual_json"
 case "$out" in *"MRA-REVIEW-COMPLETE: APPROVED"*) fail "dual incomplete output must not emit approval sentinel" ;; *) pass "dual incomplete output has no approval sentinel" ;; esac
 
+# --- codex must retry a transient failure, as claude does --------------------
+# A single 503 from the relay killed a whole review and escalated the `mra dev`
+# loop that depended on it. claude retries transient failures with backoff;
+# codex — the DEFAULT provider — had none, so one blip on a shared endpoint
+# lost the run. Observed live: "unexpected status 503 Service Unavailable",
+# five codex-internal reconnects, then REVIEW_INCOMPLETE.
+CX_REC="$TMP/cx-retry-rec"; : > "$CX_REC"; export CX_REC
+CX_BIN="$TMP/codex-flaky"
+cat > "$CX_BIN" <<'STUB'
+#!/usr/bin/env bash
+echo "call" >> "$CX_REC"
+if [[ "$(wc -l < "$CX_REC" | tr -d ' ')" -lt 2 ]]; then
+  echo "unexpected status 503 Service Unavailable: Service temporarily unavailable" >&2
+  exit 1
+fi
+last=""; want=0
+for a in "$@"; do
+  if [[ "$want" == 1 ]]; then last="$a"; want=0; fi
+  [[ "$a" == "--output-last-message" ]] && want=1
+done
+printf '{"status":"APPROVED","summary":"ok","comments":[]}\n===%s: APPROVED===\n' "$MRA_REVIEW_SENTINEL_TOKEN" > "$last"
+exit 0
+STUB
+chmod +x "$CX_BIN"
+cx_out=$(HOME="$TMP/home" MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 MRA_CLAUDE_RETRY_DELAY=0          MRA_CODEX_BIN="$CX_BIN"          review_call_model review codex "PROMPT-R" "" "$TMP/project" "" 6 "" 2>/dev/null || true)
+cx_calls=$(wc -l < "$CX_REC" | tr -d ' ')
+[[ "$cx_calls" -ge 2 ]] \
+  && pass "codex retries a transient failure ($cx_calls calls)" \
+  || fail "codex did not retry a 503 — one relay blip loses the review ($cx_calls call)"
+case "$cx_out" in *APPROVED*) pass "codex recovers on the retry" ;; *) fail "codex retry did not recover: $cx_out" ;; esac
+
 rm -rf "$TMP"
 if [[ $errors -eq 0 ]]; then
   echo "PASS: review provider tests passed"
