@@ -140,9 +140,16 @@ if _review_validate_expected_head abc abc def; then fail_test "changed remote he
 
 # --- _review_strategy_turns: defaults + env overrides ---
 unset MRA_REVIEW_STANDARD_MAX_TURNS MRA_REVIEW_LIGHT_MAX_TURNS || true
-[[ "$(_review_strategy_turns standard)" == "6" ]] \
-  && pass_test "standard default max-turns is 6" \
-  || fail_test "standard default expected 6, got '$(_review_strategy_turns standard)'"
+# 6 was measured short: acme/rails-app-1#4852 exhausted at 6, 7 and 8, completing only
+# from 10. A truncated review costs the same tokens and returns nothing, so the
+# cap is pinned well above the observed need — and to the same value the debate
+# agents already use.
+[[ "$(_review_strategy_turns standard)" == "20" ]] \
+  && pass_test "standard default max-turns is 20" \
+  || fail_test "standard default expected 20, got '$(_review_strategy_turns standard)'"
+[[ "$(_review_strategy_turns standard)" -ge 10 ]] \
+  && pass_test "standard cap clears the measured requirement" \
+  || fail_test "standard cap is below the 10 turns a real PR needed"
 [[ "$(_review_strategy_turns light)" == "2" ]] \
   && pass_test "light default max-turns is 2" \
   || fail_test "light default expected 2, got '$(_review_strategy_turns light)'"
