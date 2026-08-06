@@ -289,7 +289,7 @@ _review_without_github_credentials() {
       _review_write_codex_sandbox_profile "$codex_sandbox_profile" "$original_home" \
         "$model_home" "${_sandbox_roots[@]}" || return 1
     else
-      _review_copy_auth_file "$original_home/.claude/.credentials.json" "$model_home/.claude/.credentials.json"
+      _review_provision_claude_credential "$original_home" "$model_home" || return 1
     fi
     unset GH_TOKEN GITHUB_TOKEN
     # Auth-file lifetime (issue #17): the codex CLI re-reads auth.json on
@@ -364,6 +364,52 @@ _review_copy_auth_file() {
   mkdir -p "$(dirname "$target")"
   cp "$source" "$target"
   chmod 600 "$target"
+}
+
+# _review_provision_claude_credential <original-home> <model-home>
+# Put the one credential claude needs into the isolated HOME.
+#
+# ~/.claude/.credentials.json is the file form. On macOS the credential lives in
+# the login Keychain instead, and redirecting HOME hides it — macOS resolves the
+# login keychain through $HOME/Library/Keychains, so the isolated HOME has none
+# and claude reports "Not logged in" on STDOUT. That is why the failure surfaced
+# as `claude failed (ec=1) ... with no stderr`, and why it went unnoticed: claude
+# is the secondary provider, so it only ran when codex had already failed, and
+# then failed in a way that read as "claude is broken too".
+#
+# The single item is extracted rather than the keychain exposed. Symlinking
+# $HOME/Library/Keychains into the model home does make claude work — and hands
+# the model every secret the keychain holds, which is the opposite of what this
+# isolation is for.
+#
+# Returns non-zero when no credential can be found anywhere, so the caller fails
+# with a reason instead of making a call that cannot succeed.
+_review_provision_claude_credential() {
+  local original_home="$1" model_home="$2"
+  local dest="$model_home/.claude/.credentials.json"
+
+  _review_copy_auth_file "$original_home/.claude/.credentials.json" "$dest"
+  [[ -s "$dest" ]] && return 0
+
+  # An API key in the environment authenticates on its own; nothing to copy.
+  [[ -n "${ANTHROPIC_API_KEY:-}" ]] && return 0
+
+  local reader="${MRA_SECURITY_KEYCHAIN_READER:-}"
+  if [[ -z "$reader" ]] && command -v security >/dev/null 2>&1; then
+    reader=security
+  fi
+  if [[ -n "$reader" && -x "$(command -v "$reader" 2>/dev/null || echo "$reader")" ]]; then
+    mkdir -p "$(dirname "$dest")"
+    "$reader" find-generic-password -s "Claude Code-credentials" -w > "$dest" 2>/dev/null || true
+    chmod 600 "$dest" 2>/dev/null || true
+    if [[ -s "$dest" ]] && jq empty "$dest" >/dev/null 2>&1; then
+      return 0
+    fi
+    rm -f "$dest"
+  fi
+
+  log_error "no claude credential available: neither ~/.claude/.credentials.json, nor the macOS Keychain item 'Claude Code-credentials', nor ANTHROPIC_API_KEY. Run claude and /login, or set ANTHROPIC_API_KEY." "review" >&2
+  return 1
 }
 
 _review_create_sanitized_snapshot() {

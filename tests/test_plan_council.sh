@@ -14,7 +14,11 @@ source "$SCRIPT_DIR/lib/args.sh"
 # file would run against the real ones — and on failure would print the
 # internal relay host into the log it keeps. Give it a fixture instead.
 FAKE_HOME=$(mktemp -d)
-mkdir -p "$FAKE_HOME/.codex"
+mkdir -p "$FAKE_HOME/.codex" "$FAKE_HOME/.claude"
+# The isolation now refuses to run claude with no credential rather than making
+# a call that cannot succeed. Give the fixture one; the real Keychain is not
+# reachable from a fake HOME, which is what used to break claude reviews.
+printf '{"claudeAiOauth":{"accessToken":"test-only-token"}}\n' > "$FAKE_HOME/.claude/.credentials.json"
 printf '{"OPENAI_API_KEY":"plan-council-test-key"}\n' > "$FAKE_HOME/.codex/auth.json"
 cat > "$FAKE_HOME/.codex/config.toml" <<'TOML'
 model_provider = "TestProvider"
