@@ -25,10 +25,26 @@ select_review_strategy() {
 ## review, not a clean one). standard default raised 3 -> 6.
 ##   light    -> MRA_REVIEW_LIGHT_MAX_TURNS    (default 2)
 ##   standard -> MRA_REVIEW_STANDARD_MAX_TURNS (default 6)
+# Turn caps per strategy.
+#
+# standard was 6 and truncated real reviews. Measured against onead/erp#4852
+# (6 files, 58KB prompt): exhausted at 6, 7 and 8; completed at 10, 12 and 20.
+# The old cap was roughly 40% short of what one ordinary PR needed, and the
+# review came back REVIEW_INCOMPLETE — having spent the tokens and produced
+# nothing.
+#
+# 20 matches MRA_REVIEW_AGENT_MAX_TURNS, so the single-pass and debate paths no
+# longer disagree about how long a review may take.
+#
+# Raising a cap does not make short reviews cost more: a review that finishes in
+# five turns costs five turns whatever the cap is. Only a review that would
+# otherwise have been truncated can reach it — and that one costs the same
+# tokens either way while yielding nothing. The generous default is the cheaper
+# one.
 _review_strategy_turns() {
   case "$1" in
     light) echo "${MRA_REVIEW_LIGHT_MAX_TURNS:-2}" ;;
-    *)     echo "${MRA_REVIEW_STANDARD_MAX_TURNS:-6}" ;;
+    *)     echo "${MRA_REVIEW_STANDARD_MAX_TURNS:-20}" ;;
   esac
 }
 
