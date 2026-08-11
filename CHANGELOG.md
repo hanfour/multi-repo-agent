@@ -6,6 +6,91 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-08-11
+
+Both changes here came from user reports, and in both cases the code read
+plausibly and the data said something else. The measurements are recorded
+because they are the reason for the design, not decoration: 80 reviewed pull
+requests, 95 reviews, 31 inline findings, 5 reviews dismissed by hand.
+
+### Added
+- **A reply that refutes a finding now reaches the next review, attached to the
+  finding it answers.** MRA posted a `[HIGH]` resting on a false premise about
+  DOM event propagation; a reviewer replied nine minutes later with an
+  838-character rebuttal naming the premise and listing three verifications. The
+  review had to be dismissed by hand, and a re-run would have reproduced the
+  finding verbatim — the rebuttal was never available to any model, in any form.
+  The integration path supplies `context.pr` as `{title, body, updatedAt}` under
+  `additionalProperties: false`, and its analysis stage runs with no GitHub
+  credential, so MRA could neither be told about the reply nor go and look. The
+  protocol gains `context.pr.discussion[]` carrying `inReplyToId` — the field
+  that makes a rebuttal legible as an answer to a specific finding rather than a
+  free-standing remark. The caller populates it, because only the caller has the
+  token and knows which comments it posted: MRA reviews under the operator's own
+  account, so authorship alone identifies nothing.
+- **Answered findings must be adjudicated, and the contract is checked rather
+  than requested.** Our own prior output is framed apart from other people's
+  comments, which carry "do NOT re-report issues already raised here" — an
+  instruction that, applied to our own wrong finding, freezes it instead of
+  reconsidering it. Each answered finding needs one line in the summary:
+  `ADJUDICATION <path>:<line> UPHELD|WITHDRAWN — <reason>`. A finding
+  re-reported at a location whose reply went unanswered is dropped and logged.
+  Upholding is always available; it just has to be argued. Withdrawal goes in
+  the summary rather than a fifth severity, because consumers validate
+  `severity` against exactly `{CRITICAL, HIGH, MEDIUM, LOW}` and a new value
+  would invalidate the whole findings array.
+- **A finding may not invent the convention it says the code violates**
+  (`MRA_REVIEW_PREMISE_CHECK`, on). Of the five reviews dismissed by hand, every
+  one rested on a premise nobody had checked — and three were the *same*
+  invented decorator, reported as `[HIGH]` and `[CRITICAL]` on three separate
+  pull requests: "not annotated `@RequirePermission` like the existing
+  controller convention". Code search on that repository: `RequirePermission`
+  0 occurrences, `PermissionGuard` 0, `AuthGuard` 9. A reviewer refuted it with
+  a single grep. So "reviews are often wrong" was not a scattered error rate but
+  one hallucination hitting the same code again and again, always blocking. When
+  a finding presupposes a symbol and names it in backticks, the symbol is
+  counted in the tree (tracked files only); zero occurrences and the finding is
+  dropped with the symbol named in the log. Narrow on purpose — a finding that
+  says it is proposing something new ("新增一個 `RetryPolicy`") is exempt,
+  because naming an absent symbol is then the point.
+- **One adversarial pass over the findings, and only when there are findings**
+  (`MRA_REVIEW_REFUTE`, on). The debate strategy already carries this stage, but
+  84% of reviews find nothing at all and refutation is worth nothing with
+  nothing to refute — so the single-pass path asks the one question rather than
+  running the fleet. Measured end to end: 0 findings costs 1 model call as
+  before, 1 finding costs 2. It may remove a finding and never add one (a
+  refuter that introduces findings is running a second review nothing then
+  checks), and a broken pass keeps every original finding — `{"comments":[]}`
+  means none survived, while a reply lacking the key answered nothing.
+
+### Changed
+- `mra dev` no longer blinds itself to PR discussion. It forced
+  `MRA_REVIEW_PR_CONTEXT=0` on every loop-internal re-review (design D7) for a
+  real reason: its own round-1 findings came back through the do-not-re-report
+  block, so round 2 stayed silent and the loop read silence as a fix. The hazard
+  was the framing, not the fetch — with our own output presented separately, the
+  false green is structurally gone and the loop can hear a reviewer who answers
+  it. D7 is marked superseded in the design doc with the reasoning.
+- A single-pass review that produces findings now makes one additional model
+  call. A review that produces none is unchanged.
+- Both new gates can be switched off without a deploy — they drop findings on
+  live reviews, and an off switch nobody can find is not an off switch.
+
+### Fixed
+- The `--pr` path kept the **oldest** 40 comments of an oldest-first API while
+  reporting that it had dropped the earliest. A rebuttal is by definition the
+  newest item in its thread, so the one comment most likely to change a review
+  was the one most likely to be discarded.
+- `in_reply_to_id` was never read, so a reply arrived as a standalone bullet
+  with nothing linking it to the finding it answered.
+- Comment bodies were cut at 240 characters. On the real 838-character rebuttal
+  that landed exactly where the evidence began: the claim survived, the
+  substantiation did not.
+- Prior output nobody answered no longer vanishes from the prompt. Caught by
+  running the new marking against a real pull request — a `DISMISSED` review
+  summary has no reply and so no thread to lift it into, and a human dismissing
+  an earlier review outright is exactly the signal worth carrying forward.
+
 ## [3.2.0] - 2026-08-06
 
 Everything here was found by running paths that had never been run — against a
@@ -241,7 +326,8 @@ Three fixes change what an existing caller sees, and all three are deliberate:
 - Removed confidential design documents that did not belong to this tool from the
   repository **and its git history**.
 
-[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.2.0...HEAD
+[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.3.0
 [3.2.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.2.0
 [3.1.1]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.1.1
 [3.1.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.1.0
