@@ -2,31 +2,71 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://hanfour.github.io/multi-repo-agent/schemas/integration/v1/review-request.schema.json",
   "type": "object",
-  "required": ["schema", "protocolVersion", "requestId", "subject", "review"],
+  "required": [
+    "schema",
+    "protocolVersion",
+    "requestId",
+    "subject",
+    "review"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema": { "const": "io.mra.integration.review-request/v1" },
-    "protocolVersion": { "const": "1.0" },
-    "requestId": { "type": "string", "minLength": 1 },
+    "schema": {
+      "const": "io.mra.integration.review-request/v1"
+    },
+    "protocolVersion": {
+      "const": "1.0"
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 1
+    },
     "subject": {
       "type": "object",
-      "required": ["checkout", "project", "baseSha", "headSha"],
+      "required": [
+        "checkout",
+        "project",
+        "baseSha",
+        "headSha"
+      ],
       "additionalProperties": false,
       "properties": {
-        "checkout": { "type": "string", "pattern": "^/" },
-        "project": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
-        "pullRequest": { "type": "integer", "minimum": 1 },
-        "baseSha": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
-        "headSha": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" }
+        "checkout": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "pullRequest": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "baseSha": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{40}$"
+        },
+        "headSha": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{40}$"
+        }
       }
     },
     "review": {
       "type": "object",
-      "required": ["provider", "strategy"],
+      "required": [
+        "provider",
+        "strategy"
+      ],
       "additionalProperties": false,
       "properties": {
-        "provider": { "const": "codex" },
-        "strategy": { "const": "standard" }
+        "provider": {
+          "const": "codex"
+        },
+        "strategy": {
+          "const": "standard"
+        }
       }
     },
     "context": {
@@ -37,9 +77,72 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "title": { "type": "string" },
-            "body": { "type": "string" },
-            "updatedAt": { "type": "string" }
+            "title": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "discussion": {
+              "description": "Existing PR discussion, supplied by the caller because the analysis stage runs with no GitHub credential. `isPriorReview` marks comments the caller itself posted from an earlier review — only the caller knows which those are, and MRA must not guess: it posts under the operator's own account.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "inReplyToId": {
+                    "type": [
+                      "integer",
+                      "string",
+                      "null"
+                    ],
+                    "description": "The comment this one answers. Without it a rebuttal is unreadable as a rebuttal."
+                  },
+                  "author": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "inline",
+                      "comment",
+                      "review"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "line": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "isPriorReview": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "author",
+                  "body"
+                ]
+              }
+            }
           }
         }
       }

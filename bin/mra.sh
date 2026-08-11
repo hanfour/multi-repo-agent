@@ -22,7 +22,7 @@ MRA_LIBS=(
   graph cost template ci snapshot
   dashboard federation notify lint review-diff
   review-prompt review-context review-provider review-json review-strategy
-  review-pr-discussion review-post review review-protocol review-debate
+  review-pr-discussion review-pr-threads review-adjudication review-post review review-protocol review-debate
   review-debate-agents personas review-personas plan-council model-provider
   test-audit pkb pkb-cache pkb-query pkb-prompts
   eval eval-probe eval-ablation dev-agent dev
