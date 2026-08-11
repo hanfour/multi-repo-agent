@@ -406,6 +406,7 @@ $MRA_REVIEW_PR_DISCUSSION"
       "$persona_findings" "" "$consumers" "$has_api_change" \
       "$persona_lang" "$model" "$persona_focused" "$mra_dir")
   review_json=$(_review_enforce_adjudication "$review_json" "${MRA_REVIEW_REBUTTED_LOCS:-}")
+  review_json=$(_review_enforce_premises "$review_json" "$project_dir")
 
     _render_review_json "$review_json" "$output_mode" "$project_dir" "$pr_number" "personas" || return 1
     _review_notify_complete "$workspace" "$project" "$(_review_status_for_notify "$review_json")"
@@ -424,6 +425,7 @@ $MRA_REVIEW_PR_DISCUSSION"
       "$output_language" "$model" "$claude_add_dirs_str" "$claude_focused_dirs_str" \
       "$pkb_context" "$mode" "$range_expr" "$review_provider")
     review_json=$(_review_enforce_adjudication "$review_json" "${MRA_REVIEW_REBUTTED_LOCS:-}")
+    review_json=$(_review_enforce_premises "$review_json" "$project_dir")
 
     _review_emit_verdict "$review_json" "$project_dir"
     _render_review_json "$review_json" "$output_mode" "$project_dir" "$pr_number" "debate" || return 1
@@ -486,6 +488,13 @@ ${prompt}"
     # never a false APPROVE. _review_singlepass_body always yields valid JSON.
     review_json=$(_review_singlepass_body "$raw_review")
     review_json=$(_review_enforce_adjudication "$review_json" "${MRA_REVIEW_REBUTTED_LOCS:-}")
+    review_json=$(_review_enforce_premises "$review_json" "$project_dir")
+    # One adversarial pass over whatever survived the two free checks above, and
+    # only if anything did. Measured over 80 reviewed pull requests, 84% of
+    # reviews found nothing at all — for those this costs no call. The debate
+    # strategy has its own refutation and must not pay twice.
+    review_json=$(_review_refute_findings "$review_json" "$project_dir" "$review_provider" \
+      "$model" "$claude_add_dirs_str" "$strategy_turns" "$system_prompt_file")
     _review_emit_verdict "$review_json" "$project_dir"
     # The inline schema only permits APPROVED/CHANGES_REQUESTED, so a COMMENT
     # status can ONLY be the neutral REVIEW_INCOMPLETE verdict — log it.
