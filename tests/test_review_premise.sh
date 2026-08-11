@@ -139,5 +139,14 @@ ritual='{"status":"CHANGES_REQUESTED","summary":"s","comments":[
   && ok "declaring in-scope does not exempt a finding from the premise check" \
   || fail "a scope declaration got the finding past the gate"
 
+# --- 9. an off switch, because this drops findings in production ------------
+# The gate runs on live reviews and removes findings silently. If it ever
+# misfires, the first thing needed is a way to stop it without a code change
+# and a deploy — the refutation stage has one, this must too.
+off=$(MRA_REVIEW_PREMISE_CHECK=0 _review_enforce_premises "$invented" "$REPO" 2>/dev/null)
+[[ "$(jq -r '.comments | length' <<<"$off")" == "1" ]] \
+  && ok "MRA_REVIEW_PREMISE_CHECK=0 stops the gate without a deploy" \
+  || fail "there is no way to switch off a gate that silently drops findings"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

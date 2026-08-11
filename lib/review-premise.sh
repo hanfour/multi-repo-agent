@@ -68,6 +68,10 @@ _review_symbol_present() {
 # parse.
 _review_enforce_premises() {
   local review_json="$1" repo="$2"
+  # This runs on live reviews and removes findings. If the heuristic ever
+  # misfires on a real issue, the operator needs to stop it now, not after a
+  # code change and a deploy.
+  [[ "${MRA_REVIEW_PREMISE_CHECK:-1}" != "0" ]] || { printf '%s' "$review_json"; return 0; }
   printf '%s' "$review_json" | jq -e . >/dev/null 2>&1 || { printf '%s' "$review_json"; return 0; }
   [[ -d "$repo" ]] || { printf '%s' "$review_json"; return 0; }
 

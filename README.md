@@ -18,7 +18,7 @@
 
 > Change an API in repo A. mra automatically finds every downstream consumer in repos B, C, D — reviews the impact, updates the code, and opens the PRs. All from one command.
 
-**v3.2.0** | 42 CLI commands | 6 AI agents | 9 MCP tools | 106 test suites | 10 TM-tracked security controls
+**v3.3.0** | 42 CLI commands | 6 AI agents | 9 MCP tools | 111 test suites | 10 TM-tracked security controls
 
 ---
 
@@ -615,6 +615,8 @@ are tunable:
 | `MRA_REVIEW_AGENT_MAX_TURNS` | `20` | Turn budget for each **debate** agent (Impact Analyst / Quality Auditor / verifier). |
 | `MRA_REVIEW_PERSONA_MAX_TURNS` | `8` | Turn budget for each **persona** reviewer. |
 | `MRA_REVIEW_VERIFY_APPROVE` | `1` | When both debate agents approve, an adversarial third reviewer re-checks before approving. Set `0` to skip. |
+| `MRA_REVIEW_PREMISE_CHECK` | `1` | Drop a finding that presupposes a symbol ("the existing convention", "missing `X`") when that symbol occurs nowhere in the repository. Found by measurement: of five reviews dismissed by hand across 80 pull requests, three cited the same decorator that does not exist. Set `0` to stop the gate without a deploy. |
+| `MRA_REVIEW_REFUTE` | `1` | One adversarial pass over the findings a single-pass review produced — and only if it produced any, so a review that finds nothing costs no extra call. It may drop a finding, never add one, and a broken pass keeps them all. Debate has its own refutation; set `0` there or wherever a caller refutes for itself. |
 | `MRA_CODEX_AUTH_FILE_TTL_SECONDS` | unset | Opt-in hard deletion deadline for the transient Codex auth copy. Unset (default), the copy lives for the invocation (Codex re-reads it on stream reconnects) and is removed as soon as the child exits. |
 | `MRA_REVIEW_PROVIDER_TIMEOUT_SECONDS` | `900` | Watchdog for each Codex invocation: the child is killed (SIGALRM) after this many seconds so a hung provider can never block the review forever. `0` disables. |
 
