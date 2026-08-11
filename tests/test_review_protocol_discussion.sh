@@ -59,7 +59,12 @@ write_request() {
 }
 
 run_it() {
-  PATH="$TMP/bin:$PATH" HOME="$TMP/home" MRA_CONFIG="$TMP/config.json" \
+  # MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX: the review path refuses codex where
+  # `sandbox-exec` is absent, i.e. everywhere that is not macOS. Relying on
+  # PATH alone passed locally and reached no model at all on Linux CI.
+  # MRA_CODEX_BIN pins the stub rather than hoping PATH resolution picks it.
+  env HOME="$TMP/home" MRA_CONFIG="$TMP/config.json" \
+    MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 MRA_CODEX_BIN="$TMP/bin/codex" \
     "$ROOT/bin/mra.sh" integration review \
     --request "$TMP/request.json" --result "$TMP/result.json" --events "$TMP/events.jsonl" \
     >/dev/null 2>&1 || true
