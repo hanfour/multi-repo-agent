@@ -17,12 +17,19 @@ _review_format_pr_discussion() {
   # _review_format_prior_findings, which frames them as claims to adjudicate.
   # Leaving them here too would hand the model the opposite instruction about
   # the same text ("do NOT re-report issues already raised here").
+  #
+  # ONLY the lifted threads. Prior output nobody answered has no thread to move
+  # it to, so removing it here would delete it from the prompt altogether — on
+  # the PR that prompted this work that was a DISMISSED review summary, i.e. a
+  # human having rejected an earlier review outright.
   rest=$(printf '%s' "$json" | jq -c '
-    (map(select(.isPriorReview == true) | .id) // []) as $mine
+    (map(select(.isPriorReview == true)) // []) as $prior
+    | (map(select((.isPriorReview != true) and (.inReplyToId != null))) // []) as $replies
+    | ($prior | map(select(. as $f | $replies | any(.inReplyToId == $f.id))) | map(.id)) as $lifted
     | map(. as $it
-          | select(($it.isPriorReview != true)
+          | select((($lifted | index($it.id)) == null)
                    and (($it.inReplyToId == null)
-                        or (($mine | index($it.inReplyToId)) == null))))
+                        or (($lifted | index($it.inReplyToId)) == null))))
   ' 2>/dev/null) || rest=""
   [[ -n "$rest" && "$rest" != "null" ]] && json="$rest"
   count=$(printf '%s' "$json" | jq 'length' 2>/dev/null) || return 0
