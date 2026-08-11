@@ -89,18 +89,41 @@ printf '%s' "$OTHER" | grep -qF "migration 已經另外處理" \
   && ok "unrelated discussion still reaches the generic block" \
   || fail "unrelated discussion was lost"
 
-# Only the threads that were lifted out may be removed. Our own prior output
-# that nobody answered has no thread to move it to, so dropping it here would
-# delete it from the prompt entirely — on the real PR that was a DISMISSED
-# review summary, which is exactly the kind of signal worth keeping.
+# Nothing of ours belongs under "do NOT re-report issues already raised here".
+# That instruction is for other people's comments. Applied to our OWN finding it
+# is the cross-round false green the dev loop disables PR context to avoid:
+# round 1 posts a finding, round 2 reads it back as "already raised", says
+# nothing, and the loop reads silence as the problem being fixed.
 UNANSWERED_MINE=$(jq -cn '[
+  {id:6, inReplyToId:null, author:"mra-bot", kind:"inline", path:"src/x.ts", line:9,
+   body:"[HIGH] a finding nobody answered", createdAt:"0", isPriorReview:true},
   {id:7, inReplyToId:null, author:"mra-bot", kind:"review", path:"", line:null,
    body:"[DISMISSED] an earlier review a human rejected", createdAt:"1", isPriorReview:true},
   {id:8, inReplyToId:null, author:"dana", kind:"comment", path:"", line:null,
    body:"unrelated note", createdAt:"2", isPriorReview:false}]')
-printf '%s' "$(_review_format_pr_discussion "$UNANSWERED_MINE")" | grep -qF "DISMISSED" \
-  && ok "our own unanswered prior output stays visible" \
-  || fail "an unanswered prior review vanished from both blocks"
+GEN=$(_review_format_pr_discussion "$UNANSWERED_MINE")
+printf '%s' "$GEN" | grep -qF "a finding nobody answered" \
+  && fail "our own finding is under the do-not-re-report instruction (cross-round false green)" \
+  || ok "our own finding never lands under do-not-re-report"
+printf '%s' "$GEN" | grep -qF "unrelated note" \
+  && ok "other people's comments still reach the generic block" \
+  || fail "unrelated discussion was lost"
+
+MINE=$(_review_format_prior_findings "$UNANSWERED_MINE")
+printf '%s' "$MINE" | grep -qF "a finding nobody answered" \
+  && ok "an unanswered finding of ours is carried, not dropped" \
+  || fail "an unanswered finding vanished from the prompt entirely"
+printf '%s' "$MINE" | grep -qF "DISMISSED" \
+  && ok "a review a human dismissed stays visible" \
+  || fail "the dismissal signal was lost"
+# It must be re-reportable — silence about it is exactly the false green.
+printf '%s' "$MINE" | grep -qiE 'report it again|still' \
+  && ok "an unanswered finding may be reported again" \
+  || fail "nothing tells the model it may re-report an unanswered finding"
+# But an unanswered finding is not a rebuttal, so it demands no adjudication.
+printf '%s' "$MINE" | grep -q "ADJUDICATION" \
+  && fail "adjudication demanded for a finding nobody answered" \
+  || ok "no adjudication demanded where nobody replied"
 
 # --- 5. the instruction demands adjudication, not silence -------------------
 printf '%s' "$SECTION" | grep -q "ADJUDICATION" \

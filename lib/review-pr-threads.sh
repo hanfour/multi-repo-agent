@@ -76,8 +76,8 @@ _review_rebutted_locations() {
 # the important default: a review with no prior findings must read exactly as it
 # did before this existed.
 _review_format_prior_findings() {
-  local json="$1" threads
-  threads=$(printf '%s' "$json" | jq -r --argjson max "$_MRA_THREAD_BODY_MAX" '
+  local json="$1" answered unanswered
+  answered=$(printf '%s' "$json" | jq -r --argjson max "$_MRA_THREAD_BODY_MAX" '
     def clip: if (. | length) > $max then .[0:$max] + "…(truncated)" else . end;
     (map(select(.isPriorReview == true)) // []) as $prior
     | (map(select((.isPriorReview != true) and (.inReplyToId != null))) // []) as $replies
@@ -93,17 +93,37 @@ _review_format_prior_findings() {
                    + ((.body // "") | clip | split("\n") | map("  " + .) | join("\n")))
              | join("\n\n")))
     | join("\n\n---\n\n")
-  ' 2>/dev/null) || return 0
-  [[ -n "$threads" && "$threads" != "null" ]] || return 0
+  ' 2>/dev/null) || answered=""
+  [[ "$answered" == "null" ]] && answered=""
 
-  cat <<'HDR'
-## Your own prior findings on this PR, and the replies to them
+  unanswered=$(printf '%s' "$json" | jq -r --argjson max "$_MRA_THREAD_BODY_MAX" '
+    def clip: if (. | length) > $max then .[0:$max] + "…(truncated)" else . end;
+    (map(select((.isPriorReview != true) and (.inReplyToId != null))) // []) as $replies
+    | map(select(.isPriorReview == true))
+    | map(. as $f | select($replies | any(.inReplyToId == $f.id) | not)
+        | "### Prior output, no response — "
+          + (if '"$_MRA_THREAD_LOC_JQ"' != "" then '"$_MRA_THREAD_LOC_JQ"' else "(review summary)" end)
+          + "\n\n" + (($f.body // "") | clip))
+    | join("\n\n---\n\n")
+  ' 2>/dev/null) || unanswered=""
+  [[ "$unanswered" == "null" ]] && unanswered=""
 
-You reported the findings below in an earlier review of this same pull request,
-and somebody answered them. They are OPEN FOR REVISION — treat each reply as an
-argument you must engage with, not as discussion to stay quiet about.
+  [[ -n "$answered$unanswered" ]] || return 0
 
-For EACH prior finding below you MUST emit exactly one line in your summary:
+  # Everything of ours is framed here rather than in the generic discussion
+  # block, whose instruction is "do NOT re-report issues already raised here".
+  # That is right for other people's comments and wrong for our own: applied to
+  # our own finding it makes round two silent about a problem round one found
+  # and nobody fixed, and the caller reads that silence as the problem being
+  # gone. It is the reason the dev loop had to run with PR context switched off.
+  echo "## Your own prior output on this PR"
+  echo
+  if [[ -n "$answered" ]]; then
+    cat <<'HDR'
+Somebody answered the findings below. They are OPEN FOR REVISION — treat each
+reply as an argument you must engage with, not as discussion to stay quiet about.
+
+For EACH of them you MUST emit exactly one line in your summary:
 
     ADJUDICATION <path>:<line> UPHELD — <why the reply does not refute the finding>
     ADJUDICATION <path>:<line> WITHDRAWN — <what the finding got wrong>
@@ -116,5 +136,16 @@ Withdraw whenever the reply is right. A withdrawal stated plainly is a correct
 review outcome, not a failure.
 
 HDR
-  printf '%s\n' "$threads"
+    printf '%s\n' "$answered"
+    [[ -n "$unanswered" ]] && echo
+  fi
+  if [[ -n "$unanswered" ]]; then
+    cat <<'HDR'
+Nobody responded to the output below. It is NOT "already raised, leave it
+alone": judge it against the diff in front of you now. If the problem is still
+there, report it again. If it has been fixed or the code has moved on, do not.
+
+HDR
+    printf '%s\n' "$unanswered"
+  fi
 }
