@@ -233,7 +233,17 @@ _dev_review_one() {
   local -a rargs=(--strategy debate --base "$base" --model "${DEV_MODEL:-sonnet}")
   local pr_ctx="" allow=""
   if [[ "$mode" == pr ]]; then
-    rargs+=(--pr "$pr_n"); pr_ctx=0
+    # D7 used to force pr_ctx=0 here. The generic discussion block is headed
+    # "do NOT re-report issues already raised here", and the loop's own round-1
+    # findings came back through it: round 2 read its own finding as
+    # already-raised, said nothing, and the loop took the silence for a fix.
+    #
+    # Our own prior output no longer goes through that block — it is presented
+    # as ours, to be judged against the current diff and re-reported if it still
+    # holds (lib/review-pr-threads.sh). The false green is gone, and the cost of
+    # the workaround was that a reviewer replying "not changing it, because…"
+    # was equally unheard. tests/test_dev_pr_context.sh holds both halves.
+    rargs+=(--pr "$pr_n")
     [[ "${DEV_AUTO_APPROVE:-false}" == true ]] && allow=1
   fi
   # set -e firewall (§10-1): || true so review_project's documented return-1
