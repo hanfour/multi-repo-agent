@@ -305,12 +305,49 @@ ${pkb_context}"
   # clarifications. Only on the --pr path; best-effort + gated (MRA_REVIEW_PR_CONTEXT=0
   # disables). Exported so the dispatched agents (run_agent_*/synthesis) read it. ---
   export MRA_REVIEW_PR_DISCUSSION=""
+  # Locations whose earlier finding somebody answered. A finding re-reported at
+  # one of these without engaging the reply is dropped after the model returns
+  # (see _review_enforce_adjudication) — asking the model to adjudicate is not
+  # the same as knowing that it did.
+  export MRA_REVIEW_REBUTTED_LOCS=""
+  local discussion_json=""
   if [[ -n "${MRA_REVIEW_SUPPLIED_CONTEXT:-}" ]]; then
     MRA_REVIEW_PR_DISCUSSION="$MRA_REVIEW_SUPPLIED_CONTEXT"
     log_info "loaded supplied untrusted PR scope into review context" "review"
+    # The integration path runs with no GitHub credential by design, so the
+    # discussion cannot be fetched here — the caller supplies it or there is none.
+    discussion_json="${MRA_REVIEW_SUPPLIED_DISCUSSION:-}"
+    if [[ -n "$discussion_json" ]]; then
+      local supplied_block
+      supplied_block=$(_review_format_pr_discussion "$discussion_json")
+      [[ -n "$supplied_block" ]] && MRA_REVIEW_PR_DISCUSSION="$MRA_REVIEW_PR_DISCUSSION
+
+$supplied_block"
+    fi
   elif [[ -n "$pr_number" && "${MRA_REVIEW_PR_CONTEXT:-1}" != "0" ]]; then
-    MRA_REVIEW_PR_DISCUSSION=$(_review_fetch_pr_discussion "$project_dir" "$pr_number")
+    discussion_json=$(_review_fetch_pr_discussion_json "$project_dir" "$pr_number")
+    local scope_block discussion_block
+    scope_block=$(_review_fetch_pr_scope "$project_dir" "$pr_number")
+    discussion_block=$(_review_format_pr_discussion "${discussion_json:-[]}")
+    MRA_REVIEW_PR_DISCUSSION=$(printf '%s' "${scope_block:+$scope_block
+
+}${discussion_block}")
     [[ -n "$MRA_REVIEW_PR_DISCUSSION" ]] && log_info "loaded existing PR discussion into review context" "review"
+  fi
+
+  # Our own earlier findings, and the replies to them, are framed separately:
+  # the generic block says "do NOT re-report issues already raised here", which
+  # applied to our own wrong finding freezes it instead of reconsidering it.
+  if [[ -n "$discussion_json" ]]; then
+    local prior_block
+    prior_block=$(_review_format_prior_findings "$discussion_json")
+    if [[ -n "$prior_block" ]]; then
+      MRA_REVIEW_PR_DISCUSSION="$prior_block
+
+$MRA_REVIEW_PR_DISCUSSION"
+      MRA_REVIEW_REBUTTED_LOCS=$(_review_rebutted_locations "$discussion_json")
+      log_info "prior findings answered on this PR must be adjudicated: $(printf '%s' "$MRA_REVIEW_REBUTTED_LOCS" | tr '\n' ' ')" "review"
+    fi
   fi
 
   # --- Build --add-dir args as a string shared by Claude and Codex providers ---
@@ -368,6 +405,7 @@ ${pkb_context}"
       "$project" "$project_dir" "$persona_diff" "$persona_changed" \
       "$persona_findings" "" "$consumers" "$has_api_change" \
       "$persona_lang" "$model" "$persona_focused" "$mra_dir")
+  review_json=$(_review_enforce_adjudication "$review_json" "${MRA_REVIEW_REBUTTED_LOCS:-}")
 
     _render_review_json "$review_json" "$output_mode" "$project_dir" "$pr_number" "personas" || return 1
     _review_notify_complete "$workspace" "$project" "$(_review_status_for_notify "$review_json")"
@@ -385,6 +423,7 @@ ${pkb_context}"
       "$project_type" "$consumers" "$deps" "$has_api_change" \
       "$output_language" "$model" "$claude_add_dirs_str" "$claude_focused_dirs_str" \
       "$pkb_context" "$mode" "$range_expr" "$review_provider")
+    review_json=$(_review_enforce_adjudication "$review_json" "${MRA_REVIEW_REBUTTED_LOCS:-}")
 
     _review_emit_verdict "$review_json" "$project_dir"
     _render_review_json "$review_json" "$output_mode" "$project_dir" "$pr_number" "debate" || return 1
@@ -446,6 +485,7 @@ ${prompt}"
     # Missing sentinel / empty / unparseable => neutral REVIEW_INCOMPLETE (#8),
     # never a false APPROVE. _review_singlepass_body always yields valid JSON.
     review_json=$(_review_singlepass_body "$raw_review")
+    review_json=$(_review_enforce_adjudication "$review_json" "${MRA_REVIEW_REBUTTED_LOCS:-}")
     _review_emit_verdict "$review_json" "$project_dir"
     # The inline schema only permits APPROVED/CHANGES_REQUESTED, so a COMMENT
     # status can ONLY be the neutral REVIEW_INCOMPLETE verdict — log it.
