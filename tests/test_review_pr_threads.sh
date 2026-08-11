@@ -89,6 +89,19 @@ printf '%s' "$OTHER" | grep -qF "migration 已經另外處理" \
   && ok "unrelated discussion still reaches the generic block" \
   || fail "unrelated discussion was lost"
 
+# Only the threads that were lifted out may be removed. Our own prior output
+# that nobody answered has no thread to move it to, so dropping it here would
+# delete it from the prompt entirely — on the real PR that was a DISMISSED
+# review summary, which is exactly the kind of signal worth keeping.
+UNANSWERED_MINE=$(jq -cn '[
+  {id:7, inReplyToId:null, author:"mra-bot", kind:"review", path:"", line:null,
+   body:"[DISMISSED] an earlier review a human rejected", createdAt:"1", isPriorReview:true},
+  {id:8, inReplyToId:null, author:"dana", kind:"comment", path:"", line:null,
+   body:"unrelated note", createdAt:"2", isPriorReview:false}]')
+printf '%s' "$(_review_format_pr_discussion "$UNANSWERED_MINE")" | grep -qF "DISMISSED" \
+  && ok "our own unanswered prior output stays visible" \
+  || fail "an unanswered prior review vanished from both blocks"
+
 # --- 5. the instruction demands adjudication, not silence -------------------
 printf '%s' "$SECTION" | grep -q "ADJUDICATION" \
   && ok "the section states the adjudication contract" || fail "no adjudication contract in the prompt"
