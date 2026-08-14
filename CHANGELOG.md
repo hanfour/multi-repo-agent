@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-08-14
+
+A review that never ran, reported as a review that found nothing in particular.
+`acme/nest-monorepo-2.0#892` — 578 files, `pnpm-lock.yaml` regenerated — failed
+twice, and what reached the requester was `invalid or mismatched mra protocol
+artifact`. The actual message was one line of stderr that no consumer reads.
+Behind it were two separate ceilings, the second only visible once the first
+was gone.
+
+### Fixed
+- **The review prompt could not be delivered at all past a certain diff size.**
+  The prompt embeds the whole diff and travelled as a command-line argument, and
+  argv is capped: `ARG_MAX` is 1 MB on macOS and counts the environment too. That
+  PR's diff measured 1,009,880 bytes — 96% of the budget before a single flag —
+  so `execve` refused the call with `E2BIG` and both the first attempt and its
+  retry died. The prompt now travels on stdin (`codex exec -`, `claude -p` with
+  no prompt argument), which has no such ceiling. The redirection happens in the
+  shell, so fd 0 is open before `sandbox-exec` runs; a real deny-default profile
+  passes 1.1 MB through untouched, and the perl watchdog fork/execs without
+  reading stdin itself. The `</dev/null` this replaces guarded against codex
+  blocking on an inherited tty whose EOF never came (#18) — a regular file always
+  ends, and each retry re-opens it rather than inheriting a drained descriptor.
+
+### Changed
+- **Generated files are summarised instead of quoted.** With the prompt finally
+  reaching codex, codex refused it: 1,087,072 characters against a 1,048,576
+  limit. `pnpm-lock.yaml` was 465,442 of those — 46% of the diff spent on a file
+  generated from a `package.json` the reviewer already reads. `review_diff_text`
+  now excludes generated artifacts (lockfiles across ecosystems, minified
+  bundles, source maps) and appends one line per omitted file with its add/delete
+  counts. Dropping them silently would be the worse bug: a review that never
+  mentions the lockfile reads as a review that saw no lockfile change.
+  `review_diff_files` is untouched — it is a manifest, not a quote, so the model
+  still sees every path that moved. Measured on that PR the diff falls from
+  1,009,880 to 544,605 bytes, putting the prompt near 620,000 with 40% of the
+  limit to spare, without losing a line anyone would have reviewed.
+  `MRA_REVIEW_GENERATED_GLOBS` replaces the pattern set for a repo whose
+  generated files differ; `MRA_REVIEW_QUOTE_GENERATED=1` restores the previous
+  behaviour wholesale.
+
+  This raises the ceiling rather than removing it. A pull request carrying
+  600,000 characters of hand-written change still exceeds what one call can
+  take, and splitting a review across calls is not attempted here.
+
 ## [3.3.0] - 2026-08-11
 
 Both changes here came from user reports, and in both cases the code read
@@ -326,7 +370,8 @@ Three fixes change what an existing caller sees, and all three are deliberate:
 - Removed confidential design documents that did not belong to this tool from the
   repository **and its git history**.
 
-[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.3.0...HEAD
+[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.4.0...HEAD
+[3.4.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.4.0
 [3.3.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.3.0
 [3.2.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.2.0
 [3.1.1]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.1.1
