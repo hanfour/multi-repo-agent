@@ -44,7 +44,10 @@ export COUNT_FILE="$TMP/count"
 cat > "$BIN/codex" <<'STUB'
 #!/usr/bin/env bash
 n=$(cat "$COUNT_FILE" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$COUNT_FILE"
-echo "call=$n args=$*" >> "$REC"
+# The prompt arrives on stdin (`codex exec -`), so the adversarial-wiring
+# assertion below has to read it from there rather than from argv.
+prompt_payload=$(cat)
+echo "call=$n args=$* prompt=$prompt_payload" >> "$REC"
 if [[ "$n" == "1" ]]; then
 cat <<'OUT'
 {"status":"CHANGES_REQUESTED","summary":"pass1","comments":[{"path":"a.sh","line":1,"severity":"HIGH","body":"REAL-BUG"},{"path":"b.sh","line":2,"severity":"LOW","body":"REFUTED-NOISE"}]}
