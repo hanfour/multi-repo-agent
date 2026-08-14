@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-08-14
+
+### Fixed
+- **A hang test failed on machine load and blamed the wrong thing when it did.**
+  It counted retries from a file the stub writes before sleeping, with the alarm
+  one second away; under load the `KILL` landed before that write ran, so the
+  file reported zero attempts for a call that had genuinely retried twice. The
+  report was unreadable on top of that: `grep -c` on an empty file prints `0`
+  and exits non-zero, so the `|| echo 0` fallback appended a second line and
+  `[[ "0\n0" -ge 2 ]]` died with `arithmetic syntax error in expression` — a
+  timing flake wearing the mask of a syntax bug, in a test whose subject is
+  neither. `claude_invoke` already reports `after N attempt(s)` when it fails,
+  which is the subject's own account of what it did and does not depend on a
+  killed child winning a race to write. The assertion reads that instead,
+  verified against a stub that records nothing at all. Test-only; no runtime
+  behaviour changes.
+
 ## [3.4.0] - 2026-08-14
 
 A review that never ran, reported as a review that found nothing in particular.
@@ -370,7 +387,8 @@ Three fixes change what an existing caller sees, and all three are deliberate:
 - Removed confidential design documents that did not belong to this tool from the
   repository **and its git history**.
 
-[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.4.0...HEAD
+[Unreleased]: https://github.com/hanfour/multi-repo-agent/compare/v3.4.1...HEAD
+[3.4.1]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.4.1
 [3.4.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.4.0
 [3.3.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.3.0
 [3.2.0]: https://github.com/hanfour/multi-repo-agent/releases/tag/v3.2.0
