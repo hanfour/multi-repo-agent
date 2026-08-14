@@ -111,7 +111,10 @@ if /usr/sbin/sysctl kern.ostype >/dev/null 2>&1; then
 else
   sysctl_exec=hidden
 fi
-echo "codex: $* | cwd=$(pwd) | gh=${GH_TOKEN-unset} | github=${GITHUB_TOKEN-unset} | openai=${OPENAI_API_KEY-unset} | proxy-token=$proxy_token_state | real-key=$real_key_state | proc-env=$proc_env | sysctl=$sysctl_exec | home=$HOME | auth=$auth_state | orig-auth=$orig_auth | gh-config=$(cat "$HOME/.config/gh/hosts.yml" 2>/dev/null || true)" >> "$REC"
+# The prompt arrives on stdin (`codex exec -`), so a stub that only records
+# argv can no longer see the reviewer policy it is asked to assert about.
+prompt_payload=$(cat)
+echo "codex: $* | prompt=$prompt_payload | cwd=$(pwd) | gh=${GH_TOKEN-unset} | github=${GITHUB_TOKEN-unset} | openai=${OPENAI_API_KEY-unset} | proxy-token=$proxy_token_state | real-key=$real_key_state | proc-env=$proc_env | sysctl=$sysctl_exec | home=$HOME | auth=$auth_state | orig-auth=$orig_auth | gh-config=$(cat "$HOME/.config/gh/hosts.yml" 2>/dev/null || true)" >> "$REC"
 echo "<codex-output>"
 STUB
 chmod +x "$BIN/codex"
@@ -181,6 +184,42 @@ case "$rec" in *"home=$TMP/model-home."*) pass "codex uses a unique isolated HOM
 case "$rec" in *"ambient-gh-secret"*) fail "codex could read ambient gh config" ;; *) pass "ambient gh config is absent from model HOME" ;; esac
 [[ ! -e "$TMP/model-home" ]] && [[ -z "$(find "$TMP" -maxdepth 1 -name 'model-home.*' -print -quit)" ]] && pass "isolated model HOME is cleaned up" || fail "isolated model HOME leaked"
 
+# The review prompt embeds the whole diff (lib/review-prompt.sh), and argv is
+# capped: ARG_MAX is 1 MB on macOS, counting the environment too. On 2026-08-14
+# onead/super-dsp-2.0#892 (578 files, pnpm-lock.yaml regenerated) produced a
+# 1,009,880-byte diff, execve refused the codex call with E2BIG, and the review
+# surfaced as "invalid or mismatched mra protocol artifact" with the real cause
+# buried in stderr. `codex exec` reads the prompt from stdin when the prompt
+# argument is `-`, which has no such ceiling.
+: > "$REC"
+cat > "$BIN/codex" <<'STUB'
+#!/usr/bin/env bash
+# Record the transport, not the prompt: a megabyte in $REC helps nobody.
+argv="$*"
+stdin_bytes=$(cat | wc -c | tr -d ' ')
+echo "codex-transport: argv-bytes=${#argv} stdin-bytes=$stdin_bytes" >> "$REC"
+echo "<codex-output>"
+STUB
+chmod +x "$BIN/codex"
+
+# 1.1 MB: over ARG_MAX on its own, so argv transport cannot survive it.
+big_prompt=$(head -c 1100000 /dev/zero | tr '\0' 'd')
+big_out=$(HOME="$TMP/home" ORIGINAL_HOME_FOR_STUB="$TMP/home" MRA_REVIEW_MODEL_HOME="$TMP/model-home" \
+  MRA_REVIEW_ALLOW_UNSANDBOXED_CODEX=1 MRA_CODEX_BIN="$BIN/codex" \
+  review_call_model review codex "$big_prompt" "" "$TMP/project" "$add_dirs" 6 "" 2>/dev/null) || true
+[[ "$big_out" == "<codex-output>" ]] && pass "a diff larger than ARG_MAX still reaches codex" || fail "oversized prompt failed the codex call: '$big_out'"
+big_rec=$(grep 'codex-transport:' "$REC" 2>/dev/null | tail -1 || true)
+case "$big_rec" in
+  *"stdin-bytes=11000"*) pass "the oversized prompt travelled on stdin" ;;
+  *) fail "prompt did not travel on stdin: '$big_rec'" ;;
+esac
+big_argv=${big_rec##*argv-bytes=}; big_argv=${big_argv%% *}
+if [[ "$big_argv" =~ ^[0-9]+$ ]] && (( big_argv < 100000 )); then
+  pass "argv stays small regardless of diff size"
+else
+  fail "argv still carries the prompt: '$big_rec'"
+fi
+
 : > "$REC"
 cat > "$BIN/claude" <<'STUB'
 #!/usr/bin/env bash
@@ -194,6 +233,36 @@ out=$(MRA_CLAUDE_BIN="$BIN/claude" review_call_model review claude "PROMPT-D" ""
 rec=$(cat "$REC")
 case "$rec" in *"--model sonnet"*) pass "claude gets provider default model" ;; *) fail "claude missing default model: $rec" ;; esac
 case "$rec" in *"--max-turns 5"*) pass "claude forwards max turns" ;; *) fail "claude missing max turns: $rec" ;; esac
+
+# Same ARG_MAX ceiling as codex: `-p "$prompt"` puts the whole diff in argv.
+# claude reads the prompt from stdin when -p carries no prompt argument.
+: > "$REC"
+cat > "$BIN/claude" <<'STUB'
+#!/usr/bin/env bash
+argv="$*"
+stdin_bytes=$(cat | wc -c | tr -d ' ')
+echo "claude-transport: argv-bytes=${#argv} stdin-bytes=$stdin_bytes" >> "$REC"
+echo "<claude-output>"
+STUB
+chmod +x "$BIN/claude"
+big_out=$(MRA_CLAUDE_BIN="$BIN/claude" review_call_model review claude "$big_prompt" "" "$TMP/project" "" 5 "" 2>/dev/null) || true
+[[ "$big_out" == "<claude-output>" ]] && pass "a diff larger than ARG_MAX still reaches claude" || fail "oversized prompt failed the claude call: '$big_out'"
+big_rec=$(grep 'claude-transport:' "$REC" 2>/dev/null | tail -1 || true)
+case "$big_rec" in
+  *"stdin-bytes=11000"*) pass "the oversized claude prompt travelled on stdin" ;;
+  *) fail "claude prompt did not travel on stdin: '$big_rec'" ;;
+esac
+
+: > "$REC"
+cat > "$BIN/claude" <<'STUB'
+#!/usr/bin/env bash
+echo "claude: $* | prompt=$(cat)" >> "$REC"
+echo "<claude-output>"
+STUB
+chmod +x "$BIN/claude"
+out=$(MRA_CLAUDE_BIN="$BIN/claude" review_call_model review claude "PROMPT-STDIN" "" "$TMP/project" "" 5 "")
+rec=$(cat "$REC")
+case "$rec" in *"prompt=PROMPT-STDIN"*) pass "claude receives the prompt itself on stdin" ;; *) fail "claude lost the prompt: $rec" ;; esac
 
 config_set_string "review.primaryProvider" "codex" >/dev/null
 config_set_string "review.secondaryProvider" "claude" >/dev/null

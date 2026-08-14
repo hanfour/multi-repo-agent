@@ -515,17 +515,30 @@ _review_call_one_provider() {
     claude)
       local _ad=()
       expand_add_dir_string _ad "$add_dirs" || return 1
-      local args=(-p "$prompt")
+      # `-p` with no prompt argument makes claude read it from stdin. Same
+      # reason as the codex path below: the prompt carries the whole diff and
+      # argv is capped at ARG_MAX (1 MB on macOS, environment included), so a
+      # large enough PR made execve fail with E2BIG instead of producing a
+      # review.
+      local claude_prompt_file
+      claude_prompt_file=$(mktemp "${TMPDIR:-/tmp}/mra-claude-prompt.XXXXXX") || return 1
+      chmod 600 "$claude_prompt_file"
+      printf '%s' "$prompt" > "$claude_prompt_file"
+      local args=(-p)
       args+=("${_ad[@]}")
       [[ -n "$system_prompt_file" && -f "$system_prompt_file" ]] && args+=(--append-system-prompt-file "$system_prompt_file")
       [[ -n "$model" ]] && args+=(--model "$model")
       args+=(--max-turns "$max_turns")
       args+=(--disallowedTools "Write,Edit,NotebookEdit")
+      local claude_rc=0
       if [[ "$stream" == "true" ]]; then
-        _review_without_github_credentials claude_invoke --stream "$tag" "${args[@]}"
+        _review_without_github_credentials claude_invoke --stream "$tag" "${args[@]}" <"$claude_prompt_file" || claude_rc=$?
       else
-        _review_without_github_credentials claude_invoke "$tag" "${args[@]}"
+        _review_without_github_credentials claude_invoke "$tag" "${args[@]}" <"$claude_prompt_file" || claude_rc=$?
       fi
+      # The prompt file holds the diff under review; it leaves with the call.
+      rm -f "$claude_prompt_file"
+      return "$claude_rc"
       ;;
     codex)
       local trusted_cwd snapshot rc=0 codex_config provider_name base_url wire_api requires_openai_auth codex_last codex_stdout
@@ -569,7 +582,28 @@ _review_call_one_provider() {
       local reasoning_effort
       reasoning_effort=$(review_provider_codex_reasoning_effort)
       [[ -n "$reasoning_effort" ]] && args+=(-c "model_reasoning_effort=\"$reasoning_effort\"")
-      args+=("$prompt")
+      # The prompt embeds the whole diff, and argv has a hard ceiling: ARG_MAX is
+      # 1 MB on macOS and counts the environment too. onead/super-dsp-2.0#892
+      # (578 files, pnpm-lock.yaml regenerated) produced a 1,009,880-byte diff —
+      # 96% of the budget before a single flag or env var — and execve refused
+      # the call with E2BIG. The review then surfaced as "invalid or mismatched
+      # mra protocol artifact", naming nothing that would lead anyone here.
+      #
+      # `codex exec -` reads the prompt from stdin, which has no such ceiling.
+      # The redirection happens in this shell, so fd 0 is already open on the
+      # file before sandbox-exec runs and the sandbox has nothing to allow; the
+      # perl watchdog fork/execs and never reads stdin itself. The `</dev/null`
+      # this replaces existed so codex could not block waiting on an inherited
+      # tty for "additional input" (#18) — a regular file gives EOF at the end,
+      # so that hazard does not return.
+      local codex_prompt_file
+      codex_prompt_file=$(mktemp "${TMPDIR:-/tmp}/mra-codex-prompt.XXXXXX") || {
+        rm -f "$codex_last" "$codex_stdout"; chmod -R u+w "$snapshot" 2>/dev/null || true
+        rm -rf "$snapshot" "$trusted_cwd"; return 1
+      }
+      chmod 600 "$codex_prompt_file"
+      printf '%s' "$prompt" > "$codex_prompt_file"
+      args+=("-")
       local watchdog_secs
       watchdog_secs=$(_review_codex_watchdog_secs)
       local -a codex_cmd=()
@@ -577,9 +611,10 @@ _review_call_one_provider() {
       if [[ "$watchdog_secs" != "0" && "${codex_cmd[0]}" != "perl" ]]; then
         log_warn "perl not found — codex watchdog disabled, invocation is unbounded" "review" >&2
       fi
-      # </dev/null: codex reads "additional input" from an inherited non-tty
-      # stdin and blocks until EOF the caller may never send (issue #18's
-      # observed freeze); the prompt travels as an argument, never stdin.
+      # stdin carries the prompt (see the `-` argument above). #18's freeze was
+      # codex blocking on an inherited tty whose EOF never came; a regular file
+      # ends, so the read always terminates. Each retry re-opens the file, so a
+      # second attempt gets the prompt from the start rather than an empty fd.
       # The outer profile is now the only write boundary, so it has to know
       # which roots codex legitimately writes to. Newline-separated: these are
       # mktemp paths, which never contain newlines.
@@ -601,7 +636,7 @@ _review_call_one_provider() {
         rc=0
         MRA_REVIEW_SANDBOX_WRITABLE_ROOTS="$trusted_cwd"$'\n'"$snapshot"$'\n'"$(dirname "$codex_last")" \
         MRA_REVIEW_AUTH_PROVIDER=codex _review_without_github_credentials "${codex_cmd[@]}" "${args[@]}" \
-          >"$codex_stdout" 2>"$codex_err" </dev/null || rc=$?
+          >"$codex_stdout" 2>"$codex_err" <"$codex_prompt_file" || rc=$?
         cat "$codex_err" >&2
         [[ "$rc" -eq 0 ]] && break
         [[ "$codex_attempt" -lt "$codex_max_retries" ]] || break
@@ -630,7 +665,8 @@ _review_call_one_provider() {
           cat "$codex_stdout"
         fi
       fi
-      rm -f "$codex_last" "$codex_stdout"
+      # The prompt file holds the diff under review; it leaves with the rest.
+      rm -f "$codex_last" "$codex_stdout" "$codex_prompt_file"
       chmod -R u+w "$snapshot" 2>/dev/null || true
       rm -rf "$snapshot" "$trusted_cwd"
       return "$rc"
