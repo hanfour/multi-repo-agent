@@ -211,8 +211,9 @@ chmod +x "$HANG_BIN"
 export HANG_REC="$TMP/hang-rec"
 
 : > "$HANG_REC"
+HANG_ERR="$TMP/hang-err"
 start=$SECONDS
-out=$(MRA_CLAUDE_BIN="$HANG_BIN" MRA_CLAUDE_TIMEOUT_SECONDS=1 MRA_CLAUDE_MAX_RETRIES=1       claude_invoke hangtest -p x 2>/dev/null); rc=$?
+out=$(MRA_CLAUDE_BIN="$HANG_BIN" MRA_CLAUDE_TIMEOUT_SECONDS=1 MRA_CLAUDE_MAX_RETRIES=1       claude_invoke hangtest -p x 2>"$HANG_ERR"); rc=$?
 elapsed=$((SECONDS - start))
 
 if (( elapsed < 20 )); then
@@ -221,11 +222,18 @@ else
   fail_test "claude_invoke waited ${elapsed}s for a hung call — unbounded"
 fi
 [[ "$rc" -ne 0 ]] && pass_test "a timed-out call reports failure"                   || fail_test "a timed-out call reported success (rc=$rc, out=$out)"
-attempts=$(grep -c attempt "$HANG_REC" 2>/dev/null || echo 0)
-if [[ "$attempts" -ge 2 ]]; then
+# Count attempts from what claude_invoke itself reports, not from what the stub
+# managed to write. The stub echoes into $HANG_REC and then sleeps, and the
+# alarm is one second away: under load the KILL can land before that echo ever
+# runs, so the file said "0 attempts" for a call that had genuinely retried.
+# `grep -c` on an empty file also EXITS non-zero while printing 0, so the old
+# `|| echo 0` appended a second line and `[[ "0\n0" -ge 2 ]]` died with
+# "arithmetic syntax error" — a timing flake wearing the mask of a syntax bug.
+attempts=$(sed -n 's/.*after \([0-9][0-9]*\) attempt(s).*/\1/p' "$HANG_ERR" | tail -1)
+if [[ "$attempts" =~ ^[0-9]+$ ]] && (( attempts >= 2 )); then
   pass_test "a timeout is treated as transient and retried ($attempts attempts)"
 else
-  fail_test "a timeout was not retried ($attempts attempt(s)) — a single hang still loses the run"
+  fail_test "a timeout was not retried (reported: '${attempts:-none}') — a single hang still loses the run; stderr: $(tr '\n' ' ' < "$HANG_ERR" | head -c 300)"
 fi
 
 # 0 disables the bound, for anyone who would rather wait than lose a long call.
