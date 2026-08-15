@@ -24,6 +24,10 @@ case "$*" in
     printf '%s' "${GH_FAKE_RATE:-5000}"; exit 0 ;;
   *--include*)
     if [[ "${GH_FAKE_MODE:-ok}" == "nolink" ]]; then printf 'HTTP/2 200\n\n'; exit 0; fi
+    # linkfail 模擬「查末頁那次 gh 呼叫本身失敗」（認證、網路），跟 nolink（HTTP
+    # 200 但沒有 Link header，代表真的只有一頁）是兩種不同狀況：前者不能被當成
+    # 後者蒙混過去，退出非 0 且不輸出任何東西。
+    if [[ "${GH_FAKE_MODE:-ok}" == "linkfail" ]]; then exit 1; fi
     printf 'HTTP/2 200\nLink: <https://api.github.com/x?page=2>; rel="next", <https://api.github.com/x?page=%s>; rel="last"\n\n' "${GH_FAKE_LAST:-3}"
     exit 0 ;;
   *pulls/comments*)
@@ -52,6 +56,16 @@ eq "末頁取自 Link header" "3" "$(corpus_last_page rails/rails)"
 GH_FAKE_LAST=598 eq "末頁 598" "598" "$(GH_FAKE_LAST=598 corpus_last_page rails/rails)"
 eq "無 Link header 視為單頁" "1" "$(GH_FAKE_MODE=nolink corpus_last_page rails/rails)"
 
+# gh 本身失敗（linkfail）跟「沒有 Link header」（nolink）要分開處理：前者是
+# 暫時性故障，不能被當成「真的只有一頁」蒙混過去——那會讓一次抓取失敗把
+# 598 頁的 repo 看成 1 頁，整輪就這樣「成功」跑完。
+if out="$(GH_FAKE_MODE=linkfail corpus_last_page rails/rails)"; then
+  fail "gh 失敗時 corpus_last_page 應退出非 0，卻印出：$out"
+else
+  ok "gh 失敗時 corpus_last_page 退出非 0"
+fi
+eq "gh 失敗時無輸出" "" "$(GH_FAKE_MODE=linkfail corpus_last_page rails/rails 2>/dev/null)"
+
 # 第一次抓：退出碼 0，檔案寫出
 corpus_fetch_page rails/rails 1; eq "首抓退出 0" "0" "$?"
 if [[ -s "$TMP/cache/rails__rails/0001.json" ]]; then ok "檔案已寫出"; else fail "檔案沒寫出"; fi
@@ -77,6 +91,19 @@ out="$(GH_FAKE_RATE=10 corpus_fetch_repo vuejs/vue 100)"; rc=$?
 eq "rate 不足退出 3" "3" "$rc"
 case "$out" in RATE_LIMIT_STOP*) ok "印出 RATE_LIMIT_STOP" ;; *) fail "缺 RATE_LIMIT_STOP：$out" ;; esac
 case "$out" in *"	1	3"*) ok "印出停在第 1 頁/共 3 頁" ;; *) fail "缺頁數資訊：$out" ;; esac
+
+# 查末頁失敗（gh --include 本身非 0）：不能沿用舊行為「當成 1 頁」再往下跑，
+# 要印 LAST_PAGE_UNKNOWN 並退出 3（可重跑），完全不進抓取迴圈。用全新的 repo
+# 名稱，避免跟上面已經寫過快取的 rails/rails 互相干擾。
+out="$(GH_FAKE_MODE=linkfail corpus_fetch_repo octocat/no-last-page 100)"; rc=$?
+eq "末頁查不到退出 3" "3" "$rc"
+case "$out" in LAST_PAGE_UNKNOWN*) ok "印出 LAST_PAGE_UNKNOWN" ;; *) fail "缺 LAST_PAGE_UNKNOWN：$out" ;; esac
+case "$out" in *"	octocat/no-last-page"*) ok "LAST_PAGE_UNKNOWN 帶 repo 名稱" ;; *) fail "缺 repo 名稱：$out" ;; esac
+if [[ -e "$TMP/cache/octocat__no-last-page/.complete" ]]; then
+  fail "末頁查不到卻寫出 .complete"
+else
+  ok "末頁查不到不寫 .complete"
+fi
 
 # 正常跑完三頁
 out="$(corpus_fetch_repo vuejs/vue 100)"; rc=$?
