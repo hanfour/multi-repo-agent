@@ -1335,8 +1335,20 @@ _retention_lock() {
     fi
   done
 }
-_retention_unlock() { rm -rf "$RETENTION.lock"; }
+# 只釋放自己持有的鎖。無條件 rm -rf 會製造出跟陳舊判斷一樣的問題：等 300 秒放棄的
+# 行程並沒有取得鎖，但它結束時 trap 一樣會觸發，把別人正在持有的鎖刪掉，兩個行程
+# 又同時進臨界區。Ctrl-C、set -e 中止、任何提早離開的路徑都會走到這個 trap。
+_RETENTION_LOCK_HELD=0
+
+_retention_unlock() {
+  [[ "$_RETENTION_LOCK_HELD" == 1 ]] || return 0
+  rm -rf "$RETENTION.lock"
+  _RETENTION_LOCK_HELD=0
+}
 ```
+
+`_retention_lock` 在 `mkdir` 成功離開迴圈後要設 `_RETENTION_LOCK_HELD=1`，
+放棄那條路徑（回 1）不設。
 
 取鎖失敗（回 1）時該 repo 算失敗：`rc=1; continue`，不要繼續往下寫 `retention.tsv`。
 
