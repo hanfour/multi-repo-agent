@@ -100,8 +100,16 @@ else
   targets="$(corpus_targets)"
 fi
 
+# 用陣列 + 索引而不是 `while read <<< "$targets"`：exit 3 之前要能點名「還沒被
+# 嘗試過的 repo」，那些就是目前索引之後的所有列，heredoc 版的 while-read 迴圈
+# 一旦離開就再也拿不到剩下的行。
+mapfile -t target_lines <<< "$targets"
+
 rc=0
-while IFS=$'\t' read -r repo layer; do
+target_idx=0
+for target_line in "${target_lines[@]}"; do
+  target_idx=$((target_idx + 1))
+  IFS=$'\t' read -r repo layer <<< "$target_line"
   [[ -z "$repo" ]] && continue
 
   if [[ "$DO_FETCH" == 1 ]]; then
@@ -112,7 +120,27 @@ while IFS=$'\t' read -r repo layer; do
     else
       status=$?
       echo "$out" >&2
-      if [[ "$status" == 3 ]]; then exit 3; fi
+      if [[ "$status" == 3 ]]; then
+        # exit 3 之前要把還沒被嘗試過的 repo 點名清楚：不然它們既沒被印出來也
+        # 沒被計進任何統計，操作者無從知道還差哪些 repo。target_idx 是目前這個
+        # repo 的 1-based 序號，target_lines[target_idx..] 就是還沒輪到的那些。
+        not_attempted=()
+        for ((na_i = target_idx; na_i < ${#target_lines[@]}; na_i++)); do
+          IFS=$'\t' read -r na_repo _ <<< "${target_lines[$na_i]}"
+          [[ -n "$na_repo" ]] && not_attempted+=("$na_repo")
+        done
+        if [[ "${#not_attempted[@]}" -gt 0 ]]; then
+          not_attempted_joined="$(IFS=,; printf '%s' "${not_attempted[*]}")"
+          printf 'NOT_ATTEMPTED\t%s\t%s\n' "${#not_attempted[@]}" "$not_attempted_joined" >&2
+        fi
+        # rc 已經是 1 代表前面有 repo 是永久失敗（不是額度問題）。直接 exit 3
+        # 會把這件事蓋掉：這次的失敗形狀（額度用盡）看起來只要等額度重置、
+        # 重跑就會全綠，但那個永久失敗的 repo 不會因為重跑而自己變好。
+        if [[ "$rc" == 1 ]]; then
+          echo "已有 repo 在本次執行中永久失敗（非額度問題），重跑無法修正該 repo，需要先排查上方非 RATE_LIMIT_STOP／RATE_CHECK_FAILED／LAST_PAGE_UNKNOWN 開頭的訊息" >&2
+        fi
+        exit 3
+      fi
       rc=1
       continue
     fi
@@ -226,6 +254,6 @@ while IFS=$'\t' read -r repo layer; do
     _retention_unlock
     rm -f "$err"
   fi
-done <<< "$targets"
+done
 
 exit "$rc"
