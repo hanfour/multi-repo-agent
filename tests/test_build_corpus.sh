@@ -91,6 +91,64 @@ out="$(GH_FAKE_RATE=5 bash "$MRA_DIR/scripts/build-corpus.sh" --repo vuejs/vue 2
 eq "rate 不足退出 3" "3" "$rc"
 case "$out" in *RATE_LIMIT_STOP*) ok "訊息含 RATE_LIMIT_STOP" ;; *) fail "缺 RATE_LIMIT_STOP：$out" ;; esac
 
+# Fix 3：exit 3 之前不能悄悄放棄還沒輪到的 repo——沒點名、沒計數，操作者不知道
+# 還差哪些。用一份只有 3 個 repo 的假目標清單（真正的 corpus_targets 有 10 個，
+# 用真清單斷言會很脆弱又難讀）：symlink 回真正的 scripts/build-corpus.sh 與
+# lib/corpus-fetch.sh、corpus-filter.sh、corpus-internal.sh，只有
+# lib/corpus-targets.sh 換成一份 3 repo 的假清單。
+fake_mra="$TMP/fake-mra"
+mkdir -p "$fake_mra/scripts" "$fake_mra/lib"
+ln -s "$MRA_DIR/scripts/build-corpus.sh" "$fake_mra/scripts/build-corpus.sh"
+ln -s "$MRA_DIR/lib/corpus-fetch.sh" "$fake_mra/lib/corpus-fetch.sh"
+ln -s "$MRA_DIR/lib/corpus-filter.sh" "$fake_mra/lib/corpus-filter.sh"
+ln -s "$MRA_DIR/lib/corpus-internal.sh" "$fake_mra/lib/corpus-internal.sh"
+cat > "$fake_mra/lib/corpus-targets.sh" <<'TARGETS_LIB'
+#!/usr/bin/env bash
+corpus_targets() {
+  cat <<'TARGETS'
+acme/repo-one	common
+acme/repo-two	common
+acme/repo-three	common
+TARGETS
+}
+corpus_layer_of() {
+  local repo="$1"
+  corpus_targets | CORPUS_REPO="$repo" awk -F'\t' \
+    '$1 == ENVIRON["CORPUS_REPO"] { print $2; found = 1 } END { exit !found }'
+}
+TARGETS_LIB
+
+mkdir -p "$TMP/bin3"
+cat > "$TMP/bin3/gh" <<'SHIM3'
+#!/usr/bin/env bash
+case "$*" in
+  *rate_limit*)
+    # 第二次呼叫（對應第二個 repo）額度歸零，模擬第二個 repo 撞到 rate limit；
+    # 第一個 repo 正常跑完，第三個 repo 完全不會被嘗試到。
+    n=$(( $(cat "$RATE_CALL_COUNT" 2>/dev/null || echo 0) + 1 ))
+    printf '%s' "$n" > "$RATE_CALL_COUNT"
+    if [[ "$n" -ge 2 ]]; then printf '0'; else printf '5000'; fi
+    exit 0 ;;
+  *--include*) printf 'HTTP/2 200\nLink: <https://x?page=2>; rel="next", <https://x?page=1>; rel="last"\n\n'; exit 0 ;;
+  *pulls/comments*) printf '[{"id":1,"body":"x"}]'; exit 0 ;;
+esac
+exit 1
+SHIM3
+chmod +x "$TMP/bin3/gh"
+
+rate_count_file="$(mktemp "${TMPDIR:-/tmp}/corpus-ratecount.XXXXXX")"
+: > "$rate_count_file"
+out3="$(PATH="$TMP/bin3:$PATH" RATE_CALL_COUNT="$rate_count_file" \
+  MRA_CORPUS_DIR="$TMP/cache-not-attempted" \
+  bash "$fake_mra/scripts/build-corpus.sh" --fetch-only 2>&1)"; rc3=$?
+eq "3 repo 清單、repo2 撞額度：退出 3" "3" "$rc3"
+case "$out3" in *DONE*"acme/repo-one"*) ok "repo1 有先成功跑過" ;; *) fail "repo1 應該先成功：$out3" ;; esac
+not_attempted_line="$(printf '%s\n' "$out3" | grep '^NOT_ATTEMPTED' || true)"
+case "$not_attempted_line" in NOT_ATTEMPTED*) ok "印出 NOT_ATTEMPTED" ;; *) fail "缺 NOT_ATTEMPTED：$out3" ;; esac
+eq "NOT_ATTEMPTED 數量為 1" "1" "$(printf '%s' "$not_attempted_line" | cut -f2)"
+eq "NOT_ATTEMPTED 點名 repo3" "acme/repo-three" "$(printf '%s' "$not_attempted_line" | cut -f3)"
+rm -f "$rate_count_file"
+
 # 篩選失敗必須傳到退出碼，而且不能污染 retention.tsv、也不能留下看似成功的舊輸出。
 # corpus_filter_all 已經會在壞輸入時退出 1，這裡驗 CLI 有沒有接住。
 bad_dir="$TMP/cache/TanStack__query"
