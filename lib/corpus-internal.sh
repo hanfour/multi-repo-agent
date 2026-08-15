@@ -20,21 +20,28 @@ EOF
 }
 
 # 近一年留言數達門檻的人。輸出是 JSON 陣列，直接餵給 corpus_filter_active。
-# 三頁全部抓失敗時要回 1，不能靜默回空陣列：那會讓認證或網路故障看起來像
-# 「這個 repo 沒有活躍的 reviewer」，語料靜默變空而流程回報成功。
+#
+# 三頁全部要成功才能算數，不能只看「有沒有任何一頁成功」。舊版只要 1、2 頁成功
+# 就繼續往下算，等於拿一個絕對門檻（留言數 >= 10）去套一個只剩三分之一或三分之二
+# 的樣本，活躍的 reviewer 因此悄悄消失——下游看起來會跟「這個 repo 真的沒有活躍
+# 的 reviewer」一模一樣，是三頁全失敗那次修過的同一種混淆，只是換了個觸發條件。
 corpus_active_reviewers() {
-  local repo="$1" min="${2:-10}" page ok=0
+  local repo="$1" min="${2:-10}" page succeeded=0
   local all=""
   for page in 1 2 3; do
     local one
     if one="$(gh api "repos/$repo/pulls/comments?per_page=100&page=$page&sort=created&direction=desc" \
                 --jq '.[].user.login // empty' 2>/dev/null)"; then
-      ok=1
+      succeeded=$((succeeded + 1))
       all+="$one"$'\n'
     fi
   done
-  if [[ "$ok" -eq 0 ]]; then
-    printf 'ACTIVE_REVIEWERS_FETCH_FAILED\t%s\n' "$repo" >&2
+  if [[ "$succeeded" -lt 3 ]]; then
+    if [[ "$succeeded" -eq 0 ]]; then
+      printf 'ACTIVE_REVIEWERS_FETCH_FAILED\t%s\n' "$repo" >&2
+    else
+      printf 'ACTIVE_REVIEWERS_PARTIAL\t%s\t%s/3\n' "$repo" "$succeeded" >&2
+    fi
     return 1
   fi
   printf '%s' "$all" \

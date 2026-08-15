@@ -150,7 +150,15 @@ while IFS=$'\t' read -r repo layer; do
     # --internal 的第 2 步不是 corpus_filter_senior，改用近一年活躍留言者清單，
     # 所以要先問 gh 拿名單，再走 corpus_filter_all_internal 而不是 corpus_filter_all。
     if [[ "$INTERNAL" == 1 ]]; then
-      reviewers="$(corpus_active_reviewers "$repo" 10)"
+      # corpus_active_reviewers 的退出碼一定要檢查。它三頁裡任何一頁失敗都會回 1
+      # 並把 ACTIVE_REVIEWERS_FETCH_FAILED／ACTIVE_REVIEWERS_PARTIAL 印到 stderr，
+      # 不檢查的話 $reviewers 會是空字串或截斷的清單，餵給
+      # corpus_filter_all_internal 之後篩選照樣「成功」跑完，只是活躍 reviewer
+      # 悄悄變少，語料缺人卻沒有任何痕跡——跟 CACHE_INCOMPLETE 要擋的是同一類問題。
+      if ! reviewers="$(corpus_active_reviewers "$repo" 10)"; then
+        rm -f "$merged" "$err"
+        rc=1; continue
+      fi
       filter_rc=0
       corpus_filter_all_internal "$repo" "$layer" "$reviewers" \
         < "$merged" > "$dir/filtered.json.tmp" 2>"$err" || filter_rc=$?
