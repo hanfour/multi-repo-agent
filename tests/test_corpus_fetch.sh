@@ -100,13 +100,18 @@ eq "額度查不到時無輸出" "" "$(GH_FAKE_MODE=ratefail corpus_rate_remaini
 # mv 失敗不得回報成功。目的地唯讀時，corpus_fetch_page 要回 1 且不留暫存檔。
 ro_dir="$(corpus_repo_dir microsoft/TypeScript)"
 mkdir -p "$ro_dir"; chmod 555 "$ro_dir"
-tmp_before="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -l | tr -d ' ')"
+# 數的是本測試專屬 TMPDIR 裡的 corpus.* 暫存檔，所以是精確計數：
+# 起點必為 0，洩漏一個就是 1。數共用 TMPDIR 的 tmp.* 會數到別的行程（實測機器上
+# 有 321 個）而間歇性誤報，而 corpus_fetch_page 若用 bare mktemp，在 macOS 上又會
+# 因為忽略 TMPDIR 而恆為 0/0，變成永遠不會失敗的空斷言。
+tmp_before="$(find "$TMPDIR" -maxdepth 1 -name 'corpus.*' 2>/dev/null | wc -l | tr -d ' ')"
+eq "起點沒有殘留暫存檔" "0" "$tmp_before"
 corpus_fetch_page microsoft/TypeScript 1; rc=$?
 chmod 755 "$ro_dir"
 eq "mv 失敗退出 1" "1" "$rc"
 if [[ -e "$ro_dir/0001.json" ]]; then fail "mv 失敗卻留下檔案"; else ok "mv 失敗不留檔"; fi
-tmp_after="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -l | tr -d ' ')"
-eq "mv 失敗不洩漏暫存檔" "$tmp_before" "$tmp_after"
+tmp_after="$(find "$TMPDIR" -maxdepth 1 -name 'corpus.*' 2>/dev/null | wc -l | tr -d ' ')"
+eq "mv 失敗不洩漏暫存檔" "0" "$tmp_after"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

@@ -37,7 +37,10 @@ corpus_fetch_page() {
     return 2
   fi
   mkdir -p "$(dirname "$out")"
-  tmp="$(mktemp)"
+  # 一定要給 mktemp 明確的 template。macOS/BSD 的 bare `mktemp` 走
+  # _CS_DARWIN_USER_TEMP_DIR，完全忽略 TMPDIR（GNU 的會理），所以測試無法把暫存檔
+  # 導到自己控制的目錄，「不洩漏暫存檔」那條斷言就會變成永遠 0/0 的空斷言。
+  tmp="$(mktemp "${TMPDIR:-/tmp}/corpus.XXXXXX")" || return 1
   if ! gh api "repos/$repo/pulls/comments?per_page=100&page=$page&sort=created&direction=desc" \
          > "$tmp" 2>/dev/null; then
     rm -f "$tmp"; return 1
