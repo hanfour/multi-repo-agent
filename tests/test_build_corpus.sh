@@ -150,6 +150,41 @@ rm -f "$bad_dir/0002.json" "$bad_dir/0003.json"
 printf '%s' "$(cat "$GH_FAKE_BODY")" > "$bad_dir/0001.json"
 printf '1\n' > "$bad_dir/.complete"
 
+# Fix 2：filtered.json.tmp -> filtered.json 這個 mv 沒檢查退出碼的話，磁碟滿、
+# 或 TMPDIR 與快取目錄跨檔案系統時 mv 退化成 copy+unlink 又失敗，都會被吞掉——
+# 退出 0、留存列照樣寫「留了 N 則」，但 filtered.json 其實還是上一次成功執行的
+# 舊輸出。用 PATH shim 讓 mv 只在搬移 filtered.json.tmp -> filtered.json 這一步
+# 失敗，其餘 mv（corpus_fetch_page 內部搬頁檔、retention.tsv 的搬移）照常放行，
+# 才不會連帶測壞其他步驟。
+mkdir -p "$TMP/mvbin"
+cat > "$TMP/mvbin/mv" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *filtered.json.tmp*filtered.json) exit 1 ;;
+esac
+command -p mv "$@"
+SHIM
+chmod +x "$TMP/mvbin/mv"
+
+mv_dir="$TMP/cache/prisma__prisma"
+lines_before="$(wc -l < "$r" | tr -d ' ')"
+out="$(PATH="$TMP/mvbin:$PATH" bash "$MRA_DIR/scripts/build-corpus.sh" --repo prisma/prisma 2>&1)"; rc=$?
+if [[ "$rc" != 0 ]]; then ok "mv 失敗時退出非 0"; else fail "mv 失敗卻退出 0"; fi
+case "$out" in *FILTER_PROMOTE_FAILED*) ok "訊息含 FILTER_PROMOTE_FAILED" ;; *) fail "缺 FILTER_PROMOTE_FAILED：$out" ;; esac
+eq "mv 失敗不寫留存列" "$lines_before" "$(wc -l < "$r" | tr -d ' ')"
+if [[ -e "$mv_dir/filtered.json" ]]; then fail "mv 失敗卻留下 filtered.json"; else ok "mv 失敗不留 filtered.json"; fi
+if [[ -e "$mv_dir/filtered.json.tmp" ]]; then fail "mv 失敗留下 filtered.json.tmp"; else ok "mv 失敗不留 filtered.json.tmp"; fi
+
+# 先成功再失敗：確認 mv 失敗會把「上一次成功的 filtered.json」也清掉，不是留著
+# 讓它看起來像是這次的結果——跟合併失敗、篩選失敗那兩條分支的要求一致。
+out2="$(bash "$MRA_DIR/scripts/build-corpus.sh" --repo prisma/prisma --filter-only 2>&1)"; rc2=$?
+eq "先跑成功：退出 0" "0" "$rc2"
+if [[ -s "$mv_dir/filtered.json" ]]; then ok "先成功：filtered.json 有產出"; else fail "先成功：沒產出"; fi
+PATH="$TMP/mvbin:$PATH" bash "$MRA_DIR/scripts/build-corpus.sh" --repo prisma/prisma --filter-only >/dev/null 2>&1
+rc3=$?
+if [[ "$rc3" != 0 ]]; then ok "再失敗：退出非 0"; else fail "再失敗：退出 0"; fi
+if [[ -e "$mv_dir/filtered.json" ]]; then fail "mv 失敗後舊的 filtered.json 還在"; else ok "mv 失敗後移除舊的 filtered.json"; fi
+
 # --internal：抓 + 篩走 corpus_internal_targets / corpus_filter_all_internal，
 # 第 2 步改用活躍留言者而不是 author_association。gh shim 對 --jq 的支援見上方。
 out="$(bash "$MRA_DIR/scripts/build-corpus.sh" --internal --repo acme/rails-app-1 2>&1)"; rc=$?

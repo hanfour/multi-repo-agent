@@ -166,7 +166,19 @@ while IFS=$'\t' read -r repo layer; do
       rm -f "$merged" "$err" "$dir/filtered.json.tmp" "$dir/filtered.json"
       rc=1; continue
     fi
-    mv "$dir/filtered.json.tmp" "$dir/filtered.json"
+    # mv 的退出碼一定要檢查，理由跟 lib/corpus-fetch.sh 的 corpus_fetch_page 同一個
+    # mv 一樣：TMPDIR 與快取目錄常在不同檔案系統上，mv 會退化成 copy + unlink，
+    # 磁碟滿、配額、權限都可能讓它失敗。這個模式在這個分支已經判過兩次 Critical
+    # （corpus_fetch_page 的 mv、retention.tsv 的 mv），這是第三個，不能再無檢查出貨：
+    # 不檢查的話這裡退出 0、留存列照樣寫出「留了 N 則」，但 filtered.json 其實
+    # 還是上一次成功執行留下的舊輸出，看起來像是這次跑出來的結果。
+    if ! mv "$dir/filtered.json.tmp" "$dir/filtered.json"; then
+      printf 'FILTER_PROMOTE_FAILED\t%s\n' "$repo" >&2
+      # 舊的 filtered.json 一樣要清掉，理由跟上面篩選失敗分支一致：留著會讓這次
+      # 失敗的 promote 看起來像是延用上一次成功的結果。
+      rm -f "$merged" "$err" "$dir/filtered.json.tmp" "$dir/filtered.json"
+      rc=1; continue
+    fi
     rm -f "$merged"
 
     # 只有成功時才寫留存列。失敗時 stderr 是 FILTER_INPUT_INVALID 或
