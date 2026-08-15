@@ -1028,7 +1028,26 @@ bash scripts/build-corpus.sh --repo nestjs/nest
 cat "${MRA_CORPUS_DIR:-$HOME/.cache/mra-review-corpus}/retention.tsv"
 ```
 
-Expected: `nestjs/nest` 那列的 `n0_raw` 約 2,200。留存率（`n4_prose / n0_raw`）落在 30% 到 50% 之間。rails/rails 最新 100 則的實測是 41%，其他 repo 在這個範圍外的話要先看是不是篩選條件對該 repo 不適用，不要直接放大跑。
+實測結果：`nestjs/nest	2121	1988	1057	620	542`，整體留存率 25.6%。
+
+不要拿單一數字當合格線。已驗證的事實是留存率取決於該 repo 的 bot 導入程度，而不是篩選條件是否正確：
+
+| 取樣窗口 | n0 | n1 去 bot 後 | 留存率 |
+| --- | --- | --- | --- |
+| nestjs/nest 全歷史 | 2,121 | 1,988 | 25.6% |
+| nestjs/nest 最新 500 則 | 500 | 370 | 18.0% |
+| nestjs/nest 最新 100 則 | 100 | 32 | 6.0% |
+
+最新 100 則裡有 68 則是 GitHub Copilot。全歷史則由真人維護者主導：`kamilmysliwiec` 654 則、
+`micalevisk` 192、`jmcdo29` 132。所以低留存是 bot 佔比高，不是篩選失效。
+
+這對取材策略有兩個影響。第一，bot 導入愈深的 repo，近期資料愈沒價值，語料的價值集中在較早的
+歷史，所以一定要抓完整頁數而不是只抓前幾頁。第二，`nestjs/nest` 篩完只剩 542 則，spec 擔心的
+「NestJS 層語料太薄」在篩選後更明顯，`nestjs/typeorm`、`nestjs/swagger`、`prisma/prisma` 這三個
+補充 repo 不是可選項。
+
+判斷篩選是否正常的方式不是看留存率，而是看第 1 步濾掉的是誰：把該 repo 的留言者分布印出來，
+確認被濾掉的確實是 bot 帳號與已刪除帳號。留存率本身只當作記錄。
 
 - [ ] **Step 3: 跑完全部目標 repo**
 
