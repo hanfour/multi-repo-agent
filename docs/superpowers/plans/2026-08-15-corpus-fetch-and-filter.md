@@ -18,6 +18,8 @@
 - 打到 rate limit 要停下來印出還剩幾頁未抓，不得靜默截斷。
 - 所有新檔案要通過 `make lint`（shellcheck `-S warning`）。
 - 測試檔放 `tests/test_*.sh`，由 `bash test.sh` 自動發現，結尾用既有慣例：`echo "---"; echo "Passed: $pass"; echo "Failed: $errors"; exit $((errors > 0 ? 1 : 0))`。
+- 每新增一個 `lib/*.sh`，都要把它加進 `bin/mra.sh` 的 `MRA_LIBS` 清單。`tests/test_lib_loader.sh` 會驗這件事（issue #39：`MRA_LIBS` 是明確排序清單而不是 glob，忘記註冊的 lib 會在執行期靜默缺席）。加在 review 那一區之後即可，這些檔案都是純函式定義，載入順序無關。
+- 不要用 `awk -v var="$值"` 傳任意字串。awk 的 `-v` 會先處理反斜線跳脫，`rails\/rails`（12 位元組）會被收合成 `rails/rails`（11 位元組）而誤配。改用 `var="$值" awk '... ENVIRON["var"] ...'`。含換行的值還會讓 awk 直接 crash。
 
 ---
 
@@ -66,11 +68,27 @@ n_all=$(corpus_targets | wc -l | tr -d ' ')
 n_uniq=$(corpus_targets | cut -f1 | sort -u | wc -l | tr -d ' ')
 eq "repo 不重複" "$n_all" "$n_uniq"
 
-# spec 點名的 repo 都在
-for r in rails/rails microsoft/TypeScript facebook/react prisma/prisma \
-         TanStack/query vuejs/core nestjs/nest vuejs/vue; do
-  if corpus_targets | cut -f1 | grep -qx "$r"; then ok "含 $r"; else fail "缺 $r"; fi
-done
+# spec 點名的 repo 都在，而且各自在對的 layer。
+# 只 grep repo 欄不夠：把 microsoft/TypeScript 標成 vue、vuejs/vue 標成 common 的 mutant
+# 一樣會全過，那個測試等於沒測 layer。所以每一筆都釘死成字面值。
+check_pair() {
+  local repo="$1" want="$2" got
+  got="$(corpus_targets | awk -F'\t' -v r="$repo" '$1 == r { print $2 }')"
+  eq "$repo → $want" "$want" "$got"
+}
+check_pair microsoft/TypeScript common
+check_pair nestjs/nest          nestjs
+check_pair nestjs/typeorm       nestjs
+check_pair nestjs/swagger       nestjs
+check_pair prisma/prisma        nestjs
+check_pair rails/rails          rails
+check_pair facebook/react       react
+check_pair TanStack/query       react
+check_pair vuejs/vue            vue
+check_pair vuejs/core           vue
+
+# 清單長度也釘住，避免有人多加一筆而沒人發現
+eq "共 10 個 repo" "10" "$(corpus_targets | wc -l | tr -d ' ')"
 
 # NestJS 語料補強：nestjs 層至少四個 repo
 n_nest=$(corpus_targets | awk -F'\t' '$2=="nestjs"' | wc -l | tr -d ' ')
@@ -126,9 +144,12 @@ vuejs/core	vue
 EOF
 }
 
+# repo 名稱透過 ENVIRON 傳給 awk，不用 -v。awk 的 -v 會先處理反斜線跳脫：
+# `rails\/rails` 會被收合成 `rails/rails` 而誤配成功，含換行的值還會讓 awk crash。
 corpus_layer_of() {
   local repo="$1"
-  corpus_targets | awk -F'\t' -v r="$repo" '$1 == r { print $2; found = 1 } END { exit !found }'
+  corpus_targets \
+    | CORPUS_REPO="$repo" awk -F'\t' '$1 == ENVIRON["CORPUS_REPO"] { print $2; found = 1 } END { exit !found }'
 }
 ```
 
