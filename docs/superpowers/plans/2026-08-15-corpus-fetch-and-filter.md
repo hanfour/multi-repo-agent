@@ -1059,7 +1059,7 @@ bash scripts/build-corpus.sh
 
 - [ ] **Step 4: 記錄結果**
 
-建立 `docs/superpowers/notes/2026-corpus-retention.md`，貼上 `retention.tsv` 內容，並針對留存率落在 30% 到 50% 之外的 repo 各寫一句原因。這份數字是階段三挑選主題群大小的依據。
+建立 `docs/superpowers/notes/2026-corpus-retention.md`，貼上 `retention.tsv` 內容。逐一檢查每個 repo 第 1 步濾掉的留言者，確認都是 bot 帳號與已刪除帳號（`.user` 為 null），無誤則篩選正常。
 
 - [ ] **Step 5: Commit**
 
