@@ -32,9 +32,37 @@ def has_prose:
 # 第一步同時濾掉 bot 與「無法歸屬」的意見（帳號已刪除，.user 是 null）。留存欄位
 # 沿用 n1_nobot 這個名字，改名會牽動 Task 4 的表頭與 Task 6 的測試，不值得。
 corpus_filter_bots()    { jq "$_CORPUS_JQ_DEFS [ .[] | select(has_login and (is_bot | not)) ]"; }
-corpus_filter_senior()  { jq "$_CORPUS_JQ_DEFS [ .[] | select(senior) ]"; }
+
+# 第 2 步的完整子句（見 docs/superpowers/specs/2026-08-14-team-code-review-ruleset-design.md
+# 第 102 行）：association 判準通過，或者 login 落在呼叫端傳入的「該 repo 留言數前
+# n 名」名單裡。第二個參數是可選的 JSON 陣列；不帶時 $top 預設空陣列，
+# any(. == $u) 恆為 false，行為與只做 association 判準時逐位元組相同——舊呼叫端
+# 與既有測試不用改。
+corpus_filter_senior() {
+  local top_json="${1:-[]}"
+  jq --argjson top "$top_json" \
+    "$_CORPUS_JQ_DEFS [ .[] | select(senior or (has_login and (.user.login as \$u | \$top | any(. == \$u)))) ]"
+}
+
 corpus_filter_quality() { jq "$_CORPUS_JQ_DEFS [ .[] | select(quality) ]"; }
 corpus_filter_prose()   { jq "$_CORPUS_JQ_DEFS [ .[] | select(has_prose) ]"; }
+
+# spec 第 2 步「該 repo 留言數前 n 名」子句的名單來源。輸入是 stdin 上的留言 JSON
+# 陣列（不是快取檔——呼叫端手上已經有合併好的陣列，用 stdin 才能單獨測試），輸出
+# 是依留言數由多到少排序的前 n 名 login 陣列，n 預設 15。沿用既有的 has_login／
+# is_bot 定義排掉無法歸屬（.user 是 null）與機器人的留言，bot 因此永遠不可能佔到
+# 前 n 名的名額。留言數並列時取 login 字母序在前的，同一份輸入重跑排序都一樣。
+corpus_top_commenters() {
+  local n="${1:-15}"
+  jq --argjson n "$n" "$_CORPUS_JQ_DEFS
+    [ .[] | select(has_login and (is_bot | not)) | .user.login ]
+    | group_by(.)
+    | map({login: .[0], count: length})
+    | sort_by([-.count, .login])
+    | .[0:\$n]
+    | map(.login)
+  "
+}
 
 # diff_hunk 是整份語料最有價值的欄位：它讓每則意見自帶被批評的那段程式碼。
 corpus_project() {
@@ -66,7 +94,7 @@ corpus_project() {
 #   2. jq 解析失敗的退出碼是 5，不是 1，所以用 `|| return 1` 判斷而不是比對數值。
 corpus_filter_all() {
   local repo="$1" layer="$2"
-  local s0 s1 s2 s3 s4
+  local s0 s1 s2 s3 s4 top
   s0="$(cat)"
 
   # 先驗輸入。壞掉的輸入要當場失敗，而不是讓四個 jq 各噴一次錯之後回 0。
@@ -77,7 +105,14 @@ corpus_filter_all() {
 
   s1="$(printf '%s' "$s0" | corpus_filter_bots)" \
     || { printf 'FILTER_STAGE_FAILED\t%s\tbots\n' "$repo" >&2; return 1; }
-  s2="$(printf '%s' "$s1" | corpus_filter_senior)" \
+  # spec 第 2 步的完整子句：association 判準之外還要補「該 repo 留言數前 15
+  # 名」。前 15 名從第 1 步之前的原始輸入 s0 算，不是從已經濾掉 bot 的 s1
+  # 算——兩者結果其實一樣（corpus_top_commenters 自己也排掉 bot 與無法歸屬的
+  # 留言），但語意上這是「該 repo 的留言數排名」，不是「該 repo 過完某一階段
+  # 之後的留言數排名」。
+  top="$(printf '%s' "$s0" | corpus_top_commenters)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\ttop_commenters\n' "$repo" >&2; return 1; }
+  s2="$(printf '%s' "$s1" | corpus_filter_senior "$top")" \
     || { printf 'FILTER_STAGE_FAILED\t%s\tsenior\n' "$repo" >&2; return 1; }
   s3="$(printf '%s' "$s2" | corpus_filter_quality)" \
     || { printf 'FILTER_STAGE_FAILED\t%s\tquality\n' "$repo" >&2; return 1; }

@@ -57,6 +57,11 @@ corpus_filter_active() {
 }
 
 # 錯誤傳遞的規則與 corpus_filter_all 相同，理由見那邊的註解。
+#
+# 這裡刻意不疊 corpus_filter_all 新加的「該 repo 留言數前 15 名」子句：上面
+# corpus_filter_active 的第 2 步本來就是依「近一年活躍留言數」挑人，再疊一層
+# 「留言數前 15 名」是在同一個訊號上再篩一次，篩不出新東西，只會讓兩個判準的
+# 交互作用變得難懂。
 corpus_filter_all_internal() {
   local repo="$1" layer="$2" reviewers="$3"
   local s0 s1 s2 s3 s4
