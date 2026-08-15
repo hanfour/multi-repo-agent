@@ -43,6 +43,28 @@ rm -f "$err"
 
 # 空輸入不炸
 eq "空陣列進出都是 0" "0" "$(printf '[]' | corpus_filter_bots | corpus_filter_senior | corpus_filter_quality | corpus_filter_prose | n)"
+eq "空陣列走全管線退出 0" "0" "$(printf '[]' | corpus_filter_all r l >/dev/null 2>&1; echo $?)"
+
+# 壞掉的輸入必須失敗，不能靜默回 0。下游 build-corpus.sh 用這個退出碼判斷
+# 該 repo 算不算失敗，回 0 的話壞資料會被當成「篩完 0 筆、一切正常」。
+err2="$(mktemp)"
+printf '{not valid json' | corpus_filter_all rails/rails rails >/dev/null 2>"$err2"; rc=$?
+eq "壞輸入退出 1" "1" "$rc"
+case "$(cat "$err2")" in FILTER_INPUT_INVALID*) ok "印出 FILTER_INPUT_INVALID" ;; *) fail "缺 FILTER_INPUT_INVALID：$(cat "$err2")" ;; esac
+case "$(cat "$err2")" in *RETENTION*) fail "壞輸入不該印 RETENTION" ;; *) ok "壞輸入不印 RETENTION" ;; esac
+
+# 非陣列的合法 JSON 也算壞輸入
+printf '{"a":1}' | corpus_filter_all rails/rails rails >/dev/null 2>"$err2"; rc=$?
+eq "JSON 物件也退出 1" "1" "$rc"
+
+# 中間階段失敗要往上傳。把 corpus_filter_quality 換成必定失敗的版本。
+orig_quality="$(declare -f corpus_filter_quality)"
+corpus_filter_quality() { return 5; }
+printf '[]' | corpus_filter_all rails/rails rails >/dev/null 2>"$err2"; rc=$?
+eq "階段失敗退出 1" "1" "$rc"
+case "$(cat "$err2")" in *FILTER_STAGE_FAILED*quality*) ok "指出是 quality 階段失敗" ;; *) fail "缺階段名：$(cat "$err2")" ;; esac
+eval "$orig_quality"
+rm -f "$err2"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
