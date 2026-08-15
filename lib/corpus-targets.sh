@@ -24,7 +24,10 @@ vuejs/core	vue
 EOF
 }
 
+# repo 名稱透過 ENVIRON 傳給 awk，不用 -v。awk 的 -v 會先處理反斜線跳脫：
+# `rails\/rails` 會被收合成 `rails/rails` 而誤配成功，含換行的值還會讓 awk crash。
 corpus_layer_of() {
   local repo="$1"
-  corpus_targets | awk -F'\t' -v r="$repo" '$1 == r { print $2; found = 1 } END { exit !found }'
+  corpus_targets \
+    | CORPUS_REPO="$repo" awk -F'\t' '$1 == ENVIRON["CORPUS_REPO"] { print $2; found = 1 } END { exit !found }'
 }

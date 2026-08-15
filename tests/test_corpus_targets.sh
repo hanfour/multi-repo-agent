@@ -25,11 +25,27 @@ n_all=$(corpus_targets | wc -l | tr -d ' ')
 n_uniq=$(corpus_targets | cut -f1 | sort -u | wc -l | tr -d ' ')
 eq "repo 不重複" "$n_all" "$n_uniq"
 
-# spec 點名的 repo 都在
-for r in rails/rails microsoft/TypeScript facebook/react prisma/prisma \
-         TanStack/query vuejs/core nestjs/nest vuejs/vue; do
-  if corpus_targets | cut -f1 | grep -qx "$r"; then ok "含 $r"; else fail "缺 $r"; fi
-done
+# spec 點名的 repo 都在，而且各自在對的 layer。
+# 只 grep repo 欄不夠：把 microsoft/TypeScript 標成 vue、vuejs/vue 標成 common 的 mutant
+# 一樣會全過，那個測試等於沒測 layer。所以每一筆都釘死成字面值。
+check_pair() {
+  local repo="$1" want="$2" got
+  got="$(corpus_targets | awk -F'\t' -v r="$repo" '$1 == r { print $2 }')"
+  eq "$repo → $want" "$want" "$got"
+}
+check_pair microsoft/TypeScript common
+check_pair nestjs/nest          nestjs
+check_pair nestjs/typeorm       nestjs
+check_pair nestjs/swagger       nestjs
+check_pair prisma/prisma        nestjs
+check_pair rails/rails          rails
+check_pair facebook/react       react
+check_pair TanStack/query       react
+check_pair vuejs/vue            vue
+check_pair vuejs/core           vue
+
+# 清單長度也釘住，避免有人多加一筆而沒人發現
+eq "共 10 個 repo" "10" "$(corpus_targets | wc -l | tr -d ' ')"
 
 # NestJS 語料補強：nestjs 層至少四個 repo
 n_nest=$(corpus_targets | awk -F'\t' '$2=="nestjs"' | wc -l | tr -d ' ')
