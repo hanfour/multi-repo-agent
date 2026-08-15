@@ -6,6 +6,11 @@ MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export MRA_CORPUS_DIR="$TMP/cache"
+# TMPDIR 指到本測試專屬的目錄。下面驗「mv 失敗不洩漏暫存檔」是用數 tmp.* 檔案做的，
+# 指向共用的 TMPDIR 會數到其他行程的檔案（實測機器上有 321 個），變成間歇性紅燈。
+# 這個套件會 gate 後面每一個 task，間歇性紅燈的代價遠高於這兩行。
+export TMPDIR="$TMP/tmphome"
+mkdir -p "$TMPDIR"
 
 # --- 假造的 gh：依 GH_FAKE_MODE 改變行為，呼叫次數記在 GH_CALL_LOG
 mkdir -p "$TMP/bin"
