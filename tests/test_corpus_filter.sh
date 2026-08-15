@@ -57,13 +57,22 @@ case "$(cat "$err2")" in *RETENTION*) fail "壞輸入不該印 RETENTION" ;; *) 
 printf '{"a":1}' | corpus_filter_all rails/rails rails >/dev/null 2>"$err2"; rc=$?
 eq "JSON 物件也退出 1" "1" "$rc"
 
-# 中間階段失敗要往上傳。把 corpus_filter_quality 換成必定失敗的版本。
-orig_quality="$(declare -f corpus_filter_quality)"
-corpus_filter_quality() { return 5; }
-printf '[]' | corpus_filter_all rails/rails rails >/dev/null 2>"$err2"; rc=$?
-eq "階段失敗退出 1" "1" "$rc"
-case "$(cat "$err2")" in *FILTER_STAGE_FAILED*quality*) ok "指出是 quality 階段失敗" ;; *) fail "缺階段名：$(cat "$err2")" ;; esac
-eval "$orig_quality"
+# 四個階段各自驗一次失敗會往上傳，而且錯誤訊息要指得出是哪一階段。
+#
+# 不要只測其中一個階段。守衛寫成 `local s1="$(...)" || {...}` 時 $? 恆為 0、守衛變成
+# 死碼，只測 quality 的話另外三個階段被這樣寫也不會有人發現。實測過：只測 quality
+# 時，把 bots 階段折成 local 一行寫法，整套仍然全綠。
+for stage in bots senior quality prose; do
+  orig_fn="$(declare -f "corpus_filter_$stage")"
+  eval "corpus_filter_$stage() { return 5; }"
+  printf '[]' | corpus_filter_all rails/rails rails >/dev/null 2>"$err2"; rc=$?
+  eq "$stage 階段失敗退出 1" "1" "$rc"
+  case "$(cat "$err2")" in
+    *"FILTER_STAGE_FAILED"*"$stage"*) ok "$stage 階段名有印出" ;;
+    *) fail "$stage 缺階段名：$(cat "$err2")" ;;
+  esac
+  eval "$orig_fn"
+done
 rm -f "$err2"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
