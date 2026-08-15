@@ -24,7 +24,10 @@ done
 
 RETENTION="$(corpus_cache_dir)/retention.tsv"
 mkdir -p "$(corpus_cache_dir)"
-[[ -f "$RETENTION" ]] || printf 'repo\tn0_raw\tn1_nobot\tn2_senior\tn3_quality\tn4_prose\n' > "$RETENTION"
+# 用 -s 不用 -f：0 位元組的 retention.tsv 檔案存在但沒有表頭，-f 判斷會誤判
+# 成「已經有表頭」而跳過補寫，這個檔案的第一行就會是資料列。retention.tsv 是
+# Task 5 的驗收依據，第一行格式錯了下游會整份誤讀。
+[[ -s "$RETENTION" ]] || printf 'repo\tn0_raw\tn1_nobot\tn2_senior\tn3_quality\tn4_prose\n' > "$RETENTION"
 
 if [[ -n "$ONLY_REPO" ]]; then
   if ! layer="$(corpus_layer_of "$ONLY_REPO")"; then
@@ -95,9 +98,17 @@ while IFS=$'\t' read -r repo layer; do
     # `grep -v "^$repo\t"`：repo 名稱會被當成正規表示式，`acme/nest-monorepo-2.0`
     # 的那個點會匹配任意字元，連 `acme/nest-monorepo-2X0` 的列一起刪掉。那個名字
     # 就在 Task 6 的自家清單裡。ENVIRON 的理由同 corpus_layer_of。
-    CORPUS_REPO="$repo" awk -F'\t' 'NR == 1 || $1 != ENVIRON["CORPUS_REPO"]' \
-      "$RETENTION" > "$RETENTION.tmp"
-    mv "$RETENTION.tmp" "$RETENTION"
+    # mv 前一定要檢查 awk 的退出碼。跟 corpus_fetch_page 的 mv 是同一個道理：
+    # awk 失敗（檔案消失、I/O 錯誤）會讓 $RETENTION.tmp 是截斷或空的，不檢查
+    # 直接 mv 的話，一份寫壞的暫存檔會蓋掉原本正常的 retention.tsv，且不留痕跡。
+    if CORPUS_REPO="$repo" awk -F'\t' 'NR == 1 || $1 != ENVIRON["CORPUS_REPO"]' \
+         "$RETENTION" > "$RETENTION.tmp"; then
+      mv "$RETENTION.tmp" "$RETENTION"
+    else
+      echo "留存報告去重失敗，保留原檔：$repo" >&2
+      rm -f "$RETENTION.tmp" "$err"
+      rc=1; continue
+    fi
     sed 's/^RETENTION\t//' "$err" >> "$RETENTION"
     rm -f "$err"
   fi

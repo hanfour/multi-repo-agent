@@ -53,9 +53,20 @@ eq "不相干的列一：還在" "1" "$(grep -c '^zz/decoy-one	' "$r")"
 eq "不相干的列二：還在" "1" "$(grep -c '^zz/decoy-two	' "$r")"
 eq "表頭還在且只有一行" "1" "$(grep -c '^repo	' "$r")"
 
+# retention.tsv 是 0 位元組時要補回表頭。用 -f 判斷的話檔案存在就跳過補表頭，
+# 產出的第一行會是資料列，而這個檔案是階段一的驗收依據。
+: > "$r"
+bash "$MRA_DIR/scripts/build-corpus.sh" --repo rails/rails >/dev/null 2>&1
+eq "空檔會補回表頭" "repo" "$(head -1 "$r" | cut -f1)"
+eq "補表頭後資料列還在" "1" "$(grep -c '^rails/rails	' "$r")"
+
 # repo 名稱含正規表示式 metachar 的回歸測試不在這裡：Task 4 的目標清單裡沒有
 # 任何含 metachar 的名稱，這條路徑在本 task 的 CLI 上觸發不到。真正會踩到的是
 # Task 6 的 acme/nest-monorepo-2.0，測試放在那邊（見 Task 6 的對應區塊）。
+#
+# awk 裡的 `NR == 1` 也測不到，這是預期的不是缺口：表頭第一欄是字面值 "repo"，
+# 而 --repo 的值一定是 owner/name 帶斜線，兩者永遠不相等，所以拿掉 NR == 1
+# 表頭仍然會留著。那一項是防禦性的，留著但不必為它設計測試。
 
 # 未知 repo：拒絕並退出非 0
 if bash "$MRA_DIR/scripts/build-corpus.sh" --repo no/such-repo >/dev/null 2>&1; then
