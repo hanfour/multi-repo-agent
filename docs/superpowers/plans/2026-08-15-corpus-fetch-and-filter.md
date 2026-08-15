@@ -560,6 +560,28 @@ rm -f "$err"
 
 # 空輸入不炸
 eq "空陣列進出都是 0" "0" "$(printf '[]' | corpus_filter_bots | corpus_filter_senior | corpus_filter_quality | corpus_filter_prose | n)"
+eq "空陣列走全管線退出 0" "0" "$(printf '[]' | corpus_filter_all r l >/dev/null 2>&1; echo $?)"
+
+# 壞掉的輸入必須失敗，不能靜默回 0。下游 build-corpus.sh 用這個退出碼判斷
+# 該 repo 算不算失敗，回 0 的話壞資料會被當成「篩完 0 筆、一切正常」。
+err2="$(mktemp)"
+printf '{not valid json' | corpus_filter_all rails/rails rails >/dev/null 2>"$err2"; rc=$?
+eq "壞輸入退出 1" "1" "$rc"
+case "$(cat "$err2")" in FILTER_INPUT_INVALID*) ok "印出 FILTER_INPUT_INVALID" ;; *) fail "缺 FILTER_INPUT_INVALID：$(cat "$err2")" ;; esac
+case "$(cat "$err2")" in *RETENTION*) fail "壞輸入不該印 RETENTION" ;; *) ok "壞輸入不印 RETENTION" ;; esac
+
+# 非陣列的合法 JSON 也算壞輸入
+printf '{"a":1}' | corpus_filter_all rails/rails rails >/dev/null 2>"$err2"; rc=$?
+eq "JSON 物件也退出 1" "1" "$rc"
+
+# 中間階段失敗要往上傳。把 corpus_filter_quality 換成必定失敗的版本。
+orig_quality="$(declare -f corpus_filter_quality)"
+corpus_filter_quality() { return 5; }
+printf '[]' | corpus_filter_all rails/rails rails >/dev/null 2>"$err2"; rc=$?
+eq "階段失敗退出 1" "1" "$rc"
+case "$(cat "$err2")" in *FILTER_STAGE_FAILED*quality*) ok "指出是 quality 階段失敗" ;; *) fail "缺階段名：$(cat "$err2")" ;; esac
+eval "$orig_quality"
+rm -f "$err2"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
@@ -625,14 +647,33 @@ corpus_project() {
 }
 
 # stdout：最終陣列。stderr：一行 TSV 留存數，讓呼叫端能記錄每一步濾掉多少。
+# 任何一階段失敗就回 1，不得回 0。下游 scripts/build-corpus.sh 要靠這個退出碼決定
+# 該 repo 算不算失敗；吃掉錯誤的話，輸入壞掉或 GitHub schema 改變會變成「篩完 0 筆、
+# 一切正常」，正是這份設計要避免的 false-green。
+#
+# 兩個 bash 細節，不要「整理」掉：
+#   1. `local s0 s1 …` 必須單獨一行宣告，指派另外寫。寫成 `local s1="$(...)"` 的話，
+#      $? 拿到的是 local 自己的退出碼（永遠 0），命令替換的失敗會被吞掉。
+#   2. jq 解析失敗的退出碼是 5，不是 1，所以用 `|| return 1` 判斷而不是比對數值。
 corpus_filter_all() {
   local repo="$1" layer="$2"
   local s0 s1 s2 s3 s4
   s0="$(cat)"
-  s1="$(printf '%s' "$s0" | corpus_filter_bots)"
-  s2="$(printf '%s' "$s1" | corpus_filter_senior)"
-  s3="$(printf '%s' "$s2" | corpus_filter_quality)"
-  s4="$(printf '%s' "$s3" | corpus_filter_prose)"
+
+  # 先驗輸入。壞掉的輸入要當場失敗，而不是讓四個 jq 各噴一次錯之後回 0。
+  if ! printf '%s' "$s0" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    printf 'FILTER_INPUT_INVALID\t%s\n' "$repo" >&2
+    return 1
+  fi
+
+  s1="$(printf '%s' "$s0" | corpus_filter_bots)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tbots\n' "$repo" >&2; return 1; }
+  s2="$(printf '%s' "$s1" | corpus_filter_senior)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tsenior\n' "$repo" >&2; return 1; }
+  s3="$(printf '%s' "$s2" | corpus_filter_quality)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tquality\n' "$repo" >&2; return 1; }
+  s4="$(printf '%s' "$s3" | corpus_filter_prose)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tprose\n' "$repo" >&2; return 1; }
   printf 'RETENTION\t%s\t%s\t%s\t%s\t%s\t%s\n' "$repo" \
     "$(printf '%s' "$s0" | jq 'length')" \
     "$(printf '%s' "$s1" | jq 'length')" \
@@ -1013,14 +1054,25 @@ corpus_filter_active() {
   jq --argjson active "$reviewers" '[ .[] | select(.user.login as $u | $active | any(. == $u)) ]'
 }
 
+# 錯誤傳遞的規則與 corpus_filter_all 相同，理由見那邊的註解。
 corpus_filter_all_internal() {
   local repo="$1" layer="$2" reviewers="$3"
   local s0 s1 s2 s3 s4
   s0="$(cat)"
-  s1="$(printf '%s' "$s0" | corpus_filter_bots)"
-  s2="$(printf '%s' "$s1" | corpus_filter_active "$reviewers")"
-  s3="$(printf '%s' "$s2" | corpus_filter_quality)"
-  s4="$(printf '%s' "$s3" | corpus_filter_prose)"
+
+  if ! printf '%s' "$s0" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    printf 'FILTER_INPUT_INVALID\t%s\n' "$repo" >&2
+    return 1
+  fi
+
+  s1="$(printf '%s' "$s0" | corpus_filter_bots)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tbots\n' "$repo" >&2; return 1; }
+  s2="$(printf '%s' "$s1" | corpus_filter_active "$reviewers")" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tactive\n' "$repo" >&2; return 1; }
+  s3="$(printf '%s' "$s2" | corpus_filter_quality)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tquality\n' "$repo" >&2; return 1; }
+  s4="$(printf '%s' "$s3" | corpus_filter_prose)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tprose\n' "$repo" >&2; return 1; }
   printf 'RETENTION\t%s\t%s\t%s\t%s\t%s\t%s\n' "$repo" \
     "$(printf '%s' "$s0" | jq 'length')" \
     "$(printf '%s' "$s1" | jq 'length')" \
