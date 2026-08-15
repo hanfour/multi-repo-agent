@@ -9,3 +9,6 @@ site/node_modules/
 site/.vitepress/dist/
 site/.vitepress/cache/
 .mra-test-logs/
+
+# superpowers SDD 工作區(ledger / brief / review package),不進版控
+.superpowers/
