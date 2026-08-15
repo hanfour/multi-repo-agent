@@ -786,9 +786,20 @@ eq "不相干的列一：還在" "1" "$(grep -c '^zz/decoy-one	' "$r")"
 eq "不相干的列二：還在" "1" "$(grep -c '^zz/decoy-two	' "$r")"
 eq "表頭還在且只有一行" "1" "$(grep -c '^repo	' "$r")"
 
+# retention.tsv 是 0 位元組時要補回表頭。用 -f 判斷的話檔案存在就跳過補表頭，
+# 產出的第一行會是資料列，而這個檔案是階段一的驗收依據。
+: > "$r"
+bash "$MRA_DIR/scripts/build-corpus.sh" --repo rails/rails >/dev/null 2>&1
+eq "空檔會補回表頭" "repo" "$(head -1 "$r" | cut -f1)"
+eq "補表頭後資料列還在" "1" "$(grep -c '^rails/rails	' "$r")"
+
 # repo 名稱含正規表示式 metachar 的回歸測試不在這裡：Task 4 的目標清單裡沒有
 # 任何含 metachar 的名稱，這條路徑在本 task 的 CLI 上觸發不到。真正會踩到的是
 # Task 6 的 acme/nest-monorepo-2.0，測試放在那邊（見 Task 6 的對應區塊）。
+#
+# awk 裡的 `NR == 1` 也測不到，這是預期的不是缺口：表頭第一欄是字面值 "repo"，
+# 而 --repo 的值一定是 owner/name 帶斜線，兩者永遠不相等，所以拿掉 NR == 1
+# 表頭仍然會留著。那一項是防禦性的，留著但不必為它設計測試。
 
 # 未知 repo：拒絕並退出非 0
 if bash "$MRA_DIR/scripts/build-corpus.sh" --repo no/such-repo >/dev/null 2>&1; then
@@ -863,7 +874,9 @@ done
 
 RETENTION="$(corpus_cache_dir)/retention.tsv"
 mkdir -p "$(corpus_cache_dir)"
-[[ -f "$RETENTION" ]] || printf 'repo\tn0_raw\tn1_nobot\tn2_senior\tn3_quality\tn4_prose\n' > "$RETENTION"
+# 用 -s 不是 -f：0 位元組的檔案存在但沒有表頭，用 -f 判斷會跳過補表頭這一步，
+# 之後產出的 retention.tsv 第一行會是資料列。
+[[ -s "$RETENTION" ]] || printf 'repo\tn0_raw\tn1_nobot\tn2_senior\tn3_quality\tn4_prose\n' > "$RETENTION"
 
 if [[ -n "$ONLY_REPO" ]]; then
   if ! layer="$(corpus_layer_of "$ONLY_REPO")"; then
@@ -933,9 +946,16 @@ while IFS=$'\t' read -r repo layer; do
     # `grep -v "^$repo\t"`：repo 名稱會被當成正規表示式，`acme/nest-monorepo-2.0`
     # 的那個點會匹配任意字元，連 `acme/nest-monorepo-2X0` 的列一起刪掉。那個名字
     # 就在 Task 6 的自家清單裡。ENVIRON 的理由同 corpus_layer_of。
-    CORPUS_REPO="$repo" awk -F'\t' 'NR == 1 || $1 != ENVIRON["CORPUS_REPO"]' \
-      "$RETENTION" > "$RETENTION.tmp"
-    mv "$RETENTION.tmp" "$RETENTION"
+    # awk 失敗時不要動原檔。retention.tsv 是階段一的驗收依據，被截斷的 tmp 蓋掉
+    # 就沒有第二份。同 corpus_fetch_page 的 mv：寫入型的動作一律檢查退出碼。
+    if CORPUS_REPO="$repo" awk -F'\t' 'NR == 1 || $1 != ENVIRON["CORPUS_REPO"]' \
+         "$RETENTION" > "$RETENTION.tmp"; then
+      mv "$RETENTION.tmp" "$RETENTION"
+    else
+      echo "留存報告去重失敗，保留原檔：$repo" >&2
+      rm -f "$RETENTION.tmp"
+      rc=1; continue
+    fi
     sed 's/^RETENTION\t//' "$err" >> "$RETENTION"
     rm -f "$err"
   fi
