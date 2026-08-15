@@ -12,10 +12,12 @@ eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] go
 n()    { jq 'length'; }
 ids()  { jq -c '[.[].id]'; }
 
-eq "fixture 九筆" "9" "$(n < "$FX")"
+eq "fixture 十筆" "10" "$(n < "$FX")"
 
 eq "1 去 bot 留 7"    "7" "$(corpus_filter_bots < "$FX" | n)"
-eq "1 濾掉 id 1,2"    "[3,4,5,6,7,8,9]" "$(corpus_filter_bots < "$FX" | ids)"
+# id 10 的 .user 是 null（帳號已刪除），和兩個 bot 一起在第 1 步被濾掉。
+# 沒有這層守衛的話 is_bot 會對 null 做 ascii_downcase 而讓整個 jq 中止。
+eq "1 濾掉 bot 與無法歸屬" "[3,4,5,6,7,8,9]" "$(corpus_filter_bots < "$FX" | ids)"
 
 eq "2 資深留 6"       "6" "$(corpus_filter_bots < "$FX" | corpus_filter_senior | n)"
 eq "2 濾掉 id 3"      "[4,5,6,7,8,9]" "$(corpus_filter_bots < "$FX" | corpus_filter_senior | ids)"
@@ -38,7 +40,7 @@ eq "投影帶 reviewer"    "member1"           "$(printf '%s' "$proj" | jq -r '.
 err="$(mktemp)"
 outn="$(corpus_filter_all rails/rails rails < "$FX" 2>"$err" | n)"
 eq "全管線留 4" "4" "$outn"
-eq "留存數 TSV" "RETENTION	rails/rails	9	7	6	5	4" "$(cat "$err")"
+eq "留存數 TSV" "RETENTION	rails/rails	10	7	6	5	4" "$(cat "$err")"
 rm -f "$err"
 
 # 空輸入不炸

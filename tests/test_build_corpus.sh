@@ -37,7 +37,7 @@ eq "帶 layer"    "rails" "$(jq -r '.[0].layer' "$f")"
 
 r="$TMP/cache/retention.tsv"
 if [[ -s "$r" ]]; then ok "retention.tsv 產出"; else fail "retention.tsv 沒產出"; fi
-eq "留存數那行" "rails/rails	9	7	6	5	4" "$(grep '^rails/rails' "$r")"
+eq "留存數那行" "rails/rails	10	7	6	5	4" "$(grep '^rails/rails' "$r")"
 
 # 重跑：不重複追加同一個 repo 的留存列
 bash "$MRA_DIR/scripts/build-corpus.sh" --repo rails/rails >/dev/null 2>&1

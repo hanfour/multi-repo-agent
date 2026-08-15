@@ -6,6 +6,12 @@
 
 # shellcheck disable=SC2016
 _CORPUS_JQ_DEFS='
+# GitHub 帳號被刪除後，該筆 review comment 的 .user 會是 null。真實資料上有：
+# nestjs/nest 的 2,121 筆裡有 3 筆。沒有 has_login 這層守衛的話，is_bot 對 null 做
+# ascii_downcase 會讓整個 jq 以 `explode input must be a string` 中止，整個 repo 的
+# 語料一筆都拿不到。
+def has_login:
+  (.user | type) == "object" and ((.user.login | type) == "string");
 def is_bot:
   (.user.login | ascii_downcase) as $u
   | ($u | test("\\[bot\\]$"))
@@ -23,7 +29,9 @@ def has_prose:
 # 註：不要改成 gsub("```suggestion.*?```"; ""; "s")。jq 的 "s" flag 不會讓 `.`
 # 匹配換行，suggestion 區塊會整段留著，只有 suggestion 沒有說明的意見就濾不掉。
 
-corpus_filter_bots()    { jq "$_CORPUS_JQ_DEFS [ .[] | select(is_bot | not) ]"; }
+# 第一步同時濾掉 bot 與「無法歸屬」的意見（帳號已刪除，.user 是 null）。留存欄位
+# 沿用 n1_nobot 這個名字，改名會牽動 Task 4 的表頭與 Task 6 的測試，不值得。
+corpus_filter_bots()    { jq "$_CORPUS_JQ_DEFS [ .[] | select(has_login and (is_bot | not)) ]"; }
 corpus_filter_senior()  { jq "$_CORPUS_JQ_DEFS [ .[] | select(senior) ]"; }
 corpus_filter_quality() { jq "$_CORPUS_JQ_DEFS [ .[] | select(quality) ]"; }
 corpus_filter_prose()   { jq "$_CORPUS_JQ_DEFS [ .[] | select(has_prose) ]"; }
