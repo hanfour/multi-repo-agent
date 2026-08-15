@@ -13,6 +13,17 @@ cat > "$TMP/bin/gh" <<'SHIM'
 case "$*" in
   *rate_limit*) printf '%s' "${GH_FAKE_RATE:-5000}"; exit 0 ;;
   *--include*)  printf 'HTTP/2 200\nLink: <https://x?page=2>; rel="next", <https://x?page=1>; rel="last"\n\n'; exit 0 ;;
+esac
+# corpus_active_reviewers (--internal) calls `gh api ... --jq EXPR`. Apply the
+# expression with real jq against the fixture, same as real gh would.
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [[ "${args[$i]}" == "--jq" && "$*" == *pulls/comments* ]]; then
+    jq -r "${args[$((i + 1))]}" "$GH_FAKE_BODY"
+    exit 0
+  fi
+done
+case "$*" in
   *pulls/comments*) cat "$GH_FAKE_BODY"; exit 0 ;;
 esac
 exit 1
@@ -100,6 +111,68 @@ if [[ -s "$bad_dir/filtered.json" ]]; then ok "成功時有產出 filtered.json"
 printf '{not valid json' > "$bad_dir/0001.json"
 bash "$MRA_DIR/scripts/build-corpus.sh" --repo TanStack/query --filter-only >/dev/null 2>&1
 if [[ -e "$bad_dir/filtered.json" ]]; then fail "失敗後舊的 filtered.json 還在"; else ok "失敗後移除舊的 filtered.json"; fi
+
+# --internal：抓 + 篩走 corpus_internal_targets / corpus_filter_all_internal，
+# 第 2 步改用活躍留言者而不是 author_association。gh shim 對 --jq 的支援見上方。
+out="$(bash "$MRA_DIR/scripts/build-corpus.sh" --internal --repo acme/rails-app-1 2>&1)"; rc=$?
+eq "internal 退出碼 0" "0" "$rc"
+f_int="$TMP/cache/acme__rails-app-1/filtered.json"
+if [[ -s "$f_int" ]]; then ok "internal filtered.json 產出"; else fail "internal filtered.json 沒產出"; fi
+eq "internal 篩選後 2 筆" "2" "$(jq 'length' "$f_int")"
+eq "internal ids" "[5,9]" "$(jq -c '[.[].id]' "$f_int")"
+eq "internal 帶 layer" "rails" "$(jq -r '.[0].layer' "$f_int")"
+eq "internal 留存數那行" "acme/rails-app-1	10	7	4	3	2" "$(grep '^acme/rails-app-1	' "$r")"
+
+# 未知 repo（不在自家清單）也要拒絕，跟外部版一致
+if bash "$MRA_DIR/scripts/build-corpus.sh" --internal --repo no/such-repo >/dev/null 2>&1; then
+  fail "--internal 未知 repo 應退出非 0"
+else
+  ok "--internal 未知 repo 退出非 0"
+fi
+
+# 留存去重必須是字串比對，這裡走真正的 CLI（不是在測試檔裡重打一遍 awk 運算式）。
+# acme/nest-monorepo-2.0 是 Task 6 自家目標清單裡真實存在的名字；如果腳本裡的去重被
+# 換回 `grep -v "^$repo\t"`，這裡會把 acme/nest-monorepo-2X0 那個不相干的列一起清掉，
+# 而 Task 4 的目標清單裡沒有任何含 metachar 的名稱，這條路徑只有在這裡才踩得到。
+dsp_dir="$TMP/cache/acme__nest-monorepo-2.0"
+mkdir -p "$dsp_dir"
+cp "$GH_FAKE_BODY" "$dsp_dir/0001.json"
+printf 'acme/nest-monorepo-2.0\t1\t1\t1\t1\t1\n' >> "$r"
+printf 'acme/nest-monorepo-2X0\t9\t9\t9\t9\t9\n' >> "$r"
+bash "$MRA_DIR/scripts/build-corpus.sh" --internal --repo acme/nest-monorepo-2.0 --filter-only >/dev/null 2>&1
+eq "metachar CLI：decoy 列還在" "1" "$(grep -c '^acme/nest-monorepo-2X0	' "$r")"
+eq "metachar CLI：自己那列只有一份" "1" "$(grep -c '^acme/nest-monorepo-2\.0	' "$r")"
+
+# Step 5a：留存報告的讀改寫要互斥。--internal 讓外部與自家兩種模式共用同一份
+# retention.tsv：外部語料在一個視窗、自家語料在另一個視窗同時跑是很自然的加速
+# 做法，去重是「讀全檔 → 濾掉自己那列 → 寫回」，交錯執行會靜默丟掉對方剛寫的列。
+#
+# 每個行程只處理一個 repo 的話，去重臨界區太短，兩個行程幾乎不會真的疊在一起，
+# 拿掉鎖也測不出來（實測過：單一 repo 配對跑了 70 輪都沒抓到）。改成兩個行程
+# 各自跑完整份清單（外部 10 個、自家 10 個），每個行程會進臨界區 10 次，才有
+# 夠高的機率真的撞在一起；也更貼近這條鎖真正要防的情境。
+# 沒有鎖的話這條會間歇性失敗，所以連跑 5 次確認穩定。
+lock_ok=1
+for i in 1 2 3 4 5; do
+  printf 'repo\tn0_raw\tn1_nobot\tn2_senior\tn3_quality\tn4_prose\n' > "$r"
+  bash "$MRA_DIR/scripts/build-corpus.sh" >/dev/null 2>&1 &
+  pid1=$!
+  bash "$MRA_DIR/scripts/build-corpus.sh" --internal >/dev/null 2>&1 &
+  pid2=$!
+  wait "$pid1" "$pid2"
+  headers="$(grep -c '^repo	' "$r" 2>/dev/null || true)"
+  total_lines="$(grep -c . "$r" 2>/dev/null || true)"
+  data_rows=$(( ${total_lines:-0} - ${headers:-0} ))
+  if [[ "${headers:-0}" != "1" || "$data_rows" != "20" ]]; then
+    lock_ok=0
+    # ${data_rows} 要用大括號：bash 在某些 ctype/locale 組合下，$data_rows 後面緊接著
+    # 全形字元（如「（」）的第一個位元組會被誤判成識別字元的一部分，讓變數名稱
+    # 變成「data_rows」加一個不存在的位元組而觸發 unbound variable，把整個測試腳本
+    # 中止掉而不是乾淨地印出 FAIL。加大括號明確界定變數名稱邊界可以避開這個問題。
+    fail "並行寫入第 $i 輪：表頭=${headers}，資料列=${data_rows}（預期 20：外部 10 + 自家 10）"
+  fi
+done
+[[ "$lock_ok" == 1 ]] && ok "並行寫入 retention.tsv 五輪皆穩定（表頭唯一、20 列皆在）"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
