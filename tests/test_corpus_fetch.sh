@@ -13,7 +13,10 @@ cat > "$TMP/bin/gh" <<'SHIM'
 #!/usr/bin/env bash
 echo "$*" >> "$GH_CALL_LOG"
 case "$*" in
-  *rate_limit*) printf '%s' "${GH_FAKE_RATE:-5000}"; exit 0 ;;
+  *rate_limit*)
+    # ratefail 模擬認證失敗或網路不通：gh 退出非 0 且不輸出
+    if [[ "${GH_FAKE_MODE:-ok}" == "ratefail" ]]; then exit 1; fi
+    printf '%s' "${GH_FAKE_RATE:-5000}"; exit 0 ;;
   *--include*)
     if [[ "${GH_FAKE_MODE:-ok}" == "nolink" ]]; then printf 'HTTP/2 200\n\n'; exit 0; fi
     printf 'HTTP/2 200\nLink: <https://api.github.com/x?page=2>; rel="next", <https://api.github.com/x?page=%s>; rel="last"\n\n' "${GH_FAKE_LAST:-3}"
@@ -74,6 +77,31 @@ case "$out" in *"	1	3"*) ok "印出停在第 1 頁/共 3 頁" ;; *) fail "缺頁
 out="$(corpus_fetch_repo vuejs/vue 100)"; rc=$?
 eq "正常跑完退出 0" "0" "$rc"
 case "$out" in DONE*fetched=3*) ok "抓了三頁" ;; *) fail "頁數不對：$out" ;; esac
+
+# 有頁面失敗時退出 1。沒有這條的話，把 `[[ "$failed" -eq 0 ]]` 改成無條件
+# `return 0` 仍然會全綠：這是三個退出碼裡唯一沒被涵蓋的一個。
+out="$(GH_FAKE_MODE=fail corpus_fetch_repo TanStack/query 100)"; rc=$?
+eq "有頁面失敗退出 1" "1" "$rc"
+case "$out" in DONE*failed=3*) ok "回報 failed=3" ;; *) fail "失敗數不對：$out" ;; esac
+
+# 額度查不到（不是額度用盡）要印 RATE_CHECK_FAILED，不能印成 RATE_LIMIT_STOP，
+# 否則操作者會以為要等一小時，實際上是認證或網路壞了。
+out="$(GH_FAKE_MODE=ratefail corpus_fetch_repo prisma/prisma 100)"; rc=$?
+eq "額度查不到退出 3" "3" "$rc"
+case "$out" in RATE_CHECK_FAILED*) ok "印出 RATE_CHECK_FAILED" ;; *) fail "應為 RATE_CHECK_FAILED：$out" ;; esac
+if corpus_rate_remaining >/dev/null 2>&1; then ok "額度正常時 corpus_rate_remaining 回 0"; else fail "額度正常時不該失敗"; fi
+eq "額度查不到時無輸出" "" "$(GH_FAKE_MODE=ratefail corpus_rate_remaining 2>/dev/null)"
+
+# mv 失敗不得回報成功。目的地唯讀時，corpus_fetch_page 要回 1 且不留暫存檔。
+ro_dir="$(corpus_repo_dir microsoft/TypeScript)"
+mkdir -p "$ro_dir"; chmod 555 "$ro_dir"
+tmp_before="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -l | tr -d ' ')"
+corpus_fetch_page microsoft/TypeScript 1; rc=$?
+chmod 755 "$ro_dir"
+eq "mv 失敗退出 1" "1" "$rc"
+if [[ -e "$ro_dir/0001.json" ]]; then fail "mv 失敗卻留下檔案"; else ok "mv 失敗不留檔"; fi
+tmp_after="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -l | tr -d ' ')"
+eq "mv 失敗不洩漏暫存檔" "$tmp_before" "$tmp_after"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
