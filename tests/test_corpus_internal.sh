@@ -47,6 +47,66 @@ eq "自家管線 ids" "[5,9]" "$(corpus_filter_all_internal acme/rails-app-1 rai
 case "$(cat "$err")" in RETENTION*acme/rails-app-1*) ok "留存數 TSV 格式一致" ;; *) fail "TSV 格式不對：$(cat "$err")" ;; esac
 rm -f "$err"
 
+# corpus_active_reviewers 要有直接測試。實測過：沒有這些斷言的話，把門檻的 >= 改成 >
+# （邊界差一）與拿掉 corpus_filter_all_internal 的輸入守衛，兩個 mutation 套件都不會紅，
+# 因為它只被 --internal 的整合測試間接跑到，而那條路徑的 gh shim 每頁回同一份 fixture，
+# 計數遠超門檻，邊界永遠碰不到。
+mkdir -p "$TMP/ar"
+cat > "$TMP/ar/gh" <<'ARSHIM'
+#!/usr/bin/env bash
+# 判斷「是不是 page=1」不能用 *"page=1"*：查詢字串裡固定帶的 per_page=100
+# 本身就含 "page=1" 這個子字串（per_PAGE=1_00），page=2、page=3 的請求一樣會
+# 誤判成 page=1，等於完全沒有 gate 到。實測過，用 grep -c 對三種 page 值各驗一次：
+#   page=1 的網址 → 含 "&page=1&" 也含裸的 "page=1"（都算命中，符合預期）
+#   page=2 的網址 → 不含 "&page=1&"，但仍然含裸的 "page=1"（per_page=100 那段）
+# 改用 *"&page=1&"* 帶前後的 & 分隔字元，才真的只匹配 page=1 那一次呼叫。
+case "$AR_MODE" in
+  # 三個人分別 10、9、1 則：剛好在門檻上、差一則、遠低於門檻。
+  # 只在 page=1 回資料：corpus_active_reviewers 固定跑三頁，這裡若跟 nobody 一樣
+  # 三頁都回同一批，10/9/1 會被乘成 30/27/3，min=10 時 27>=10 讓「差一則」也跟著
+  # 通過，「剛好達門檻」跟「差一則不留」兩條斷言就分不出來了——原始的 plan 範例
+  # 沒有這個 page 判斷（而且範例用的 *page=1* 寫法本身也踩了上面那個 per_page
+  # 誤判的坑），實測會產生 ["exactly10","nine"]，不是預期的 ["exactly10"]。
+  boundary) [[ "$*" == *"&page=1&"* ]] && { printf 'exactly10\n%.0s' $(seq 10); printf 'nine\n%.0s' $(seq 9); echo lonely; }; ;;
+  onepage)  [[ "$*" == *"&page=1&"* ]] && { printf 'solo\n%.0s' $(seq 12); }; ;;  # 只有第一頁有資料
+  nobody)   echo drive-by ;;                                                     # 沒有人達標
+  allfail)  exit 1 ;;                                                            # 三頁全失敗
+esac
+exit 0
+ARSHIM
+chmod +x "$TMP/ar/gh"
+
+ar() { PATH="$TMP/ar:$PATH" AR_MODE="$1" corpus_active_reviewers x/y "${2:-10}"; }
+
+eq "剛好達門檻要留下"   '["exactly10"]' "$(ar boundary 10)"
+eq "差一則不留"         '["exactly10"]' "$(ar boundary 10)"
+eq "門檻調到 9 則兩人"  '["exactly10","nine"]' "$(ar boundary 9 | jq -c 'sort')"
+eq "不足三頁也能算"     '["solo"]'      "$(ar onepage 10)"
+eq "沒人達標回空陣列"   '[]'            "$(ar nobody 10)"
+if ar allfail 10 >/dev/null 2>&1; then fail "三頁全失敗應退出非 0"; else ok "三頁全失敗退出非 0"; fi
+eq "空陣列不會弄壞下游" "0" "$(printf '[]' | corpus_filter_active "$(ar nobody 10)" | jq 'length')"
+
+# corpus_filter_all_internal 的輸入守衛要有直接測試。
+# 光看退出碼不夠：拿掉守衛之後，壞輸入還是會在第一個 jq 階段（corpus_filter_bots）
+# 自己解析失敗，一樣退出非 0，「應退出非 0」這種寫法測不出守衛被拿掉——實測過，
+# 拿掉 `type == "array"` 那段守衛後，這兩條斷言原封不動地維持綠燈。要驗到守衛本身，
+# 必須連 stderr 一起檢查：守衛在時是 FILTER_INPUT_INVALID，守衛不在時是
+# FILTER_STAGE_FAILED...bots（downstream 自己噴的），兩者都退出非 0 但訊息不同。
+guard_err="$(mktemp "${TMPDIR:-/tmp}/corpus-internal-guard.XXXXXX")"
+printf '{not json' | corpus_filter_all_internal r l '["x"]' >/dev/null 2>"$guard_err"; rc=$?
+eq "壞輸入退出非 0" "1" "$rc"
+case "$(cat "$guard_err")" in
+  FILTER_INPUT_INVALID*) ok "壞輸入印出 FILTER_INPUT_INVALID" ;;
+  *) fail "缺 FILTER_INPUT_INVALID（守衛沒被觸發）：$(cat "$guard_err")" ;;
+esac
+printf '{"a":1}' | corpus_filter_all_internal r l '["x"]' >/dev/null 2>"$guard_err"; rc=$?
+eq "非陣列退出非 0" "1" "$rc"
+case "$(cat "$guard_err")" in
+  FILTER_INPUT_INVALID*) ok "非陣列印出 FILTER_INPUT_INVALID" ;;
+  *) fail "缺 FILTER_INPUT_INVALID（守衛沒被觸發）：$(cat "$guard_err")" ;;
+esac
+rm -f "$guard_err"
+
 # 留存去重必須是字串比對。acme/nest-monorepo-2.0 的那個點如果被當成正規表示式，
 # 會連 acme/nest-monorepo-2X0 這種不相干的列一起刪掉。Task 4 的目標清單裡沒有含
 # metachar 的名稱，所以這條回歸測試只能放在這裡。

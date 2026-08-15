@@ -20,17 +20,27 @@ EOF
 }
 
 # 近一年留言數達門檻的人。輸出是 JSON 陣列，直接餵給 corpus_filter_active。
+# 三頁全部抓失敗時要回 1，不能靜默回空陣列：那會讓認證或網路故障看起來像
+# 「這個 repo 沒有活躍的 reviewer」，語料靜默變空而流程回報成功。
 corpus_active_reviewers() {
-  local repo="$1" min="${2:-10}" page
+  local repo="$1" min="${2:-10}" page ok=0
   local all=""
   for page in 1 2 3; do
-    all+="$(gh api "repos/$repo/pulls/comments?per_page=100&page=$page&sort=created&direction=desc" \
-              --jq '.[].user.login' 2>/dev/null)"$'\n'
+    local one
+    if one="$(gh api "repos/$repo/pulls/comments?per_page=100&page=$page&sort=created&direction=desc" \
+                --jq '.[].user.login // empty' 2>/dev/null)"; then
+      ok=1
+      all+="$one"$'\n'
+    fi
   done
+  if [[ "$ok" -eq 0 ]]; then
+    printf 'ACTIVE_REVIEWERS_FETCH_FAILED\t%s\n' "$repo" >&2
+    return 1
+  fi
   printf '%s' "$all" \
     | grep -v '^$' \
     | sort | uniq -c \
-    | min="$min" awk '$1 >= ENVIRON["min"] { print $2 }' \
+    | CORPUS_MIN="$min" awk '$1 >= ENVIRON["CORPUS_MIN"] { print $2 }' \
     | jq -R . | jq -s -c .
 }
 
