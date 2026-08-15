@@ -1134,6 +1134,46 @@ eq "自家管線 ids" "[5,9]" "$(corpus_filter_all_internal acme/rails-app-1 rai
 case "$(cat "$err")" in RETENTION*acme/rails-app-1*) ok "留存數 TSV 格式一致" ;; *) fail "TSV 格式不對：$(cat "$err")" ;; esac
 rm -f "$err"
 
+# corpus_active_reviewers 要有直接測試。實測過：沒有這些斷言的話，把門檻的 >= 改成 >
+# （邊界差一）與拿掉 corpus_filter_all_internal 的輸入守衛，兩個 mutation 套件都不會紅，
+# 因為它只被 --internal 的整合測試間接跑到，而那條路徑的 gh shim 每頁回同一份 fixture，
+# 計數遠超門檻，邊界永遠碰不到。
+mkdir -p "$TMP/ar"
+cat > "$TMP/ar/gh" <<'ARSHIM'
+#!/usr/bin/env bash
+case "$AR_MODE" in
+  # 三個人分別 10、9、1 則：剛好在門檻上、差一則、遠低於門檻
+  boundary) printf 'exactly10\n%.0s' $(seq 10); printf 'nine\n%.0s' $(seq 9); echo lonely ;;
+  onepage)  [[ "$*" == *"page=1"* ]] && { printf 'solo\n%.0s' $(seq 12); }; ;;  # 只有第一頁有資料
+  nobody)   echo drive-by ;;                                                     # 沒有人達標
+  allfail)  exit 1 ;;                                                            # 三頁全失敗
+esac
+exit 0
+ARSHIM
+chmod +x "$TMP/ar/gh"
+
+ar() { PATH="$TMP/ar:$PATH" AR_MODE="$1" corpus_active_reviewers x/y "${2:-10}"; }
+
+eq "剛好達門檻要留下"   '["exactly10"]' "$(ar boundary 10)"
+eq "差一則不留"         '["exactly10"]' "$(ar boundary 10)"
+eq "門檻調到 9 則兩人"  '["exactly10","nine"]' "$(ar boundary 9 | jq -c 'sort')"
+eq "不足三頁也能算"     '["solo"]'      "$(ar onepage 10)"
+eq "沒人達標回空陣列"   '[]'            "$(ar nobody 10)"
+if ar allfail 10 >/dev/null 2>&1; then fail "三頁全失敗應退出非 0"; else ok "三頁全失敗退出非 0"; fi
+eq "空陣列不會弄壞下游" "0" "$(printf '[]' | corpus_filter_active "$(ar nobody 10)" | jq 'length')"
+
+# corpus_filter_all_internal 的輸入守衛要有直接測試
+if printf '{not json' | corpus_filter_all_internal r l '["x"]' >/dev/null 2>&1; then
+  fail "壞輸入應退出非 0"
+else
+  ok "壞輸入退出非 0"
+fi
+if printf '{"a":1}' | corpus_filter_all_internal r l '["x"]' >/dev/null 2>&1; then
+  fail "非陣列應退出非 0"
+else
+  ok "非陣列退出非 0"
+fi
+
 # 留存去重必須是字串比對。acme/nest-monorepo-2.0 的那個點如果被當成正規表示式，
 # 會連 acme/nest-monorepo-2X0 這種不相干的列一起刪掉。Task 4 的目標清單裡沒有含
 # metachar 的名稱，所以這條回歸測試只能放在這裡。
@@ -1188,17 +1228,27 @@ EOF
 }
 
 # 近一年留言數達門檻的人。輸出是 JSON 陣列，直接餵給 corpus_filter_active。
+# 三頁全部抓失敗時要回 1，不能靜默回空陣列：那會讓認證或網路故障看起來像
+# 「這個 repo 沒有活躍的 reviewer」，語料靜默變空而流程回報成功。
 corpus_active_reviewers() {
-  local repo="$1" min="${2:-10}" page
+  local repo="$1" min="${2:-10}" page ok=0
   local all=""
   for page in 1 2 3; do
-    all+="$(gh api "repos/$repo/pulls/comments?per_page=100&page=$page&sort=created&direction=desc" \
-              --jq '.[].user.login' 2>/dev/null)"$'\n'
+    local one
+    if one="$(gh api "repos/$repo/pulls/comments?per_page=100&page=$page&sort=created&direction=desc" \
+                --jq '.[].user.login // empty' 2>/dev/null)"; then
+      ok=1
+      all+="$one"$'\n'
+    fi
   done
+  if [[ "$ok" -eq 0 ]]; then
+    printf 'ACTIVE_REVIEWERS_FETCH_FAILED\t%s\n' "$repo" >&2
+    return 1
+  fi
   printf '%s' "$all" \
     | grep -v '^$' \
     | sort | uniq -c \
-    | awk -v m="$min" '$1 >= m { print $2 }' \
+    | CORPUS_MIN="$min" awk '$1 >= ENVIRON["CORPUS_MIN"] { print $2 }' \
     | jq -R . | jq -s -c .
 }
 
@@ -1253,22 +1303,42 @@ Expected: PASS，`Failed: 0`
 
 ```bash
 # 留存報告的讀改寫要互斥。mkdir 是原子操作，成功的那一個行程拿到鎖。
+_retention_lock_mtime() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+}
+
 _retention_lock() {
-  local lock="$RETENTION.lock" waited=0
+  local lock="$RETENTION.lock" waited=0 mtime age
   while ! mkdir "$lock" 2>/dev/null; do
-    # 前一個行程被 kill 掉會留下鎖。超過 60 秒就當作陳舊鎖清掉，
-    # 這比讓使用者手動刪一個他不知道存在的目錄好。
-    if [[ "$waited" -ge 60 ]]; then
-      echo "留存報告的鎖超過 60 秒未釋放，視為陳舊並清除：$lock" >&2
-      rm -rf "$lock"
-      continue
+    # 陳舊判斷一定要看「鎖目錄本身的年齡」，不能看「自己等了多久」。
+    # 後者是每個行程各自的計數器而且不會重置，一旦跨過門檻，這個行程就會把它看到的
+    # 任何鎖當成陳舊的砍掉 —— 包括另一個等待者前一毫秒才合法取得的新鎖。實測過：
+    # 三個行程競爭時，W2 取得鎖之後 W1 立刻把它砍掉再自己取得，兩個同時進臨界區，
+    # 而且沒有任何錯誤訊息。
+    mtime="$(_retention_lock_mtime "$lock")"
+    if [[ -n "$mtime" ]]; then
+      age=$(( $(date +%s) - mtime ))
+      if [[ "$age" -ge 60 ]]; then
+        echo "留存報告的鎖已存在 ${age} 秒，視為陳舊並清除：$lock" >&2
+        rm -rf "$lock"
+        # 清完先睡一下再重試。讓贏得 mkdir 競爭的那個行程有時間建立鎖，
+        # 否則同時判定陳舊的另一個行程會立刻把它的新鎖再砍掉。
+        sleep 1
+        continue
+      fi
     fi
     sleep 1
     waited=$((waited + 1))
+    if [[ "$waited" -ge 300 ]]; then
+      echo "等待留存報告的鎖超過 300 秒，放棄：$lock" >&2
+      return 1
+    fi
   done
 }
 _retention_unlock() { rm -rf "$RETENTION.lock"; }
 ```
+
+取鎖失敗（回 1）時該 repo 算失敗：`rc=1; continue`，不要繼續往下寫 `retention.tsv`。
 
 `$RETENTION.tmp` 也要改成每個行程唯一，否則兩邊仍會互相蓋掉：
 `ret_tmp="$(mktemp "${TMPDIR:-/tmp}/corpus-ret.XXXXXX")"`。
