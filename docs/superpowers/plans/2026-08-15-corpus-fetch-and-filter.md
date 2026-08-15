@@ -872,7 +872,10 @@ eq "NONE 也能留下" "[3,4,5,8,9]" "$(corpus_filter_bots < "$FX" | corpus_filt
 # 完整管線的 stdout / stderr 契約與外部版一致
 err="$(mktemp)"
 outn="$(corpus_filter_all_internal acme/rails-app-1 rails "$active" < "$FX" 2>"$err" | jq 'length')"
-eq "自家管線留 3" "3" "$outn"
+# 留 2 筆（id 5、9）。id 4 短且無回覆無 reaction 被第 3 步濾掉，
+# id 8 只有 suggestion 區塊沒有說明文字被第 4 步濾掉。
+eq "自家管線留 2" "2" "$outn"
+eq "自家管線 ids" "[5,9]" "$(corpus_filter_all_internal acme/rails-app-1 rails "$active" < "$FX" 2>/dev/null | jq -c '[.[].id]')"
 case "$(cat "$err")" in RETENTION*acme/rails-app-1*) ok "留存數 TSV 格式一致" ;; *) fail "TSV 格式不對：$(cat "$err")" ;; esac
 rm -f "$err"
 
