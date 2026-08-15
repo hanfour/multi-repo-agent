@@ -1,0 +1,42 @@
+[
+  {"id":1,"user":{"login":"coderabbitai[bot]"},"author_association":"NONE",
+   "body":"This is a long automated review comment that easily exceeds one hundred and fifty characters so that it would otherwise pass the quality gate on length alone.",
+   "in_reply_to_id":null,"reactions":{"total_count":0},
+   "path":"a.rb","diff_hunk":"@@ -1 +1 @@","html_url":"https://x/1","created_at":"2026-01-01T00:00:00Z"},
+
+  {"id":2,"user":{"login":"dependabot"},"author_association":"NONE",
+   "body":"This is a long automated dependency bump comment that easily exceeds one hundred and fifty characters so it would otherwise pass the quality gate on length.",
+   "in_reply_to_id":null,"reactions":{"total_count":0},
+   "path":"b.rb","diff_hunk":"@@ -1 +1 @@","html_url":"https://x/2","created_at":"2026-01-01T00:00:00Z"},
+
+  {"id":3,"user":{"login":"outsider"},"author_association":"NONE",
+   "body":"A long drive-by comment from someone with no association to the project, written long enough to exceed one hundred and fifty characters for this test case.",
+   "in_reply_to_id":null,"reactions":{"total_count":0},
+   "path":"c.rb","diff_hunk":"@@ -1 +1 @@","html_url":"https://x/3","created_at":"2026-01-01T00:00:00Z"},
+
+  {"id":4,"user":{"login":"member1"},"author_association":"MEMBER",
+   "body":"LGTM","in_reply_to_id":null,"reactions":{"total_count":0},
+   "path":"d.rb","diff_hunk":"@@ -1 +1 @@","html_url":"https://x/4","created_at":"2026-01-01T00:00:00Z"},
+
+  {"id":5,"user":{"login":"member1"},"author_association":"MEMBER",
+   "body":"Treating the adapter API as public would prevent too many improvements. There is a handful of external adapters and we let the maintainers know when it changes.",
+   "in_reply_to_id":null,"reactions":{"total_count":0},
+   "path":"e.rb","diff_hunk":"@@ -10,3 +10,5 @@","html_url":"https://x/5","created_at":"2026-01-01T00:00:00Z"},
+
+  {"id":6,"user":{"login":"member2"},"author_association":"COLLABORATOR",
+   "body":"Right, that matches what I meant.","in_reply_to_id":999,"reactions":{"total_count":0},
+   "path":"f.rb","diff_hunk":"@@ -1 +1 @@","html_url":"https://x/6","created_at":"2026-01-01T00:00:00Z"},
+
+  {"id":7,"user":{"login":"member3"},"author_association":"OWNER",
+   "body":"Good catch, this would have shipped a wrong total to the client.","in_reply_to_id":null,"reactions":{"total_count":2},
+   "path":"g.rb","diff_hunk":"@@ -1 +1 @@","html_url":"https://x/7","created_at":"2026-01-01T00:00:00Z"},
+
+  {"id":8,"user":{"login":"member1"},"author_association":"MEMBER",
+   "body":"```suggestion\n  value.blank?\n```","in_reply_to_id":999,"reactions":{"total_count":0},
+   "path":"h.rb","diff_hunk":"@@ -1 +1 @@","html_url":"https://x/8","created_at":"2026-01-01T00:00:00Z"},
+
+  {"id":9,"user":{"login":"member1"},"author_association":"MEMBER",
+   "body":"```suggestion\n  value.blank?\n```\n\nThe rest of the method uses blank? and present?, so this should match.",
+   "in_reply_to_id":999,"reactions":{"total_count":0},
+   "path":"i.rb","diff_hunk":"@@ -20,2 +20,4 @@","html_url":"https://x/9","created_at":"2026-01-01T00:00:00Z"}
+]
