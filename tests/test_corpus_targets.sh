@@ -30,7 +30,7 @@ eq "repo 不重複" "$n_all" "$n_uniq"
 # 一樣會全過，那個測試等於沒測 layer。所以每一筆都釘死成字面值。
 check_pair() {
   local repo="$1" want="$2" got
-  got="$(corpus_targets | awk -F'\t' -v r="$repo" '$1 == r { print $2 }')"
+  got="$(corpus_targets | CORPUS_REPO="$repo" awk -F'\t' '$1 == ENVIRON["CORPUS_REPO"] { print $2 }')"
   eq "$repo → $want" "$want" "$got"
 }
 check_pair microsoft/TypeScript common

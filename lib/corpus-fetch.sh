@@ -89,8 +89,9 @@ corpus_fetch_repo() {
     return 3
   fi
   for ((page = 1; page <= last; page++)); do
-    # 額度查不到時 corpus_rate_remaining 回 0，行為上跟額度用盡一樣要停（fail closed），
-    # 但訊息要分得出來：把認證失敗印成 RATE_LIMIT_STOP 會讓操作者白等一小時。
+    # 成功時印出剩餘數並回 0。失敗時不印任何東西並回 1，讓呼叫端能把「額度用盡」
+    # 和「查不到額度」分開報。認證失敗或網路不通會被印成 RATE_CHECK_FAILED，
+    # 額度用盡則印成 RATE_LIMIT_STOP。兩者訊息不同是因為前者要重新驗證、後者要等額度。
     if ! remaining="$(corpus_rate_remaining)"; then
       printf 'RATE_CHECK_FAILED\t%s\t%s\t%s\n' "$repo" "$page" "$last"
       return 3
