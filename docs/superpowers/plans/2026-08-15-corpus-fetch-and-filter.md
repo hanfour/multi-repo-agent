@@ -776,16 +776,19 @@ eq "留存數那行" "rails/rails	9	7	6	5	4" "$(grep '^rails/rails' "$r")"
 bash "$MRA_DIR/scripts/build-corpus.sh" --repo rails/rails >/dev/null 2>&1
 eq "重跑後仍只有一列" "1" "$(grep -c '^rails/rails' "$r")"
 
-# 去重必須是字串比對，不是正規表示式。repo 名稱含 `.` 時（Task 6 的自家清單裡
-# 就有 acme/nest-monorepo-2.0），grep -v "^$repo\t" 的那個點會匹配任意字元，把
-# acme/nest-monorepo-2X0 這種不相干的列一起刪掉。
-printf 'a/b-2.0\t1\t1\t1\t1\t1\na/b-2X0\t9\t9\t9\t9\t9\n' >> "$r"
-CORPUS_REPO="a/b-2.0" awk -F'\t' 'NR == 1 || $1 != ENVIRON["CORPUS_REPO"]' "$r" > "$r.probe"
-if grep -q '^a/b-2X0' "$r.probe"; then ok "去重不會誤刪含 . 的相似名稱"; else fail "誤刪了 a/b-2X0"; fi
-if grep -q '^a/b-2\.0' "$r.probe"; then fail "該刪的 a/b-2.0 還在"; else ok "該刪的列有刪掉"; fi
-eq "表頭保留" "repo" "$(head -1 "$r.probe" | cut -f1)"
-rm -f "$r.probe"
-grep -v '^a/b-2' "$r" > "$r.clean" && mv "$r.clean" "$r"
+# 去重只能動自己那一列。塞兩列不相干的資料進去，跑一次 CLI，它們必須都還在。
+# 注意這裡是透過 CLI 驗，不是在測試檔裡把 awk 重打一遍 —— 那樣測的是測試自己
+# 寫的運算式，把腳本裡的去重改壞也不會紅。
+printf 'zz/decoy-one\t1\t1\t1\t1\t1\nzz/decoy-two\t9\t9\t9\t9\t9\n' >> "$r"
+bash "$MRA_DIR/scripts/build-corpus.sh" --repo rails/rails >/dev/null 2>&1
+eq "rails/rails 仍只有一列" "1" "$(grep -c '^rails/rails	' "$r")"
+eq "不相干的列一：還在" "1" "$(grep -c '^zz/decoy-one	' "$r")"
+eq "不相干的列二：還在" "1" "$(grep -c '^zz/decoy-two	' "$r")"
+eq "表頭還在且只有一行" "1" "$(grep -c '^repo	' "$r")"
+
+# repo 名稱含正規表示式 metachar 的回歸測試不在這裡：Task 4 的目標清單裡沒有
+# 任何含 metachar 的名稱，這條路徑在本 task 的 CLI 上觸發不到。真正會踩到的是
+# Task 6 的 acme/nest-monorepo-2.0，測試放在那邊（見 Task 6 的對應區塊）。
 
 # 未知 repo：拒絕並退出非 0
 if bash "$MRA_DIR/scripts/build-corpus.sh" --repo no/such-repo >/dev/null 2>&1; then
@@ -1071,9 +1074,27 @@ eq "自家管線 ids" "[5,9]" "$(corpus_filter_all_internal acme/rails-app-1 rai
 case "$(cat "$err")" in RETENTION*acme/rails-app-1*) ok "留存數 TSV 格式一致" ;; *) fail "TSV 格式不對：$(cat "$err")" ;; esac
 rm -f "$err"
 
+# 留存去重必須是字串比對。acme/nest-monorepo-2.0 的那個點如果被當成正規表示式，
+# 會連 acme/nest-monorepo-2X0 這種不相干的列一起刪掉。Task 4 的目標清單裡沒有含
+# metachar 的名稱，所以這條回歸測試只能放在這裡。
+R="$MRA_CORPUS_DIR/retention.tsv"
+mkdir -p "$MRA_CORPUS_DIR"
+printf 'repo\tn0_raw\tn1_nobot\tn2_senior\tn3_quality\tn4_prose\n' > "$R"
+printf 'acme/nest-monorepo-2.0\t1\t1\t1\t1\t1\n' >> "$R"
+printf 'acme/nest-monorepo-2X0\t9\t9\t9\t9\t9\n' >> "$R"
+CORPUS_REPO="acme/nest-monorepo-2.0" awk -F'\t' 'NR == 1 || $1 != ENVIRON["CORPUS_REPO"]' "$R" > "$R.probe"
+eq "含 . 的名稱只刪自己那列" "1" "$(grep -c '^acme/nest-monorepo-2X0	' "$R.probe")"
+eq "自己那列有刪掉" "0" "$(grep -c '^acme/nest-monorepo-2\.0	' "$R.probe")"
+rm -f "$R.probe"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
 ```
+
+Step 5 會把 `--internal` 接進 `scripts/build-corpus.sh`。接完之後要再補一條走 CLI 的版本：
+把上面那兩列塞進 `retention.tsv`，跑 `build-corpus.sh --internal --repo acme/nest-monorepo-2.0 --filter-only`，
+確認 `acme/nest-monorepo-2X0` 那列還在。前面那條驗的是 awk 運算式本身，走 CLI 的那條才驗得到腳本
+真的用了它 —— 兩條都要，缺後者的話把腳本裡的去重改回 `grep` 不會有任何測試變紅。
 
 - [ ] **Step 2: 跑測試確認失敗**
 
