@@ -788,6 +788,27 @@ out="$(GH_FAKE_RATE=5 bash "$MRA_DIR/scripts/build-corpus.sh" --repo vuejs/vue 2
 eq "rate 不足退出 3" "3" "$rc"
 case "$out" in *RATE_LIMIT_STOP*) ok "訊息含 RATE_LIMIT_STOP" ;; *) fail "缺 RATE_LIMIT_STOP：$out" ;; esac
 
+# 篩選失敗必須傳到退出碼，而且不能污染 retention.tsv、也不能留下看似成功的舊輸出。
+# corpus_filter_all 已經會在壞輸入時退出 1，這裡驗 CLI 有沒有接住。
+bad_dir="$TMP/cache/TanStack__query"
+mkdir -p "$bad_dir"
+printf '{not valid json' > "$bad_dir/0001.json"
+lines_before="$(wc -l < "$TMP/cache/retention.tsv" | tr -d ' ')"
+out="$(bash "$MRA_DIR/scripts/build-corpus.sh" --repo TanStack/query --filter-only 2>&1)"; rc=$?
+eq "篩選失敗退出 1" "1" "$rc"
+case "$out" in *FILTER_INPUT_INVALID*) ok "訊息含 FILTER_INPUT_INVALID" ;; *) fail "缺 FILTER_INPUT_INVALID：$out" ;; esac
+eq "失敗不寫留存列" "$lines_before" "$(wc -l < "$TMP/cache/retention.tsv" | tr -d ' ')"
+if [[ -e "$bad_dir/filtered.json" ]]; then fail "篩選失敗卻留下 filtered.json"; else ok "篩選失敗不留 filtered.json"; fi
+if [[ -e "$bad_dir/filtered.json.tmp" ]]; then fail "留下暫存的 filtered.json.tmp"; else ok "不留 filtered.json.tmp"; fi
+
+# 先成功再失敗：舊的 filtered.json 不得留著假裝是這次的結果
+printf '%s' "$(cat "$GH_FAKE_BODY")" > "$bad_dir/0001.json"
+bash "$MRA_DIR/scripts/build-corpus.sh" --repo TanStack/query --filter-only >/dev/null 2>&1
+if [[ -s "$bad_dir/filtered.json" ]]; then ok "成功時有產出 filtered.json"; else fail "成功時沒產出"; fi
+printf '{not valid json' > "$bad_dir/0001.json"
+bash "$MRA_DIR/scripts/build-corpus.sh" --repo TanStack/query --filter-only >/dev/null 2>&1
+if [[ -e "$bad_dir/filtered.json" ]]; then fail "失敗後舊的 filtered.json 還在"; else ok "失敗後移除舊的 filtered.json"; fi
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
 ```
@@ -863,11 +884,28 @@ while IFS=$'\t' read -r repo layer; do
       rc=1
       continue
     fi
+    # 合併與篩選分開跑。寫成單一 pipeline 的話，jq -s 的失敗會被管線最後一個
+    # 指令的退出碼蓋掉，而 corpus_filter_all 的失敗又會被重導向吃掉。
+    merged="$(mktemp)"
+    if ! jq -s 'add' "${pages[@]}" > "$merged" 2>/dev/null; then
+      echo "合併頁面失敗：$repo" >&2
+      rm -f "$merged"; rc=1; continue
+    fi
+
     err="$(mktemp)"
-    jq -s 'add' "${pages[@]}" \
-      | corpus_filter_all "$repo" "$layer" 2>"$err" \
-      > "$dir/filtered.json"
-    # 重跑時先移除舊列，避免同一個 repo 累積多列
+    if ! corpus_filter_all "$repo" "$layer" < "$merged" > "$dir/filtered.json.tmp" 2>"$err"; then
+      echo "篩選失敗：$repo" >&2
+      cat "$err" >&2
+      # 舊的 filtered.json 要一併刪掉。留著會讓上一次成功的輸出看起來像這次的結果。
+      rm -f "$merged" "$err" "$dir/filtered.json.tmp" "$dir/filtered.json"
+      rc=1; continue
+    fi
+    mv "$dir/filtered.json.tmp" "$dir/filtered.json"
+    rm -f "$merged"
+
+    # 只有成功時才寫留存列。失敗時 stderr 是 FILTER_INPUT_INVALID 或
+    # FILTER_STAGE_FAILED，直接 sed 進去會在報告裡留下一行垃圾。
+    # 重跑時先移除舊列，避免同一個 repo 累積多列。
     grep -v "^$repo	" "$RETENTION" > "$RETENTION.tmp" || true
     mv "$RETENTION.tmp" "$RETENTION"
     sed 's/^RETENTION\t//' "$err" >> "$RETENTION"
