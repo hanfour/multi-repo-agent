@@ -50,4 +50,4 @@ jobs:
         # Raised from -S error once the warning backlog was cleared (#50), so
         # it cannot regrow. Keep in step with the Makefile's lint target —
         # tests/test_lint_gate.sh fails if these drift apart.
-        run: shellcheck -S warning lib/*.sh bin/*.sh tests/*.sh test.sh
+        run: shellcheck -S warning lib/*.sh bin/*.sh scripts/*.sh tests/*.sh test.sh

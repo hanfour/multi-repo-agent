@@ -49,7 +49,7 @@ build: mcp-install
 # regrowing; tests/test_lint_gate.sh keeps the two in step.
 lint:
 	@if command -v shellcheck >/dev/null 2>&1; then \
-		shellcheck -S warning lib/*.sh bin/*.sh tests/*.sh test.sh; \
+		shellcheck -S warning lib/*.sh bin/*.sh scripts/*.sh tests/*.sh test.sh; \
 	else \
 		echo "shellcheck not installed (brew install shellcheck) — skipping"; \
 	fi
