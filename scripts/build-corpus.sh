@@ -36,18 +36,36 @@ mkdir -p "$(corpus_cache_dir)"
 # 是很自然的加速做法。去重是「讀全檔 → 濾掉自己那列 → 寫回」，兩個行程交錯
 # 執行會丟掉對方剛寫的列，且不會有任何錯誤訊息。mkdir 在 POSIX 上是原子操作，
 # 成功的那一個行程拿到鎖；macOS 預設沒有 flock 指令，所以不用 flock。
+_retention_lock_mtime() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+}
+
 _retention_lock() {
-  local lock="$RETENTION.lock" waited=0
+  local lock="$RETENTION.lock" waited=0 mtime age
   while ! mkdir "$lock" 2>/dev/null; do
-    # 前一個行程被 kill 掉會留下鎖。超過 60 秒就當作陳舊鎖清掉，
-    # 這比讓使用者手動刪一個他不知道存在的目錄好。
-    if [[ "$waited" -ge 60 ]]; then
-      echo "留存報告的鎖超過 60 秒未釋放，視為陳舊並清除：$lock" >&2
-      rm -rf "$lock"
-      continue
+    # 陳舊判斷一定要看「鎖目錄本身的年齡」，不能看「自己等了多久」。
+    # 後者是每個行程各自的計數器而且不會重置，一旦跨過門檻，這個行程就會把它看到的
+    # 任何鎖當成陳舊的砍掉 —— 包括另一個等待者前一毫秒才合法取得的新鎖。實測過：
+    # 三個行程競爭時，W2 取得鎖之後 W1 立刻把它砍掉再自己取得，兩個同時進臨界區，
+    # 而且沒有任何錯誤訊息。
+    mtime="$(_retention_lock_mtime "$lock")"
+    if [[ -n "$mtime" ]]; then
+      age=$(( $(date +%s) - mtime ))
+      if [[ "$age" -ge 60 ]]; then
+        echo "留存報告的鎖已存在 ${age} 秒，視為陳舊並清除：$lock" >&2
+        rm -rf "$lock"
+        # 清完先睡一下再重試。讓贏得 mkdir 競爭的那個行程有時間建立鎖，
+        # 否則同時判定陳舊的另一個行程會立刻把它的新鎖再砍掉。
+        sleep 1
+        continue
+      fi
     fi
     sleep 1
     waited=$((waited + 1))
+    if [[ "$waited" -ge 300 ]]; then
+      echo "等待留存報告的鎖超過 300 秒，放棄：$lock" >&2
+      return 1
+    fi
   done
 }
 _retention_unlock() { rm -rf "$RETENTION.lock"; }
@@ -143,7 +161,12 @@ while IFS=$'\t' read -r repo layer; do
     # 讀改寫要互斥：--internal 讓外部與自家兩種模式共用同一份 retention.tsv，
     # 兩個行程交錯執行「讀全檔 → 濾掉自己那列 → 寫回」會丟掉對方剛寫的列，
     # 而且不會有任何錯誤訊息。取鎖之後才能動 retention.tsv。
-    _retention_lock
+    # 取鎖失敗（等超過 300 秒，_retention_lock 已經印過原因並回 1）算這個
+    # repo 失敗，不能略過鎖直接寫，也不能假裝成功。
+    if ! _retention_lock; then
+      rm -f "$err"
+      rc=1; continue
+    fi
     # 鎖內也補一次表頭：拿到鎖之前檔案有可能被其他行程清空過。
     [[ -s "$RETENTION" ]] || printf 'repo\tn0_raw\tn1_nobot\tn2_senior\tn3_quality\tn4_prose\n' > "$RETENTION"
     # ret_tmp 每個行程要唯一，不能沿用固定路徑：兩個並行行程都寫
