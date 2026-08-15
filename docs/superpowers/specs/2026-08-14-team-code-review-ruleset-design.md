@@ -124,22 +124,38 @@ GitHub 的 pull request review comment 帶 `diff_hunk` 欄位，也就是被批�
 
 **合併。** 同一條規則可能從外部與自家語料各長出一次。合併時保留兩邊出處，判準以外部為主、嚴重度以自家為主。外面的資深者提供方法，自己的團隊定標準。
 
-### NestJS 層的例外
+### NestJS 層的分群例外
 
-階段一實測後（見 `docs/superpowers/notes/2026-corpus-retention.md`），NestJS 層的外部語料只有
-1,386 則，而它對應 Acme 近一年約 720 個 PR，平均每個 PR 只有 1.9 則外部參考意見。其他層
-是 11 到 38 則。原因是 `nestjs/nest` 本身只有 2,121 則原始意見，而三個補充 repo
-（`nestjs/typeorm` 46 則、`nestjs/swagger` 259 則、`prisma/prisma` 留存率 5.5%）合計只補了 844 則。
+階段一實測（見 `docs/superpowers/notes/2026-corpus-retention.md`）：NestJS 層外部語料 6,594 則，
+對應 Acme 近一年約 720 個 PR，每個 PR 約 9 則。數量不是問題，組成才是：
 
-決定：NestJS 層的規則以自家語料為主，外部語料只補方法層面的參考。來源是
-`nest-monorepo-2.0`（349 PR）、`finance-system`（194）、`nest-app-3`（60）。
+| 來源 | 則數 | 佔比 |
+| --- | --- | --- |
+| prisma/prisma | 5,730 | 87% |
+| nestjs/nest | 751 | 11% |
+| nestjs/swagger | 85 | 1% |
+| nestjs/typeorm | 28 | 0.4% |
 
-這一層因此偏離上面的分工：判準與嚴重度都主要來自自家。三個具體影響：
+`prisma/prisma` 是 ORM 與 query engine 的程式碼，review 重點是查詢產生、型別推導、資料庫相容性。
+Acme 的 `nest-monorepo-2.0`、`finance-system` 是 NestJS 應用服務，重點是 DI 生命週期、module 切分、
+API 契約。把 prisma 的意見當成整層通用的 NestJS 方法來源，會讓規則偏向它不該偏的方向。
 
-- 「出處至少三則」的門檻在這一層仍然適用，但三則可以全部來自自家語料。其他層要求至少一則外部出處。
-- 這一層的規則品質取決於自家 review 的品質。回測時若 NestJS 層的漏抓率明顯高於其他層，
-  要先確認是規則不足還是自家 review 本來就沒抓到那類問題，兩者的處理方式不同。
-- 規則檔的 `出處` 欄位要能看出來源是外部還是自家，方便日後判斷哪些規則有外部佐證。
+決定：這一層在萃取階段再細分一次，不在語料階段丟棄任何來源。
+
+- `nestjs/nest` 的 751 則是 NestJS 專屬方法的來源。量少但切題。
+- `prisma/prisma` 的 5,730 則歸入資料存取主題，不作為整層通用素材。它產出的規則
+  `layer` 仍是 `nestjs`，但主題群要標示為資料存取相關，讓階段四生成 persona 時能分開處理。
+- 嚴重度標準照原本的分工來自自家語料：`nest-monorepo-2.0`（349 PR）、`finance-system`（194）、
+  `nest-app-3`（60）。
+
+三個具體影響：
+
+- 分群時 NestJS 層要先依來源 repo 分成兩堆再做主題分群，不要混在一起跑 TF-IDF。混在一起的話
+  prisma 的 5,730 則會主導所有群心，把 nestjs/nest 的 751 則稀釋掉。
+- 「出處至少三則」在資料存取那堆仍要求至少一則外部出處；NestJS 專屬那堆因為外部樣本只有 751 則，
+  允許三則全部來自自家語料。
+- 規則檔的 `出處` 欄位要能看出來源是外部還是自家，並且外部來源要能分辨是 `nestjs/nest` 還是
+  `prisma/prisma`。這是日後判斷某條規則適不適用於應用服務的依據。
 
 ### canonical 檔案格式
 
