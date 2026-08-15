@@ -19,11 +19,20 @@ corpus_page_file() {
   printf '%s/%04d.json' "$(corpus_repo_dir "$repo")" "$page"
 }
 
-# 末頁頁數取自 Link header。沒有 Link header 代表結果只有一頁。
+# 末頁頁數取自 Link header。沒有 Link header 代表結果只有一頁；但 gh 這次呼叫
+# 本身失敗（認證、網路）也會走到同一條「沒有 Link header」的路，兩者不能混為一談：
+# 前者是真的單頁 repo，後者是暫時性故障卻被當成「只有 1 頁」蒙混過去——一次
+# 抓取失敗會讓 598 頁的 repo 看起來像 1 頁，整輪就這樣「成功」跑完；額度用盡時
+# RATE_LIMIT_STOP 印出的「page 1 of 1」也會是錯的，恰好是這個訊息存在的目的。
+# 所以要把 gh 呼叫本身的退出碼跟「grep 有沒有找到 Link header」分開檢查：前者
+# 失敗直接讓這個函式回傳非 0，不印任何東西；後者找不到才視為單頁。
 corpus_last_page() {
-  local repo="$1" link last
-  link=$(gh api "repos/$repo/pulls/comments?per_page=100&sort=created&direction=desc" \
-           --include 2>/dev/null | grep -i '^link:') || true
+  local repo="$1" out link last
+  if ! out=$(gh api "repos/$repo/pulls/comments?per_page=100&sort=created&direction=desc" \
+               --include 2>/dev/null); then
+    return 1
+  fi
+  link=$(printf '%s' "$out" | grep -i '^link:') || true
   if [[ -z "${link:-}" ]]; then printf '1'; return 0; fi
   last=$(printf '%s' "$link" | grep -oE 'page=[0-9]+>; rel="last"' | grep -oE '[0-9]+' | head -1)
   printf '%s' "${last:-1}"
@@ -70,8 +79,15 @@ corpus_rate_remaining() {
 
 corpus_fetch_repo() {
   local repo="$1" min_rate="${2:-100}"
-  local last page fetched=0 skipped=0 failed=0 remaining
-  last="$(corpus_last_page "$repo")"
+  local page fetched=0 skipped=0 failed=0 remaining
+  # local 與賦值要分開寫才能拿到 corpus_last_page 自己的退出碼：`local last=$(...)`
+  # 的退出碼永遠是 local 自己的 0，query 本身失敗這件事會被吃掉。查不到末頁時不能
+  # 沿用舊行為「當成 1 頁」再往下跑——那正是這個函式本來要修的假訊號。
+  local last
+  if ! last="$(corpus_last_page "$repo")"; then
+    printf 'LAST_PAGE_UNKNOWN\t%s\n' "$repo"
+    return 3
+  fi
   for ((page = 1; page <= last; page++)); do
     # 額度查不到時 corpus_rate_remaining 回 0，行為上跟額度用盡一樣要停（fail closed），
     # 但訊息要分得出來：把認證失敗印成 RATE_LIMIT_STOP 會讓操作者白等一小時。
