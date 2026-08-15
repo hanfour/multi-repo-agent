@@ -48,14 +48,33 @@ corpus_project() {
 }
 
 # stdout：最終陣列。stderr：一行 TSV 留存數，讓呼叫端能記錄每一步濾掉多少。
+# 任何一階段失敗就回 1，不得回 0。下游 scripts/build-corpus.sh 要靠這個退出碼決定
+# 該 repo 算不算失敗；吃掉錯誤的話，輸入壞掉或 GitHub schema 改變會變成「篩完 0 筆、
+# 一切正常」，正是這份設計要避免的 false-green。
+#
+# 兩個 bash 細節，不要「整理」掉：
+#   1. `local s0 s1 …` 必須單獨一行宣告，指派另外寫。寫成 `local s1="$(...)"` 的話，
+#      $? 拿到的是 local 自己的退出碼（永遠 0），命令替換的失敗會被吞掉。
+#   2. jq 解析失敗的退出碼是 5，不是 1，所以用 `|| return 1` 判斷而不是比對數值。
 corpus_filter_all() {
   local repo="$1" layer="$2"
   local s0 s1 s2 s3 s4
   s0="$(cat)"
-  s1="$(printf '%s' "$s0" | corpus_filter_bots)"
-  s2="$(printf '%s' "$s1" | corpus_filter_senior)"
-  s3="$(printf '%s' "$s2" | corpus_filter_quality)"
-  s4="$(printf '%s' "$s3" | corpus_filter_prose)"
+
+  # 先驗輸入。壞掉的輸入要當場失敗，而不是讓四個 jq 各噴一次錯之後回 0。
+  if ! printf '%s' "$s0" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    printf 'FILTER_INPUT_INVALID\t%s\n' "$repo" >&2
+    return 1
+  fi
+
+  s1="$(printf '%s' "$s0" | corpus_filter_bots)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tbots\n' "$repo" >&2; return 1; }
+  s2="$(printf '%s' "$s1" | corpus_filter_senior)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tsenior\n' "$repo" >&2; return 1; }
+  s3="$(printf '%s' "$s2" | corpus_filter_quality)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tquality\n' "$repo" >&2; return 1; }
+  s4="$(printf '%s' "$s3" | corpus_filter_prose)" \
+    || { printf 'FILTER_STAGE_FAILED\t%s\tprose\n' "$repo" >&2; return 1; }
   printf 'RETENTION\t%s\t%s\t%s\t%s\t%s\t%s\n' "$repo" \
     "$(printf '%s' "$s0" | jq 'length')" \
     "$(printf '%s' "$s1" | jq 'length')" \
