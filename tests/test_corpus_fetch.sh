@@ -82,12 +82,26 @@ case "$out" in *"	1	3"*) ok "印出停在第 1 頁/共 3 頁" ;; *) fail "缺頁
 out="$(corpus_fetch_repo vuejs/vue 100)"; rc=$?
 eq "正常跑完退出 0" "0" "$rc"
 case "$out" in DONE*fetched=3*) ok "抓了三頁" ;; *) fail "頁數不對：$out" ;; esac
+eq "成功時寫出 .complete，內容是末頁頁碼" "3" "$(cat "$TMP/cache/vuejs__vue/.complete" 2>/dev/null)"
 
 # 有頁面失敗時退出 1。沒有這條的話，把 `[[ "$failed" -eq 0 ]]` 改成無條件
 # `return 0` 仍然會全綠：這是三個退出碼裡唯一沒被涵蓋的一個。
+#
+# 失敗時不能印 DONE：DONE 是成功形狀的一行，failed=N 只是眾多欄位之一，容易被掃過去。
+# 一次實跑漏了 10 頁但 DONE 照樣印出來，驗收筆記就照著它寫成「語料完整」——這是本專案
+# 存在理由的那類缺陷，出現在它自己的驗收證據上。失敗要有自己的開頭 token：FETCH_INCOMPLETE。
 out="$(GH_FAKE_MODE=fail corpus_fetch_repo TanStack/query 100)"; rc=$?
 eq "有頁面失敗退出 1" "1" "$rc"
-case "$out" in DONE*failed=3*) ok "回報 failed=3" ;; *) fail "失敗數不對：$out" ;; esac
+case "$out" in FETCH_INCOMPLETE*) ok "印出 FETCH_INCOMPLETE" ;; *) fail "缺 FETCH_INCOMPLETE：$out" ;; esac
+case "$out" in DONE*) fail "頁面失敗卻印出 DONE：$out" ;; *) ok "頁面失敗不印 DONE" ;; esac
+eq "FETCH_INCOMPLETE 欄位：fetched" "0" "$(printf '%s' "$out" | cut -f3)"
+eq "FETCH_INCOMPLETE 欄位：last"    "3" "$(printf '%s' "$out" | cut -f4)"
+eq "FETCH_INCOMPLETE 欄位：failed"  "3" "$(printf '%s' "$out" | cut -f5)"
+if [[ -e "$TMP/cache/TanStack__query/.complete" ]]; then
+  fail "抓取不完整卻寫出 .complete"
+else
+  ok "抓取不完整不寫 .complete"
+fi
 
 # 額度查不到（不是額度用盡）要印 RATE_CHECK_FAILED，不能印成 RATE_LIMIT_STOP，
 # 否則操作者會以為要等一小時，實際上是認證或網路壞了。
@@ -112,6 +126,43 @@ eq "mv 失敗退出 1" "1" "$rc"
 if [[ -e "$ro_dir/0001.json" ]]; then fail "mv 失敗卻留下檔案"; else ok "mv 失敗不留檔"; fi
 tmp_after="$(find "$TMPDIR" -maxdepth 1 -name 'corpus.*' 2>/dev/null | wc -l | tr -d ' ')"
 eq "mv 失敗不洩漏暫存檔" "0" "$tmp_after"
+
+# corpus_check_complete：篩選階段合併前的完整性守門。.complete 不存在、內容壞掉、
+# 或缺頁時都要擋下來；1..last 每一頁都在時才放行。
+comp_repo="acme/complete-check"
+comp_dir="$(corpus_repo_dir "$comp_repo")"
+mkdir -p "$comp_dir"
+
+# 沒有 .complete：沒有「應該有幾頁」的依據，expected 老實印成 ?，不假裝算得出來。
+out="$(corpus_check_complete "$comp_repo")"; rc=$?
+eq "沒有 .complete 時退出 1" "1" "$rc"
+first_line="$(printf '%s\n' "$out" | head -1)"
+eq "沒有 .complete：token" "CACHE_INCOMPLETE" "$(printf '%s' "$first_line" | cut -f1)"
+eq "沒有 .complete：present=0" "0" "$(printf '%s' "$first_line" | cut -f3)"
+eq "沒有 .complete：expected=?" "?" "$(printf '%s' "$first_line" | cut -f4)"
+
+# .complete 存在但內容不是數字：跟沒有標記同一類，一樣不能假裝算得出來。
+printf 'not-a-number' > "$comp_dir/.complete"
+out="$(corpus_check_complete "$comp_repo")"; rc=$?
+eq ".complete 內容壞掉時退出 1" "1" "$rc"
+case "$out" in CACHE_INCOMPLETE*) ok ".complete 壞掉印出 CACHE_INCOMPLETE" ;; *) fail "缺 CACHE_INCOMPLETE：$out" ;; esac
+
+# .complete 存在、末頁 3，但缺中間第 2 頁
+printf '3\n' > "$comp_dir/.complete"
+printf '[{"id":1}]' > "$comp_dir/0001.json"
+printf '[{"id":3}]' > "$comp_dir/0003.json"
+out="$(corpus_check_complete "$comp_repo")"; rc=$?
+eq "缺中間頁時退出 1" "1" "$rc"
+first_line="$(printf '%s\n' "$out" | head -1)"
+eq "缺頁：present=2" "2" "$(printf '%s' "$first_line" | cut -f3)"
+eq "缺頁：expected=3" "3" "$(printf '%s' "$first_line" | cut -f4)"
+eq "缺頁：印出缺的頁碼 2" "2" "$(printf '%s\n' "$out" | tail -1)"
+
+# 補齊第 2 頁後視為完整：退出 0，且沒有多餘輸出
+printf '[{"id":2}]' > "$comp_dir/0002.json"
+out="$(corpus_check_complete "$comp_repo")"; rc=$?
+eq "補齊後退出 0" "0" "$rc"
+eq "補齊後無輸出" "" "$out"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

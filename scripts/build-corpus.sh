@@ -120,12 +120,17 @@ while IFS=$'\t' read -r repo layer; do
 
   if [[ "$DO_FILTER" == 1 ]]; then
     dir="$(corpus_repo_dir "$repo")"
-    pages=("$dir"/[0-9]*.json)
-    if [[ ! -e "${pages[0]}" ]]; then
-      echo "沒有已抓取的頁面：$repo" >&2
-      rc=1
-      continue
+
+    # 合併前一定要先驗快取完整性：.complete 存在且 1..last 每一頁都要在。
+    # 這裡取代了原本只檢查「有沒有任何頁檔」的判斷——有頁檔不代表頁碼是連續的，
+    # 一次實跑漏了 10 頁但那個 repo 底下仍有其他頁檔，舊的檢查完全看不出來，
+    # DONE 那行照樣印、篩選照樣跑、留存列照樣寫，語料缺頁卻沒有任何痕跡。
+    if ! complete_out="$(corpus_check_complete "$repo")"; then
+      echo "$complete_out" >&2
+      rc=1; continue
     fi
+
+    pages=("$dir"/[0-9]*.json)
     # 合併與篩選分開跑。寫成單一 pipeline 的話，jq -s 的失敗會被管線最後一個
     # 指令的退出碼蓋掉，而 corpus_filter_all 的失敗又會被重導向吃掉。
     # 給 mktemp 明確 template，理由同 lib/corpus-fetch.sh：macOS 的 bare mktemp
