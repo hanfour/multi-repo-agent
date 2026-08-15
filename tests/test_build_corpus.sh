@@ -43,12 +43,17 @@ eq "退出碼 0" "0" "$?"
 
 f="$TMP/cache/rails__rails/filtered.json"
 if [[ -s "$f" ]]; then ok "filtered.json 產出"; else fail "filtered.json 沒產出"; fi
-eq "篩選後 4 筆" "4" "$(jq 'length' "$f")"
+# spec 第 2 步「或該 repo 留言數前 15 名」子句上線後，fixture 裡的 id 3
+# （outsider，association 是 NONE）不再被第 2 步濾掉——扣掉 bot 之後只剩 4 個
+# 不同 login，預設 n=15 全部上榜，id 3 本身內文夠長也不是純 suggestion，一路
+# 留到最後。鏈從 10/7/6/5/4 變成 10/7/7/6/5，見 lib/corpus-filter.sh 的
+# corpus_top_commenters／corpus_filter_senior。
+eq "篩選後 5 筆" "5" "$(jq 'length' "$f")"
 eq "帶 layer"    "rails" "$(jq -r '.[0].layer' "$f")"
 
 r="$TMP/cache/retention.tsv"
 if [[ -s "$r" ]]; then ok "retention.tsv 產出"; else fail "retention.tsv 沒產出"; fi
-eq "留存數那行" "rails/rails	10	7	6	5	4" "$(grep '^rails/rails' "$r")"
+eq "留存數那行" "rails/rails	10	7	7	6	5" "$(grep '^rails/rails' "$r")"
 
 # 重跑：不重複追加同一個 repo 的留存列
 bash "$MRA_DIR/scripts/build-corpus.sh" --repo rails/rails >/dev/null 2>&1
