@@ -1201,6 +1201,45 @@ corpus_filter_all_internal() {
 Run: `bash tests/test_corpus_internal.sh`
 Expected: PASS，`Failed: 0`
 
+- [ ] **Step 5a: 留存報告加寫入鎖**
+
+`--internal` 讓兩種模式共用同一份 `retention.tsv`：外部語料 10 個 repo、自家語料 10 個，
+同時開兩個視窗各跑一種是很自然的加速做法。但去重是「讀全檔 → 濾掉自己那列 → 寫回」，
+兩個行程交錯執行會丟掉對方剛寫的列，而 `$RETENTION.tmp` 又是固定路徑，兩邊還會互相蓋掉
+暫存檔。丟掉的是驗收依據，而且不會有任何錯誤訊息。
+
+在 `scripts/build-corpus.sh` 加一個 mkdir 型的互斥鎖（`mkdir` 在 POSIX 上是原子的，
+不需要 flock，macOS 預設也沒有 flock 指令）：
+
+```bash
+# 留存報告的讀改寫要互斥。mkdir 是原子操作，成功的那一個行程拿到鎖。
+_retention_lock() {
+  local lock="$RETENTION.lock" waited=0
+  while ! mkdir "$lock" 2>/dev/null; do
+    # 前一個行程被 kill 掉會留下鎖。超過 60 秒就當作陳舊鎖清掉，
+    # 這比讓使用者手動刪一個他不知道存在的目錄好。
+    if [[ "$waited" -ge 60 ]]; then
+      echo "留存報告的鎖超過 60 秒未釋放，視為陳舊並清除：$lock" >&2
+      rm -rf "$lock"
+      continue
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+}
+_retention_unlock() { rm -rf "$RETENTION.lock"; }
+```
+
+`$RETENTION.tmp` 也要改成每個行程唯一，否則兩邊仍會互相蓋掉：
+`ret_tmp="$(mktemp "${TMPDIR:-/tmp}/corpus-ret.XXXXXX")"`。
+
+去重那一段包起來：取鎖、`-s` 補表頭、awk 去重、成功才 mv、釋放鎖。失敗路徑也要釋放，
+用 `trap '_retention_unlock' EXIT` 保險，避免中途 Ctrl-C 留下鎖。
+
+測試：背景同時跑兩個 `build-corpus.sh --repo <A>` 與 `--repo <B>`，等兩個都結束，
+斷言 `retention.tsv` 同時有 A 與 B 兩列且表頭只有一行。沒有鎖的話這條會間歇性失敗，
+所以連跑 5 次確認穩定。
+
 - [ ] **Step 5: 讓 CLI 支援 `--internal`**
 
 修改 `scripts/build-corpus.sh`。在參數解析加一個旗標：
