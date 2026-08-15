@@ -504,11 +504,22 @@ git commit -m "feat(corpus): 分頁抓取與續抓"
   {"id":9,"user":{"login":"member1"},"author_association":"MEMBER",
    "body":"```suggestion\n  value.blank?\n```\n\nThe rest of the method uses blank? and present?, so this should match.",
    "in_reply_to_id":999,"reactions":{"total_count":0},
-   "path":"i.rb","diff_hunk":"@@ -20,2 +20,4 @@","html_url":"https://x/9","created_at":"2026-01-01T00:00:00Z"}
+   "path":"i.rb","diff_hunk":"@@ -20,2 +20,4 @@","html_url":"https://x/9","created_at":"2026-01-01T00:00:00Z"},
+
+  {"id":10,"user":null,"author_association":"MEMBER",
+   "body":"Account was deleted, so this comment cannot be attributed to any reviewer even though the text itself is long enough to pass the quality gate.",
+   "in_reply_to_id":999,"reactions":{"total_count":3},
+   "path":"j.rb","diff_hunk":"@@ -1 +1 @@","html_url":"https://x/10","created_at":"2026-01-01T00:00:00Z"}
 ]
 ```
 
-各步預期留存：`9 → 7 → 6 → 5 → 4`。第 1 步濾掉 id 1、2；第 2 步濾掉 id 3；第 3 步濾掉 id 4（短、無回覆、無 reaction）；第 4 步濾掉 id 8（只有 suggestion 沒有說明）。
+各步預期留存：`10 → 7 → 6 → 5 → 4`，最終 ids `[5,6,7,9]`。第 1 步濾掉 id 1、2（bot）與
+id 10（`.user` 是 null，帳號已刪除，無法歸屬）；第 2 步濾掉 id 3；第 3 步濾掉 id 4（短、
+無回覆、無 reaction）；第 4 步濾掉 id 8（只有 suggestion 沒有說明）。
+
+id 10 取自真實資料：`nestjs/nest` 的 2,121 筆裡有 3 筆 `.user` 是 null。沒有這一筆的話，
+`is_bot` 對 null 做 `ascii_downcase` 會讓 jq 整個中止，該 repo 的語料一筆都拿不到，而九筆
+fixture 涵蓋不到這種情況。
 
 - [ ] **Step 2: 寫失敗的測試**
 
@@ -529,10 +540,12 @@ eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] go
 n()    { jq 'length'; }
 ids()  { jq -c '[.[].id]'; }
 
-eq "fixture 九筆" "9" "$(n < "$FX")"
+eq "fixture 十筆" "10" "$(n < "$FX")"
 
 eq "1 去 bot 留 7"    "7" "$(corpus_filter_bots < "$FX" | n)"
-eq "1 濾掉 id 1,2"    "[3,4,5,6,7,8,9]" "$(corpus_filter_bots < "$FX" | ids)"
+# id 10 的 .user 是 null（帳號已刪除），和兩個 bot 一起在第 1 步被濾掉。
+# 沒有這層守衛的話 is_bot 會對 null 做 ascii_downcase 而讓整個 jq 中止。
+eq "1 濾掉 bot 與無法歸屬" "[3,4,5,6,7,8,9]" "$(corpus_filter_bots < "$FX" | ids)"
 
 eq "2 資深留 6"       "6" "$(corpus_filter_bots < "$FX" | corpus_filter_senior | n)"
 eq "2 濾掉 id 3"      "[4,5,6,7,8,9]" "$(corpus_filter_bots < "$FX" | corpus_filter_senior | ids)"
@@ -555,7 +568,7 @@ eq "投影帶 reviewer"    "member1"           "$(printf '%s' "$proj" | jq -r '.
 err="$(mktemp)"
 outn="$(corpus_filter_all rails/rails rails < "$FX" 2>"$err" | n)"
 eq "全管線留 4" "4" "$outn"
-eq "留存數 TSV" "RETENTION	rails/rails	9	7	6	5	4" "$(cat "$err")"
+eq "留存數 TSV" "RETENTION	rails/rails	10	7	6	5	4" "$(cat "$err")"
 rm -f "$err"
 
 # 空輸入不炸
@@ -614,6 +627,12 @@ Expected: FAIL，訊息是 `lib/corpus-filter.sh: No such file or directory`
 
 # shellcheck disable=SC2016
 _CORPUS_JQ_DEFS='
+# GitHub 帳號被刪除後，該筆 review comment 的 .user 會是 null。真實資料上有：
+# nestjs/nest 的 2,121 筆裡有 3 筆。沒有 has_login 這層守衛的話，is_bot 對 null 做
+# ascii_downcase 會讓整個 jq 以 `explode input must be a string` 中止，整個 repo 的
+# 語料一筆都拿不到。
+def has_login:
+  (.user | type) == "object" and ((.user.login | type) == "string");
 def is_bot:
   (.user.login | ascii_downcase) as $u
   | ($u | test("\\[bot\\]$"))
@@ -631,7 +650,9 @@ def has_prose:
 # 註：不要改成 gsub("```suggestion.*?```"; ""; "s")。jq 的 "s" flag 不會讓 `.`
 # 匹配換行，suggestion 區塊會整段留著，只有 suggestion 沒有說明的意見就濾不掉。
 
-corpus_filter_bots()    { jq "$_CORPUS_JQ_DEFS [ .[] | select(is_bot | not) ]"; }
+# 第一步同時濾掉 bot 與「無法歸屬」的意見（帳號已刪除，.user 是 null）。留存欄位
+# 沿用 n1_nobot 這個名字，改名會牽動 Task 4 的表頭與 Task 6 的測試，不值得。
+corpus_filter_bots()    { jq "$_CORPUS_JQ_DEFS [ .[] | select(has_login and (is_bot | not)) ]"; }
 corpus_filter_senior()  { jq "$_CORPUS_JQ_DEFS [ .[] | select(senior) ]"; }
 corpus_filter_quality() { jq "$_CORPUS_JQ_DEFS [ .[] | select(quality) ]"; }
 corpus_filter_prose()   { jq "$_CORPUS_JQ_DEFS [ .[] | select(has_prose) ]"; }
@@ -770,7 +791,7 @@ eq "帶 layer"    "rails" "$(jq -r '.[0].layer' "$f")"
 
 r="$TMP/cache/retention.tsv"
 if [[ -s "$r" ]]; then ok "retention.tsv 產出"; else fail "retention.tsv 沒產出"; fi
-eq "留存數那行" "rails/rails	9	7	6	5	4" "$(grep '^rails/rails' "$r")"
+eq "留存數那行" "rails/rails	10	7	6	5	4" "$(grep '^rails/rails' "$r")"
 
 # 重跑：不重複追加同一個 repo 的留存列
 bash "$MRA_DIR/scripts/build-corpus.sh" --repo rails/rails >/dev/null 2>&1
