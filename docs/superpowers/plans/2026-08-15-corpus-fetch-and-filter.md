@@ -866,14 +866,18 @@ while IFS=$'\t' read -r repo layer; do
   [[ -z "$repo" ]] && continue
 
   if [[ "$DO_FETCH" == 1 ]]; then
-    if ! out="$(corpus_fetch_repo "$repo")"; then
+    # 用 `if out=$(...)` 加 else，不要寫成 `if ! out=$(...); then status=$?`。
+    # `!` 會連 $? 一起取反，then 分支裡拿到的永遠是 0，rate limit 的退出碼 3
+    # 就分辨不出來，操作者也就不會知道該等額度重置後重跑。
+    if out="$(corpus_fetch_repo "$repo")"; then
+      echo "$out"
+    else
       status=$?
       echo "$out" >&2
       if [[ "$status" == 3 ]]; then exit 3; fi
       rc=1
       continue
     fi
-    echo "$out"
   fi
 
   if [[ "$DO_FILTER" == 1 ]]; then
@@ -888,8 +892,11 @@ while IFS=$'\t' read -r repo layer; do
     # 指令的退出碼蓋掉，而 corpus_filter_all 的失敗又會被重導向吃掉。
     merged="$(mktemp)"
     if ! jq -s 'add' "${pages[@]}" > "$merged" 2>/dev/null; then
-      echo "合併頁面失敗：$repo" >&2
-      rm -f "$merged"; rc=1; continue
+      # 壞掉的快取頁在這裡就會擋下來，根本到不了 corpus_filter_all。所以「快取檔
+      # 損毀」這個情境的清理必須寫在這個分支，只寫在下面的篩選失敗分支等於沒寫。
+      printf 'FILTER_INPUT_INVALID\t%s\tmerge\n' "$repo" >&2
+      rm -f "$merged" "$dir/filtered.json.tmp" "$dir/filtered.json"
+      rc=1; continue
     fi
 
     err="$(mktemp)"
