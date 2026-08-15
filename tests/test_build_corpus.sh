@@ -174,5 +174,36 @@ for i in 1 2 3 4 5; do
 done
 [[ "$lock_ok" == 1 ]] && ok "並行寫入 retention.tsv 五輪皆穩定（表頭唯一、20 列皆在）"
 
+# Fix round 2：_retention_unlock 只能釋放自己持有的鎖，不能無條件 rm -rf。
+# 等 300 秒放棄取鎖的行程並沒有真的拿到鎖，但結束時 EXIT trap 一樣會觸發
+# _retention_unlock；無條件版本會把另一個行程正在合法持有的鎖砍掉，兩個行程
+# 又同時進臨界區——跟 Fix round 1 修掉的陳舊判斷問題是同一種失效模式的另一條路。
+#
+# 用函式層級的測試直接驗證，比並行測試更清楚也更穩定。從真正的腳本原始碼裡把
+# 鎖函式的定義抽出來（用固定的起訖字串當錨點，不是在測試裡另外抄一份）：抄一份
+# 的話正式碼被改壞，這裡不會變紅，等於白測。抽出來丟進一個全新的 bash 行程執行，
+# 用環境變數控制 RETENTION 路徑跟 _RETENTION_LOCK_HELD 的初始值。
+lock_start="$(grep -n '^_retention_lock_mtime() {' "$MRA_DIR/scripts/build-corpus.sh" | head -1 | cut -d: -f1)"
+lock_end="$(grep -n "^trap '_retention_unlock' EXIT" "$MRA_DIR/scripts/build-corpus.sh" | head -1 | cut -d: -f1)"
+lock_end=$((lock_end - 1))
+lock_unit="$(mktemp "${TMPDIR:-/tmp}/corpus-lock-unit.XXXXXX")"
+{
+  echo 'set -uo pipefail'
+  sed -n "${lock_start},${lock_end}p" "$MRA_DIR/scripts/build-corpus.sh"
+  cat <<'DRIVER'
+mkdir -p "$RETENTION.lock"
+_RETENTION_LOCK_HELD="$HELD"
+_retention_unlock
+if [[ -d "$RETENTION.lock" ]]; then echo STILL_THERE; else echo GONE; fi
+DRIVER
+} > "$lock_unit"
+
+lock_test_target="$TMP/cache/lock-unit-test"
+out1="$(RETENTION="$lock_test_target" HELD=0 bash "$lock_unit")"
+eq "沒持有鎖時 _retention_unlock 不動別人的鎖" "STILL_THERE" "$out1"
+out2="$(RETENTION="$lock_test_target" HELD=1 bash "$lock_unit")"
+eq "持有鎖時 _retention_unlock 會釋放" "GONE" "$out2"
+rm -f "$lock_unit"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

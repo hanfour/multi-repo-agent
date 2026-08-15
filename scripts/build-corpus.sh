@@ -67,8 +67,17 @@ _retention_lock() {
       return 1
     fi
   done
+  _RETENTION_LOCK_HELD=1
 }
-_retention_unlock() { rm -rf "$RETENTION.lock"; }
+# 只釋放自己持有的鎖。無條件 rm -rf 會製造出跟陳舊判斷一樣的問題：等 300 秒放棄的
+# 行程並沒有取得鎖，但它結束時 trap 一樣會觸發，把別人正在持有的鎖刪掉，兩個行程
+# 又同時進臨界區。Ctrl-C、set -e 中止、任何提早離開的路徑都會走到這個 trap。
+_RETENTION_LOCK_HELD=0
+_retention_unlock() {
+  [[ "$_RETENTION_LOCK_HELD" == 1 ]] || return 0
+  rm -rf "$RETENTION.lock"
+  _RETENTION_LOCK_HELD=0
+}
 # Ctrl-C 或其他中途中斷都要放鎖，不然下一次執行會卡在 60 秒的陳舊逾時上。
 trap '_retention_unlock' EXIT
 
