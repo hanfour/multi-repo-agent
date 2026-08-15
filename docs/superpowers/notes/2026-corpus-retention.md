@@ -4,7 +4,10 @@
 **Spec:** `docs/superpowers/specs/2026-08-14-team-code-review-ruleset-design.md`
 **Plan:** `docs/superpowers/plans/2026-08-15-corpus-fetch-and-filter.md`（階段一 Task 5）
 
-抓取 1,710 頁、169,960 則原始 review comment，篩選後留下 61,362 則。
+抓取 1,710 頁、170,500 則原始 review comment，篩選後留下 61,362 則（36.0%）。
+
+表中各 repo 的原始則數相加即為 170,500，`n4` 欄相加即為 61,362，兩者都可用
+`.superpowers/sdd/2026-08-15-corpus-fetch-and-filter/verify-totals.sh` 直接對語料重算驗證。
 
 這份數字是全分支 review 後重新測得的。第一版少抓 10 頁而且沒有發現，篩選也漏了 spec 的
 「前 15 名」子句，兩者都已修正，詳見文末的「第一版的兩個錯誤」。
@@ -96,7 +99,8 @@ reviewer 都不具官方成員身分。NestJS 層因此從 1,386 變成 6,594。
 - 抓取 1,710 頁，併發 4，約 40 分鐘。單頁 4.7 到 7.6 秒，瓶頸是 GitHub API 本身
 - 額度檢查每頁 0.6 秒，佔約 12%。`GET /rate_limit` 不計入額度
 - 缺頁重抓是暫時性失敗，重跑兩輪即補齊；已存在的頁面會跳過，不耗額度
-- 篩選全部循序執行，數分鐘。`prisma/prisma` 峰值記憶體約 588 MB，`rails/rails` 推估約 2 GB
+- 篩選全部循序執行，數分鐘。`prisma/prisma` 實測峰值 838 MB RSS、18.2 秒（含 top-15 階段），
+  `rails/rails` 語料約 241 MB JSON，等比推估更高
 - 語料不進版控，可用 `scripts/build-corpus.sh` 重建
 
 抓取用 `--fetch-only` 平行、篩選循序，因為篩選會讀改寫共用的 `retention.tsv`。

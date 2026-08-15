@@ -118,8 +118,11 @@ corpus_filter_all() {
     || { printf 'FILTER_STAGE_FAILED\t%s\tquality\n' "$repo" >&2; return 1; }
   s4="$(printf '%s' "$s3" | corpus_filter_prose)" \
     || { printf 'FILTER_STAGE_FAILED\t%s\tprose\n' "$repo" >&2; return 1; }
-  # 每一步都額外啟一個 jq 'length' 計數，測量上實測 prisma/prisma 588 MB RSS、9.3 秒，
-  # rails/rails 約 241 MB JSON 推估 2 GB peak。最佳化待排期，目前先完成功能。
+  # 每一步都額外啟一個 jq 'length' 計數。實測 prisma/prisma（14,314 則）在含 top-15 階段的
+  # 完整管線下峰值 838 MB RSS、18.2 秒；把 corpus_top_commenters 拿掉重跑是 556 MB、9.35 秒。
+  # rails/rails 的語料約 241 MB JSON，等比推估峰值更高。
+  # 暫不最佳化，因為目前跑得完。這個數字要跟著管線改動一起重測，不要沿用舊值：
+  # 前一版註解寫的 588 MB / 9.3 秒是 top-15 階段加入之前量的，加入後沒有重測就留在這裡。
   printf 'RETENTION\t%s\t%s\t%s\t%s\t%s\t%s\n' "$repo" \
     "$(printf '%s' "$s0" | jq 'length')" \
     "$(printf '%s' "$s1" | jq 'length')" \
