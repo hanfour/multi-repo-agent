@@ -95,6 +95,10 @@ case "$out" in *RATE_LIMIT_STOP*) ok "訊息含 RATE_LIMIT_STOP" ;; *) fail "缺
 # corpus_filter_all 已經會在壞輸入時退出 1，這裡驗 CLI 有沒有接住。
 bad_dir="$TMP/cache/TanStack__query"
 mkdir -p "$bad_dir"
+# .complete 要先補上：這個 fixture 是手工造的、從沒真的跑過 fetch，Fix 1(c) 的
+# 完整性檢查會在合併之前擋下沒有 .complete 的快取，這裡要測的是「合併階段本身」
+# 壞掉（FILTER_INPUT_INVALID），不是完整性檢查那一層，兩層各自有各自的測試。
+printf '1\n' > "$bad_dir/.complete"
 printf '{not valid json' > "$bad_dir/0001.json"
 lines_before="$(wc -l < "$TMP/cache/retention.tsv" | tr -d ' ')"
 out="$(bash "$MRA_DIR/scripts/build-corpus.sh" --repo TanStack/query --filter-only 2>&1)"; rc=$?
@@ -111,6 +115,40 @@ if [[ -s "$bad_dir/filtered.json" ]]; then ok "成功時有產出 filtered.json"
 printf '{not valid json' > "$bad_dir/0001.json"
 bash "$MRA_DIR/scripts/build-corpus.sh" --repo TanStack/query --filter-only >/dev/null 2>&1
 if [[ -e "$bad_dir/filtered.json" ]]; then fail "失敗後舊的 filtered.json 還在"; else ok "失敗後移除舊的 filtered.json"; fi
+
+# Fix 1(c)：篩選前的快取完整性檢查要蓋過原本「有沒有任何頁檔」那層判斷——有頁檔
+# 不代表頁碼是連續的。沒有 .complete（從沒真的抓完過）時要擋下來，不寫留存列、
+# 不寫 filtered.json。
+rm -f "$bad_dir/.complete"
+printf '%s' "$(cat "$GH_FAKE_BODY")" > "$bad_dir/0001.json"
+lines_before="$(wc -l < "$r" | tr -d ' ')"
+out="$(bash "$MRA_DIR/scripts/build-corpus.sh" --repo TanStack/query --filter-only 2>&1)"; rc=$?
+if [[ "$rc" != 0 ]]; then ok "沒有 .complete 時退出非 0"; else fail "沒有 .complete 卻退出 0"; fi
+case "$out" in *CACHE_INCOMPLETE*) ok "沒有 .complete 訊息含 CACHE_INCOMPLETE" ;; *) fail "缺 CACHE_INCOMPLETE：$out" ;; esac
+eq "沒有 .complete 不寫留存列" "$lines_before" "$(wc -l < "$r" | tr -d ' ')"
+if [[ -e "$bad_dir/filtered.json" ]]; then fail "沒有 .complete 卻留下 filtered.json"; else ok "沒有 .complete 不留 filtered.json"; fi
+
+# 缺中間一頁：.complete 記的末頁是 3，但只放了第 1、3 頁，第 2 頁不見。這是真實
+# 事故的樣子——頁檔存在（不是空目錄），只是不連續，舊的「有沒有任何頁檔」判斷
+# 完全看不出來。
+printf '3\n' > "$bad_dir/.complete"
+cp "$GH_FAKE_BODY" "$bad_dir/0001.json"
+cp "$GH_FAKE_BODY" "$bad_dir/0003.json"
+rm -f "$bad_dir/0002.json"
+lines_before="$(wc -l < "$r" | tr -d ' ')"
+out="$(bash "$MRA_DIR/scripts/build-corpus.sh" --repo TanStack/query --filter-only 2>&1)"; rc=$?
+if [[ "$rc" != 0 ]]; then ok "缺中間頁時退出非 0"; else fail "缺中間頁卻退出 0"; fi
+case "$out" in *CACHE_INCOMPLETE*) ok "缺中間頁訊息含 CACHE_INCOMPLETE" ;; *) fail "缺 CACHE_INCOMPLETE：$out" ;; esac
+if printf '%s\n' "$out" | grep -qx '2'; then ok "印出缺的頁碼 2"; else fail "沒印出缺的頁碼：$out"; fi
+eq "缺中間頁不寫留存列" "$lines_before" "$(wc -l < "$r" | tr -d ' ')"
+if [[ -e "$bad_dir/filtered.json" ]]; then fail "缺中間頁卻留下 filtered.json"; else ok "缺中間頁不留 filtered.json"; fi
+
+# 把 bad_dir 收回一個乾淨、完整的單頁狀態：本檔案結尾的並行測試會用完整目標
+# 清單重新跑一次 fetch+filter（TanStack/query 也在清單裡），殘留的第 3 頁與缺頁
+# 狀態不清掉的話會讓那段測試的前提變得不乾淨。
+rm -f "$bad_dir/0002.json" "$bad_dir/0003.json"
+printf '%s' "$(cat "$GH_FAKE_BODY")" > "$bad_dir/0001.json"
+printf '1\n' > "$bad_dir/.complete"
 
 # --internal：抓 + 篩走 corpus_internal_targets / corpus_filter_all_internal，
 # 第 2 步改用活躍留言者而不是 author_association。gh shim 對 --jq 的支援見上方。
@@ -137,6 +175,10 @@ fi
 dsp_dir="$TMP/cache/acme__nest-monorepo-2.0"
 mkdir -p "$dsp_dir"
 cp "$GH_FAKE_BODY" "$dsp_dir/0001.json"
+# 同理補 .complete：沒有它的話 Fix 1(c) 會在完整性檢查那一層就擋下來，
+# 這條測試要驗的去重路徑（成功篩選後改寫這一列）就永遠跑不到，斷言雖然還是綠的，
+# 但測不到它原本要測的東西。
+printf '1\n' > "$dsp_dir/.complete"
 printf 'acme/nest-monorepo-2.0\t1\t1\t1\t1\t1\n' >> "$r"
 printf 'acme/nest-monorepo-2X0\t9\t9\t9\t9\t9\n' >> "$r"
 bash "$MRA_DIR/scripts/build-corpus.sh" --internal --repo acme/nest-monorepo-2.0 --filter-only >/dev/null 2>&1

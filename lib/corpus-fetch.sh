@@ -90,7 +90,72 @@ corpus_fetch_repo() {
       *) failed=$((failed + 1)) ;;
     esac
   done
+  if [[ "$failed" -gt 0 ]]; then
+    # DONE 是成功形狀的一行，failed=N 只是眾多欄位之一，很容易被掃過去 ——
+    # 一次實跑漏了 10 頁，DONE 照樣印出來，驗收筆記就照著它寫成「語料完整」。
+    # 失敗要有自己的開頭 token，跟 RATE_LIMIT_STOP／RATE_CHECK_FAILED／
+    # FILTER_INPUT_INVALID／FILTER_STAGE_FAILED 一致，呼叫端一看開頭就分得出來。
+    printf 'FETCH_INCOMPLETE\t%s\t%s\t%s\t%s\n' "$repo" "$fetched" "$last" "$failed"
+    return 1
+  fi
+
+  # 完整性標記要在印 DONE 之前寫：標記本身寫失敗（磁碟滿、權限）就不能再印
+  # 成功形狀的 DONE，那會是同一種「假綠」換一個位置重演。
+  local complete_file
+  complete_file="$(corpus_repo_dir "$repo")/.complete"
+  if ! printf '%s\n' "$last" > "$complete_file"; then
+    echo "寫入完整性標記失敗：$complete_file" >&2
+    return 1
+  fi
+
   printf 'DONE\t%s\tlast=%s\tfetched=%s\tskipped=%s\tfailed=%s\n' \
     "$repo" "$last" "$fetched" "$skipped" "$failed"
-  [[ "$failed" -eq 0 ]]
+}
+
+# 算快取目錄裡實際存在的頁檔數。用既有的 [0-9]*.json glob，跟篩選階段合併時
+# 用的是同一個 pattern；.complete 不是數字開頭，本來就不會被算進去。
+_corpus_count_page_files() {
+  local dir="$1" pages
+  pages=("$dir"/[0-9]*.json)
+  if [[ -e "${pages[0]}" ]]; then printf '%s' "${#pages[@]}"; else printf '0'; fi
+}
+
+# 篩選前檢查快取完整性：.complete 要存在，而且它記錄的末頁 1..last 每一頁都要在。
+# .complete 不是 [0-9]*.json，篩選階段既有的頁面 glob 本來就撿不到它，這裡直接
+# 檢查固定路徑，不依賴那個 glob。
+#
+# 回傳 0 代表完整可用。不完整（含 .complete 根本不存在，或內容不是數字）時印出
+# CACHE_INCOMPLETE\t<repo>\t<present>\t<expected>，接著逐行印出缺的頁碼，並回傳 1。
+corpus_check_complete() {
+  local repo="$1" dir marker last page present missing_pages
+  dir="$(corpus_repo_dir "$repo")"
+  marker="$dir/.complete"
+
+  last=""
+  if [[ -s "$marker" ]]; then
+    last="$(<"$marker")"
+  fi
+  if [[ ! "$last" =~ ^[0-9]+$ ]]; then
+    # 沒有標記，或標記內容壞掉：沒有「應該有幾頁」的依據，expected 老實印成 ?，
+    # 不假裝算得出完整比對；present 用現有頁檔數頂替，至少讓操作者看得出快取
+    # 裡目前有多少東西。
+    printf 'CACHE_INCOMPLETE\t%s\t%s\t%s\n' "$repo" "$(_corpus_count_page_files "$dir")" '?'
+    return 1
+  fi
+
+  present=0
+  missing_pages=()
+  for ((page = 1; page <= last; page++)); do
+    if [[ -s "$(corpus_page_file "$repo" "$page")" ]]; then
+      present=$((present + 1))
+    else
+      missing_pages+=("$page")
+    fi
+  done
+  if [[ "${#missing_pages[@]}" -eq 0 ]]; then
+    return 0
+  fi
+  printf 'CACHE_INCOMPLETE\t%s\t%s\t%s\n' "$repo" "$present" "$last"
+  printf '%s\n' "${missing_pages[@]}"
+  return 1
 }
