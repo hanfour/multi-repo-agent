@@ -71,6 +71,11 @@ case "$AR_MODE" in
   onepage)  [[ "$*" == *"&page=1&"* ]] && { printf 'solo\n%.0s' $(seq 12); }; ;;  # 只有第一頁有資料
   nobody)   echo drive-by ;;                                                     # 沒有人達標
   allfail)  exit 1 ;;                                                            # 三頁全失敗
+  # 2/3、1/3 頁成功：舊版只要 ok=1（至少一頁成功）就把絕對門檻套在殘缺樣本上，
+  # 活躍者因此悄悄變少。這裡讓失敗的那幾頁直接 exit 1，成功的頁印出遠超門檻
+  # 的計數，確保「回傳非空陣列」不是因為門檻剛好也被殘缺樣本打中。
+  partial2) [[ "$*" == *"&page=3&"* ]] && exit 1; printf 'active\n%.0s' $(seq 10) ;;
+  partial1) [[ "$*" == *"&page=1&"* ]] || exit 1; printf 'active\n%.0s' $(seq 10) ;;
 esac
 exit 0
 ARSHIM
@@ -85,6 +90,31 @@ eq "不足三頁也能算"     '["solo"]'      "$(ar onepage 10)"
 eq "沒人達標回空陣列"   '[]'            "$(ar nobody 10)"
 if ar allfail 10 >/dev/null 2>&1; then fail "三頁全失敗應退出非 0"; else ok "三頁全失敗退出非 0"; fi
 eq "空陣列不會弄壞下游" "0" "$(printf '[]' | corpus_filter_active "$(ar nobody 10)" | jq 'length')"
+
+# 三頁裡有頁失敗（不是全部失敗）也要退出非 0，不能只看「有沒有任何一頁成功」。
+# 舊版的 ok=1 只要有一頁成功就繼續往下算，等於拿絕對門檻去套殘缺樣本，活躍者
+# 因此悄悄消失，下游看起來會跟「這個 repo 真的沒有活躍的 reviewer」一模一樣。
+partial_err="$(mktemp "${TMPDIR:-/tmp}/corpus-internal-partial.XXXXXX")"
+if PATH="$TMP/ar:$PATH" AR_MODE=partial2 corpus_active_reviewers x/y 10 >/dev/null 2>"$partial_err"; then
+  fail "2/3 頁成功應退出非 0"
+else
+  ok "2/3 頁成功退出非 0"
+fi
+case "$(cat "$partial_err")" in
+  ACTIVE_REVIEWERS_PARTIAL*x/y*2/3*) ok "2/3 頁成功印出 ACTIVE_REVIEWERS_PARTIAL 與 2/3" ;;
+  *) fail "缺 ACTIVE_REVIEWERS_PARTIAL 或欄位不對：$(cat "$partial_err")" ;;
+esac
+
+if PATH="$TMP/ar:$PATH" AR_MODE=partial1 corpus_active_reviewers x/y 10 >/dev/null 2>"$partial_err"; then
+  fail "1/3 頁成功應退出非 0"
+else
+  ok "1/3 頁成功退出非 0"
+fi
+case "$(cat "$partial_err")" in
+  ACTIVE_REVIEWERS_PARTIAL*x/y*1/3*) ok "1/3 頁成功印出 ACTIVE_REVIEWERS_PARTIAL 與 1/3" ;;
+  *) fail "缺 ACTIVE_REVIEWERS_PARTIAL 或欄位不對：$(cat "$partial_err")" ;;
+esac
+rm -f "$partial_err"
 
 # corpus_filter_all_internal 的輸入守衛要有直接測試。
 # 光看退出碼不夠：拿掉守衛之後，壞輸入還是會在第一個 jq 階段（corpus_filter_bots）
