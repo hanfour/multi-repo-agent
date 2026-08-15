@@ -64,7 +64,9 @@ while IFS=$'\t' read -r repo layer; do
     fi
     # 合併與篩選分開跑。寫成單一 pipeline 的話，jq -s 的失敗會被管線最後一個
     # 指令的退出碼蓋掉，而 corpus_filter_all 的失敗又會被重導向吃掉。
-    merged="$(mktemp)"
+    # 給 mktemp 明確 template，理由同 lib/corpus-fetch.sh：macOS 的 bare mktemp
+    # 忽略 TMPDIR，會讓任何「不洩漏暫存檔」的測試變成永遠不會失敗的空斷言。
+    merged="$(mktemp "${TMPDIR:-/tmp}/corpus-merge.XXXXXX")"
     if ! jq -s 'add' "${pages[@]}" > "$merged" 2>/dev/null; then
       # 快取頁檔本身壞掉（不是合法 JSON）也算輸入無效，用同一個 FILTER_INPUT_INVALID
       # token，呼叫端不用分辨「合併失敗」跟「corpus_filter_all 自己驗出壞輸入」。
@@ -75,7 +77,7 @@ while IFS=$'\t' read -r repo layer; do
       rc=1; continue
     fi
 
-    err="$(mktemp)"
+    err="$(mktemp "${TMPDIR:-/tmp}/corpus-err.XXXXXX")"
     if ! corpus_filter_all "$repo" "$layer" < "$merged" > "$dir/filtered.json.tmp" 2>"$err"; then
       echo "篩選失敗：$repo" >&2
       cat "$err" >&2
@@ -88,8 +90,13 @@ while IFS=$'\t' read -r repo layer; do
 
     # 只有成功時才寫留存列。失敗時 stderr 是 FILTER_INPUT_INVALID 或
     # FILTER_STAGE_FAILED，直接 sed 進去會在報告裡留下一行垃圾。
-    # 重跑時先移除舊列，避免同一個 repo 累積多列。
-    grep -v "^$repo	" "$RETENTION" > "$RETENTION.tmp" || true
+    #
+    # 重跑時先移除舊列，避免同一個 repo 累積多列。用 awk 的字串比對而不是
+    # `grep -v "^$repo\t"`：repo 名稱會被當成正規表示式，`acme/nest-monorepo-2.0`
+    # 的那個點會匹配任意字元，連 `acme/nest-monorepo-2X0` 的列一起刪掉。那個名字
+    # 就在 Task 6 的自家清單裡。ENVIRON 的理由同 corpus_layer_of。
+    CORPUS_REPO="$repo" awk -F'\t' 'NR == 1 || $1 != ENVIRON["CORPUS_REPO"]' \
+      "$RETENTION" > "$RETENTION.tmp"
     mv "$RETENTION.tmp" "$RETENTION"
     sed 's/^RETENTION\t//' "$err" >> "$RETENTION"
     rm -f "$err"
