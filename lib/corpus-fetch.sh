@@ -38,11 +38,20 @@ corpus_last_page() {
   printf '%s' "${last:-1}"
 }
 
+# 判斷某一頁是不是已經抓過且合法。corpus_fetch_page 用它決定要不要真的打 API；
+# corpus_fetch_repo 也要用它，在決定要不要查額度之前就先判斷這頁能不能跳過——
+# 已快取的頁不該讓 resume 白付一次 gh api rate_limit 的網路來回。
+_corpus_page_cached() {
+  local repo="$1" page="$2" out
+  out="$(corpus_page_file "$repo" "$page")"
+  [[ -s "$out" ]] && jq -e 'type == "array"' "$out" >/dev/null 2>&1
+}
+
 # 退出碼：0 已抓、2 已存在跳過、1 失敗。
 corpus_fetch_page() {
   local repo="$1" page="$2" out tmp
   out="$(corpus_page_file "$repo" "$page")"
-  if [[ -s "$out" ]] && jq -e 'type == "array"' "$out" >/dev/null 2>&1; then
+  if _corpus_page_cached "$repo" "$page"; then
     return 2
   fi
   mkdir -p "$(dirname "$out")"
@@ -89,9 +98,19 @@ corpus_fetch_repo() {
     return 3
   fi
   for ((page = 1; page <= last; page++)); do
+    # 已快取且合法的頁直接跳過，連額度都不查。順序很重要：查額度本身要打一次
+    # `gh api rate_limit`（約 0.6 秒的網路來回），resume 時 598 頁裡只缺 6 頁的話，
+    # 先查額度再讓 corpus_fetch_page 內部判斷跳過，等於為那 592 頁已快取的頁
+    # 各白付一次來回。這裡改成先判斷跳不跳，只有真的要抓的頁才需要查額度。
+    if _corpus_page_cached "$repo" "$page"; then
+      skipped=$((skipped + 1))
+      continue
+    fi
     # 成功時印出剩餘數並回 0。失敗時不印任何東西並回 1，讓呼叫端能把「額度用盡」
     # 和「查不到額度」分開報。認證失敗或網路不通會被印成 RATE_CHECK_FAILED，
     # 額度用盡則印成 RATE_LIMIT_STOP。兩者訊息不同是因為前者要重新驗證、後者要等額度。
+    # 這裡一定要在「確定這頁真的要抓」之後才查，不能為了省事挪到迴圈最前面：
+    # 那樣會把已快取的頁又繞回原本要修的問題，額度用盡的守門也不能因此變鬆。
     if ! remaining="$(corpus_rate_remaining)"; then
       printf 'RATE_CHECK_FAILED\t%s\t%s\t%s\n' "$repo" "$page" "$last"
       return 3

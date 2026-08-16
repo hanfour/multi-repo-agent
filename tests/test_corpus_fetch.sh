@@ -191,5 +191,19 @@ out="$(corpus_check_complete "$comp_repo")"; rc=$?
 eq "補齊後退出 0" "0" "$rc"
 eq "補齊後無輸出" "" "$out"
 
+# corpus_fetch_repo resume 時，已快取的頁不該觸發 gh api rate_limit。
+# rails/rails 這時候的快取狀態是頁 1 合法（最上面第一次抓時寫入）、頁 2、3
+# 都沒有留下合法檔案（前面的 API 失敗與非 JSON 測試都不留檔），last 仍是
+# 預設的 3。跳過頁 1 不該讓 rate_limit 呼叫次數增加——順序顛倒的舊版會為
+# 這種已快取的頁白付一次查額度的網路來回，598 頁全快取只缺 6 頁時就是
+# 592 次白付的呼叫。
+rate_calls_before=$(grep -c 'rate_limit' "$GH_CALL_LOG")
+out="$(corpus_fetch_repo rails/rails 100)"; rc=$?
+rate_calls_after=$(grep -c 'rate_limit' "$GH_CALL_LOG")
+eq "resume 正常完成退出 0" "0" "$rc"
+case "$out" in DONE*skipped=1*) ok "已快取的頁 1 算進 skipped" ;; *) fail "頁 1 沒被算進 skipped：$out" ;; esac
+case "$out" in DONE*fetched=2*) ok "頁 2、3 算進 fetched" ;; *) fail "頁 2、3 沒被算進 fetched：$out" ;; esac
+eq "resume 只為要抓的 2 頁查額度，跳過的頁 1 不算" "2" "$((rate_calls_after - rate_calls_before))"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
