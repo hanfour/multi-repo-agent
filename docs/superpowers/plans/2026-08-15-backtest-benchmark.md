@@ -16,7 +16,34 @@
 - 讀 acme org 需要 `gh auth switch --user acme-bot`，跑完切回 `hanfour`。腳本不自行切換帳號，只在權限不足時明確報錯。
 - 回測不得 post 到 PR。`run-backtest.sh` 一律走輸出存檔比對。
 - `mra review` 的輸出格式以 `schemas/review-result.schema.json` 為準：`{status, summary, comments:[{path, line, body, severity}]}`，severity 值域 `CRITICAL / HIGH / MEDIUM / LOW`。
-- 所有新檔案要通過 `make lint`（shellcheck `-S warning`）。
+- 所有新檔案要通過 `make lint`（shellcheck `-S warning`）。lint 閘門現在涵蓋 `lib/`、`bin/`、
+  `tests/`、`scripts/` 四處；新增其他目錄要同步改 `Makefile` 與 `.github/workflows/repo-tests.yml`，
+  `tests/test_lint_gate.sh` 會驗兩邊的檔案集一致。
+
+### 階段一付過代價換來的約束
+
+以下每一條都對應階段一實際發生過的缺陷，不是預防性的清單。違反任何一條都會重現已知的失敗。
+
+- **新增的 `lib/*.sh` 一定要註冊進 `bin/mra.sh` 的 `MRA_LIBS`。** `tests/test_lib_loader.sh` 會驗
+  （issue #39：那是明確排序清單不是 glob，忘記註冊的 lib 在執行期靜默缺席）。
+- **不得用 `awk -v var="$值"` 傳任意字串。** awk 的 `-v` 會先處理反斜線跳脫，`rails\/rails`（12 位元組）
+  會被收合成 `rails/rails`（11 位元組）而誤配，含換行的值直接讓 awk crash。用
+  `var="$值" awk '... ENVIRON["var"] ...'`。
+- **不得用無參數的 `mktemp`。** macOS/BSD 的 bare `mktemp` 走 `_CS_DARWIN_USER_TEMP_DIR`、忽略
+  `TMPDIR`，會讓任何「不洩漏暫存檔」的斷言變成永遠不會失敗的空斷言。一律
+  `mktemp "${TMPDIR:-/tmp}/名稱.XXXXXX"`。
+- **所有寫入型動作都要檢查退出碼**，包含 `mv`。階段一有三個 `mv` 各自造成一次「回報成功但檔案沒寫進去、
+  暫存檔洩漏」，前兩個修掉之後第三個仍然出貨。
+- **每一種失敗都要有自己的開頭 token**，不得把失敗塞進成功形狀的訊息裡。階段一的
+  `DONE ... failed=6` 讓 10 頁語料悄悄消失且驗收文件回報完整。既有 token：`RATE_LIMIT_STOP`、
+  `RATE_CHECK_FAILED`、`FETCH_INCOMPLETE`、`CACHE_INCOMPLETE`、`FILTER_INPUT_INVALID`、
+  `FILTER_STAGE_FAILED`、`FILTER_PROMOTE_FAILED`、`LAST_PAGE_UNKNOWN`、`NOT_ATTEMPTED`、
+  `ACTIVE_REVIEWERS_FETCH_FAILED`、`ACTIVE_REVIEWERS_PARTIAL`。
+- **`local x="$(cmd)"` 的 `$?` 恆為 0**（`local` 本身是指令，退出碼蓋掉命令替換的）。需要判斷退出碼時
+  先宣告再指派。同理 `if ! out="$(cmd)"; then status=$?` 拿到的是 0 不是原始退出碼，要寫成 if/else。
+- **jq 解析失敗的退出碼是 5 不是 1**，用 `|| return 1` 判斷，不要比對特定數值。
+- **每個 task 收尾時要把本 task 產生的 ruling 套到全 repo。** 階段一有四條 ruling 判斷正確但只套用在
+  發現它的位置，兄弟位置要等最終 review 才被抓到。
 
 ## 一個已知的判定誤差
 
@@ -123,14 +150,17 @@ backtest_hunks_of() {
     | awk '{ len = ($2 == "" ? 1 : $2); print $1, $1 + len - 1 }'
 }
 
-# B 用分號串接再傳給 awk。不要寫成 awk -v B="$b" 直接傳多行字串：macOS 的 awk
-# 會報 `newline in string` 然後整個判斷靜默失效，重疊一律變成「否」。
+# B 用分號串接再透過 ENVIRON 傳給 awk。兩個原因：
+#   1. 不能傳多行字串。macOS 的 awk 會報 `newline in string`，整個判斷靜默失效，
+#      重疊一律變成「否」，而且不會有錯誤訊息。
+#   2. 用 ENVIRON 而不是 -v。這裡的值只有數字與分號，-v 的反斜線跳脫咬不到，
+#      但全 repo 一律不用 -v 傳計算出來的字串，不留「這裡可以」的例外給人抄。
 backtest_ranges_overlap() {
   local a="$1" b="$2"
   [[ -z "$a" || -z "$b" ]] && return 1
-  awk -v B="$(printf '%s' "$b" | tr '\n' ';')" '
+  BT_RANGES_B="$(printf '%s' "$b" | tr '\n' ';')" awk '
     BEGIN {
-      n = split(B, lines, ";")
+      n = split(ENVIRON["BT_RANGES_B"], lines, ";")
       for (i = 1; i <= n; i++) {
         if (lines[i] == "") continue
         split(lines[i], p, " "); bs[i] = p[1]; be[i] = p[2]
