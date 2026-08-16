@@ -34,9 +34,27 @@ source "$MRA_DIR/lib/corpus-fetch.sh"
 # 測試用的替身入口：測試不想真的打 GitHub API，換成一個假的 build-corpus.sh。
 BUILD_CORPUS_BIN="${CORPUS_BUILD_CORPUS_BIN:-$MRA_DIR/scripts/build-corpus.sh}"
 
-# --- 兩個併發設定，皆可用環境變數覆寫 ---
+# --- 併發設定，皆可用環境變數覆寫 ---
 _corpus_fetch_jobs()       { printf '%s' "${CORPUS_FETCH_JOBS:-8}"; }
 _corpus_filter_budget_mb() { printf '%s' "${CORPUS_FILTER_BUDGET_MB:-3072}"; }
+
+# 篩選預算沒核准時，_harvest_repo 要等多久才放棄（見下面 _harvest_repo 的
+# 說明）。跟前兩個一樣可覆寫，主要是為了讓測試不用真的等 900 秒就能驗到
+# 逾時分支——它是整數秒，用 _corpus_require_positive_int 驗。
+_corpus_filter_admit_timeout_secs() { printf '%s' "${CORPUS_FILTER_ADMIT_TIMEOUT_SECS:-900}"; }
+
+# _filter_lock 鎖爭用時的重試間隔，預設 1 秒（跟 build-corpus.sh 的
+# _retention_lock 同一個節奏）。可覆寫成小數（例如 0.05），因為 sleep 支援
+# 小數秒——不走 _corpus_require_positive_int 那套整數驗證。
+#
+# 這個變數存在的理由：tests/test_corpus_harvest.sh 驗「兩個會超預算的 repo
+# 不得同時在跑」是用真實背景行程 + 真實鎖去驗時間上有沒有重疊，如果重試
+# 間隔固定寫死 1 秒，兩個 worker 光是鎖爭用就可能被拉開超過 1 秒，這個
+# 延遲跟排程邏輯本身有沒有 bug 完全無關，卻會把測試的 hold 窗口越推越高
+# （原本 0.3 秒測不出拿掉預算判斷的 mutant，得推到 2 秒才行）。把重試間隔
+# 也做成可覆寫，測試就能把它調到 0.05 秒，用遠短的 hold 窗口驗，不用繼續
+# 陪著這顆寫死的常數往上加。
+_corpus_lock_retry_secs() { printf '%s' "${CORPUS_LOCK_RETRY_SECS:-1}"; }
 
 # 併發數或記憶體預算若被設成 0、負數、或非數字，不該安靜地變成「號誌開 0 個
 # token」或「預算比較永遠是 false」這種難以察覺的當掉方式，要在啟動當下就
@@ -54,6 +72,10 @@ _corpus_require_positive_int() {
 # 用 fd 而不是 mkdir 鎖：抓取階段每頁都要重新搶放一次，一個 598 頁的 repo
 # 就是 598 次搶放，mkdir/rmdir 在這個頻率下開銷太高；FIFO 的單位元組
 # read/write 是核心層級的原子操作，重複搶放很便宜。
+# 寫進 FIFO 的每一個 token 都是一份「可以抓取」的權限，寫失敗卻不檢查的話
+# 會憑空少一個 token（fail safe：並發上限悄悄變低，不會變高），但仍然是
+# 一次沒檢查的寫入，跟這個分支「每個寫入操作都要檢查」的規則牴觸，也會
+# 讓後面的人照樣抄一次不檢查的寫法。
 _fetch_sem_init() {
   local n="$1" fifo
   fifo="$(mktemp -u "${TMPDIR:-/tmp}/corpus-fetch-sem.XXXXXX")"
@@ -61,10 +83,20 @@ _fetch_sem_init() {
   exec {_FETCH_SEM_FD}<>"$fifo" || { rm -f "$fifo"; return 1; }
   rm -f "$fifo"
   local i
-  for ((i = 0; i < n; i++)); do printf 'x' >&"${_FETCH_SEM_FD}"; done
+  for ((i = 0; i < n; i++)); do
+    if ! printf 'x' >&"${_FETCH_SEM_FD}"; then
+      printf 'FETCH_SEM_WRITE_FAILED\tinit\t%s\n' "$i" >&2
+      return 1
+    fi
+  done
 }
 _fetch_sem_acquire() { local _tok; read -r -n 1 -u "${_FETCH_SEM_FD}" _tok; }
-_fetch_sem_release() { printf 'x' >&"${_FETCH_SEM_FD}"; }
+_fetch_sem_release() {
+  if ! printf 'x' >&"${_FETCH_SEM_FD}"; then
+    printf 'FETCH_SEM_WRITE_FAILED\trelease\n' >&2
+    return 1
+  fi
+}
 
 # --- 篩選預算排程：鎖保護的共用「在跑權重總量」檔案 ---
 #
@@ -79,8 +111,10 @@ _filter_lock_path()  { printf '%s.lock' "$(_filter_state_file)"; }
 _filter_lock_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
 
 _filter_lock() {
-  local lock waited=0 mtime age
+  local lock retry_secs start_ts mtime age elapsed
   lock="$(_filter_lock_path)"
+  retry_secs="$(_corpus_lock_retry_secs)"
+  start_ts=$(date +%s)
   while ! mkdir "$lock" 2>/dev/null; do
     mtime="$(_filter_lock_mtime "$lock")"
     if [[ -n "${mtime:-}" ]]; then
@@ -88,13 +122,20 @@ _filter_lock() {
       if [[ "$age" -ge 60 ]]; then
         echo "篩選排程鎖已存在 ${age} 秒，視為陳舊並清除：$lock" >&2
         rm -rf "$lock"
-        sleep 1
+        # retry_secs 可覆寫（CORPUS_LOCK_RETRY_SECS），理由見上面
+        # _corpus_lock_retry_secs 的說明：測試需要把它調到遠小於 1 秒，
+        # 否則兩個並行 worker 光是鎖爭用就可能被拉開超過 1 秒，跟排程邏輯
+        # 本身有沒有 bug 無關，卻會讓測試的時間窗口愈墊愈高。
+        sleep "$retry_secs"
         continue
       fi
     fi
-    sleep 1
-    waited=$((waited + 1))
-    if [[ "$waited" -ge 300 ]]; then
+    sleep "$retry_secs"
+    # 逾時判準用實際經過的秒數，不是重試次數：重試間隔可覆寫之後，「重試
+    # 300 次」在間隔 1 秒時是 300 秒，但間隔 0.05 秒時只剩 15 秒——同一個
+    # 「等太久就放棄」的門檻不該因為重試間隔變快就跟著縮水。
+    elapsed=$(( $(date +%s) - start_ts ))
+    if [[ "$elapsed" -ge 300 ]]; then
       printf 'FILTER_SCHED_LOCK_TIMEOUT\t%s\n' "$lock" >&2
       return 1
     fi
@@ -194,7 +235,9 @@ _filter_release() {
 # --fetch-only 接 --filter-only 兩次呼叫：拆開才有地方插入「篩選前要先等
 # 記憶體預算」這個關卡。兩次呼叫跟一次完整管線的最終結果等價——build-corpus.sh
 # 本身不帶旗標時也就是「先做 DO_FETCH 那塊、再做 DO_FILTER 那塊」，這裡只是把
-# 中間插進排程邏輯而已。抓取失敗（含 rate limit 停止）就直接回傳，不進篩選。
+# 中間插進排程邏輯而已。抓取失敗（含 rate limit 停止）就直接回傳，不進篩選：
+# _corpus_weight_mb 只有在 fetch 成功之後才會被呼叫，失敗的 repo 連 du -sm
+# 都不會跑。
 _harvest_repo() {
   local repo="$1" budget="$2" rc
 
@@ -207,13 +250,27 @@ _harvest_repo() {
     return "$rc"
   fi
 
-  local weight admit_rc
+  # 等待預算核准的迴圈一定要有上限：_filter_lock 本身已經有 300 秒的取鎖
+  # 逾時，但那只保護「拿到鎖」這一步，拿到鎖之後合法地被拒絕（budget 不夠）
+  # 可以無限重試下去。如果某個 repo 的背景 subshell 在 admit 和 release 之間
+  # 被砍掉，它的權重永遠不會被還回去，之後每個 repo 都會在這裡陪著空等，
+  # 卻沒有任何診斷訊息。逾時後放棄並印出可辨識的 token，讓這個 repo 算失敗，
+  # 而不是拖著整個 harvest 假裝還在跑。
+  local weight admit_rc admit_start elapsed timeout
   weight="$(_corpus_weight_mb "$repo")"
+  admit_start=$(date +%s)
+  timeout="$(_corpus_filter_admit_timeout_secs)"
   while :; do
     _filter_try_admit "$repo" "$weight" "$budget"
     admit_rc=$?
     [[ "$admit_rc" == 0 ]] && break
     if [[ "$admit_rc" == 2 ]]; then
+      return 1
+    fi
+    elapsed=$(( $(date +%s) - admit_start ))
+    if [[ "$elapsed" -ge "$timeout" ]]; then
+      printf 'FILTER_BUDGET_TIMEOUT\t%s\tweight=%sMB\tinflight=%sMB\tbudget=%sMB\n' \
+        "$repo" "$weight" "$(_filter_inflight_read)" "$budget" >&2
       return 1
     fi
     sleep 2
@@ -226,11 +283,13 @@ _harvest_repo() {
 }
 
 _corpus_harvest_main() {
-  local fetch_jobs budget_mb
+  local fetch_jobs budget_mb admit_timeout
   fetch_jobs="$(_corpus_fetch_jobs)"
   budget_mb="$(_corpus_filter_budget_mb)"
+  admit_timeout="$(_corpus_filter_admit_timeout_secs)"
   _corpus_require_positive_int CORPUS_FETCH_JOBS "$fetch_jobs" || exit 1
   _corpus_require_positive_int CORPUS_FILTER_BUDGET_MB "$budget_mb" || exit 1
+  _corpus_require_positive_int CORPUS_FILTER_ADMIT_TIMEOUT_SECS "$admit_timeout" || exit 1
 
   # log 跟 repo 清單寫進 $(corpus_cache_dir)，不寫回這個腳本所在目錄：
   # repo 裡不該有任何東西依賴 gitignore 掉的暫存路徑。

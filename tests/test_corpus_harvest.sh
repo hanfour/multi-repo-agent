@@ -13,6 +13,14 @@ export MRA_CORPUS_DIR="$TMP/cache"
 export TMPDIR="$TMP/tmphome"
 mkdir -p "$MRA_CORPUS_DIR" "$TMPDIR"
 
+# _filter_lock 的鎖爭用重試間隔調到遠小於預設的 1 秒。門檻搜尋量出來的
+# discrimination floor：預設 1 秒時要 hold >= 1.2 秒才能穩定抓到「拿掉
+# 預算判斷」的 mutant（0.3 秒 0/5、1.0 秒 0/5、1.2 秒 5/5）；調到 0.05 秒後
+# floor 降到 0.06～0.08 秒之間（0.06 秒只有 1-2/5，0.08 秒起穩定 5/5）。
+# 下面沿用的 2 秒 hold 因此從原本只有 1.67x 的窄餘裕變成約 25x（2 / 0.08），
+# 不是靠拉長 hold 硬撐出餘裕，而是讓 hold 跟造成延遲的那個常數一起變小。
+export CORPUS_LOCK_RETRY_SECS=0.05
+
 # 只 source，不執行主流程：scripts/corpus-harvest.sh 用
 # `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` 擋住，source 進來時兩者不相等。
 source "$MRA_DIR/scripts/corpus-harvest.sh"
@@ -27,6 +35,12 @@ eq "CORPUS_FETCH_JOBS 預設 8"       "8"    "$(_corpus_fetch_jobs)"
 eq "CORPUS_FILTER_BUDGET_MB 預設 3072" "3072" "$(_corpus_filter_budget_mb)"
 eq "CORPUS_FETCH_JOBS 可被環境變數覆寫"       "3"   "$(CORPUS_FETCH_JOBS=3 _corpus_fetch_jobs)"
 eq "CORPUS_FILTER_BUDGET_MB 可被環境變數覆寫" "512" "$(CORPUS_FILTER_BUDGET_MB=512 _corpus_filter_budget_mb)"
+eq "CORPUS_FILTER_ADMIT_TIMEOUT_SECS 預設 900"       "900" "$(_corpus_filter_admit_timeout_secs)"
+eq "CORPUS_FILTER_ADMIT_TIMEOUT_SECS 可被環境變數覆寫" "5"   "$(CORPUS_FILTER_ADMIT_TIMEOUT_SECS=5 _corpus_filter_admit_timeout_secs)"
+# CORPUS_LOCK_RETRY_SECS 的預設值要在子殼層裡 unset 才驗得到：這個檔案開頭
+# 已經把它 export 成 0.05（見上面的說明），不 unset 的話量到的永遠是覆寫值。
+eq "CORPUS_LOCK_RETRY_SECS 預設 1"       "1"    "$(unset CORPUS_LOCK_RETRY_SECS; _corpus_lock_retry_secs)"
+eq "CORPUS_LOCK_RETRY_SECS 可被環境變數覆寫（本檔案開頭已覆寫成 0.05）" "0.05" "$(_corpus_lock_retry_secs)"
 
 # --- 設定驗證：0、負數、非數字要拒絕；正整數要接受 ---
 if _corpus_require_positive_int X 0 >/dev/null 2>&1; then fail "0 應被拒絕"; else ok "0 被拒絕"; fi
@@ -75,6 +89,34 @@ else
   fail "抓取號誌沒擋住並發：觀測到 ${max_seen}，上限應是 2"
 fi
 
+# --- 抓取號誌：寫 FIFO token 失敗要回傳非 0 並印出可辨識的 token ---
+#
+# 用 shell function 蓋掉 printf builtin 逼寫入失敗，只蓋「寫 x 這個 token」
+# 那一種呼叫，其他 printf（含錯誤訊息本身）都轉呼叫真正的 builtin——蓋成
+# 無條件失敗的話，_fetch_sem_release 印錯誤訊息那次 printf 也會被打斷，
+# 斷言就驗不到訊息內容。closing 這個 fd 來逼真的寫入失敗也試過，但 macOS
+# 上的行為不穩定（關閉後寫入仍然「成功」），不如直接蓋 printf 可靠。
+_fetch_sem_init 1
+printf() { [[ "$1" == "x" ]] && return 1; command printf "$@"; }
+sem_write_err="$(_fetch_sem_release 2>&1 1>/dev/null)"
+sem_write_rc=$?
+unset -f printf
+eq "release 寫 token 失敗時退出非 0" "1" "$sem_write_rc"
+case "$sem_write_err" in
+  *FETCH_SEM_WRITE_FAILED*release*) ok "release 寫入失敗印出 FETCH_SEM_WRITE_FAILED" ;;
+  *) fail "release 寫入失敗缺 token：$sem_write_err" ;;
+esac
+
+printf() { [[ "$1" == "x" ]] && return 1; command printf "$@"; }
+sem_init_err="$(_fetch_sem_init 4 2>&1 1>/dev/null)"
+sem_init_rc=$?
+unset -f printf
+eq "init 寫 token 失敗時退出非 0" "1" "$sem_init_rc"
+case "$sem_init_err" in
+  *FETCH_SEM_WRITE_FAILED*init*) ok "init 寫入失敗印出 FETCH_SEM_WRITE_FAILED" ;;
+  *) fail "init 寫入失敗缺 token：$sem_init_err" ;;
+esac
+
 # --- 篩選預算排程：兩個「加起來會超預算」的重 repo 不得同時在跑 ---
 #
 # 用真實的背景行程 + 真實的鎖去驗，不是純算術斷言：兩個 repo 各自搶到預算後
@@ -120,11 +162,13 @@ budget_ok=1
 for round in 1 2 3; do
   rm -rf "$budget_active_dir"; mkdir -p "$budget_active_dir"
   : > "$violation"
-  # hold 給 2 秒不是隨便挑的：_filter_lock 的鎖爭用重試間隔是 1 秒（跟
-  # build-corpus.sh 的 _retention_lock 同一個節奏），兩個 worker 幾乎同時
-  # 搶鎖時，其中一個有機會單純因為鎖爭用就晚了 1 秒才拿到核准——這跟排程
-  # 邏輯本身有沒有 bug 無關。hold 太短（試過 0.3 秒）會讓這個無關的延遲
-  # 剛好把兩個 repo 在時間上錯開，連拿掉預算判斷的 mutant 都測不出來。
+  # hold 給 2 秒不是隨便挑的。_filter_lock 的鎖爭用重試間隔會讓兩個幾乎
+  # 同時搶鎖的 worker，其中一個單純因為鎖爭用就晚了一整個重試間隔才拿到
+  # 核准——這跟排程邏輯本身有沒有 bug 完全無關，卻會把兩個 repo 在時間上
+  # 錯開。重試間隔預設是 1 秒（跟 build-corpus.sh 的 _retention_lock 同一個
+  # 節奏），門檻搜尋量出來的 discrimination floor 要 hold >= 1.2 秒才穩定
+  # （見上面 CORPUS_LOCK_RETRY_SECS 那段）。這裡把重試間隔調到 0.05 秒，
+  # floor 跟著降到 0.08 秒，2 秒 hold 因此有約 25x 餘裕，不是卡在邊緣。
   _budget_worker heavy-A 70 2 &
   bp1=$!
   _budget_worker heavy-B 70 2 &
@@ -161,9 +205,9 @@ _giant_worker() {
   done
   printf 'giant' > "$budget_active_dir/giant"
   # 在整個 hold 期間每 0.1 秒都檢查一次，不是只在結尾檢查一次：small1/small2
-  # 可能因為 _filter_lock 的鎖爭用重試（跟 build-corpus.sh 的 _retention_lock
-  # 同一個 1 秒節奏）比預期晚才拿到核准，牠們短暫存在的 marker 有可能只落在
-  # hold 期間的某個中段，只在結尾看一次會錯過。
+  # 可能因為 _filter_lock 的鎖爭用重試（本檔開頭已經把 CORPUS_LOCK_RETRY_SECS
+  # 調小，但仍然不是 0）比預期晚才拿到核准，牠們短暫存在的 marker 有可能
+  # 只落在 hold 期間的某個中段，只在結尾看一次會錯過。
   local tick others
   for ((tick = 0; tick < 20; tick++)); do
     others=$(find "$budget_active_dir" -type f ! -name giant | wc -l | tr -d ' ')
