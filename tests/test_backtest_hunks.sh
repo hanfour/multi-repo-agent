@@ -76,6 +76,8 @@ if backtest_ranges_overlap "5 4" "1 10"; then fail "A 側逆序應為假"; else 
 if backtest_ranges_overlap "1 10" "5 4"; then fail "B 側逆序應為假"; else ok "B 側逆序不重疊"; fi
 
 # 逆序範圍（無效區間）不應與任何東西重疊
+# 注意：這筆斷言即使拿掉上面兩側任一個逆序守衛依然會綠燈（純算術巧合），
+# 真正把關的是上面 `A 側逆序應為假`／`B 側逆序應為假` 這兩筆，不要把這筆當成守衛有覆蓋到的證據。
 if backtest_ranges_overlap "20 10" "15 25"; then fail "逆序範圍應為假"; else ok "逆序範圍不重疊"; fi
 
 # 逆序記錄是「跳過」不是「整組作廢」：同一組裡合法的區間仍要能命中。
