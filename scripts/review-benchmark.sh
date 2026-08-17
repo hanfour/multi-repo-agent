@@ -84,6 +84,21 @@ _resolve_repo() {
   esac
 }
 
+# 選項解析迴圈裡「消耗一個值」的動作（例如 --repo 要接著讀 $2）一定要先確認
+# 那個值真的存在，不能無條件 shift 2。使用者把 --repo 打成輸入的最後一個
+# token（後面沒接值就送出）時，直接讀 $2 在 set -u 底下會被 bash 自己的
+# 「未綁定的變數」炸掉——這跟第一輪修過的 Critical 3（找不到檔案時的診斷
+# 訊息本身炸掉）是同一種錯：讀一個可能不存在的位置參數卻沒先擋。上一輪
+# 只補了那一處，這一輪在新寫的選項解析迴圈裡又出現了一次，所以抽成共用
+# 函式，往後選項變多也不會每加一個就要記得補一次同樣的檢查。
+#
+# $1：選項名稱（只用來組錯誤訊息）。呼叫端要在 shift 2 之前呼叫，通不過
+# 直接 exit，不回傳——選項缺值是使用者輸入本身有問題，沒有恢復的餘地。
+_require_opt_value() {
+  echo "用法：$1 需要接一個值" >&2
+  exit 1
+}
+
 case "${1:---next}" in
   --status)
     if ! jq -r '
@@ -137,7 +152,9 @@ case "${1:---next}" in
     args=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
-        --repo) repo="$2"; shift 2 ;;
+        --repo)
+          [[ $# -ge 2 ]] || _require_opt_value "--repo"
+          repo="$2"; shift 2 ;;
         *) args+=("$1"); shift ;;
       esac
     done
@@ -178,7 +195,9 @@ case "${1:---next}" in
     args=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
-        --repo) repo="$2"; shift 2 ;;
+        --repo)
+          [[ $# -ge 2 ]] || _require_opt_value "--repo"
+          repo="$2"; shift 2 ;;
         *) args+=("$1"); shift ;;
       esac
     done

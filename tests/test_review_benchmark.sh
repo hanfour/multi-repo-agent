@@ -159,6 +159,41 @@ snap="$(snapshot)"
 if bash "$S" --add 4911 app/z.rb 1 LOW >/dev/null 2>&1; then fail "缺參數應退出非 0"; else ok "--add 缺參數退出非 0"; fi
 eq "--add 缺參數檔案沒被動" "$snap" "$(snapshot)"
 
+# --- Fix round 2：--repo 是輸入的最後一個 token、後面沒接值時不能讓 bash 自己
+# 的「未綁定的變數」把使用者嚇到，要印出點名 --repo 的用法錯誤。這是上一輪
+# Critical 3（找不到檔案時的診斷訊息本身炸掉）同一種「讀一個可能不存在的位置
+# 參數卻沒先擋」的模式，在這一輪新寫的選項解析迴圈裡又出現一次——所以三條
+# 斷言都要驗，不能只驗結束碼：bash 自己的中止也會是非 0，訊息內容才分得出
+# 「工具好好地報錯」跟「工具自己炸了、剛好退出碼也是非 0」兩者的差別。
+
+snap="$(snapshot)"
+out="$(bash "$S" --set 4919 true --repo 2>&1)"; rc=$?
+if [[ "$rc" -ne 0 ]]; then ok "--set 結尾缺 --repo 值退出非 0"; else fail "--set 結尾缺 --repo 值應退出非 0"; fi
+case "$out" in *"--repo"*) ok "--set 結尾缺 --repo 值訊息點名 --repo" ;; *) fail "訊息沒點名 --repo：$out" ;; esac
+case "$out" in *"未綁定"*|*"unbound"*) fail "--set 結尾缺 --repo 值炸出 bash 內部訊息：$out" ;;
+  *) ok "--set 結尾缺 --repo 值沒有炸出 bash 內部訊息" ;;
+esac
+eq "--set 結尾缺 --repo 值檔案沒被動" "$snap" "$(snapshot)"
+
+snap="$(snapshot)"
+out="$(bash "$S" --add 4919 app/a.rb 95 HIGH note --repo 2>&1)"; rc=$?
+if [[ "$rc" -ne 0 ]]; then ok "--add 結尾缺 --repo 值退出非 0"; else fail "--add 結尾缺 --repo 值應退出非 0"; fi
+case "$out" in *"--repo"*) ok "--add 結尾缺 --repo 值訊息點名 --repo" ;; *) fail "訊息沒點名 --repo：$out" ;; esac
+case "$out" in *"未綁定"*|*"unbound"*) fail "--add 結尾缺 --repo 值炸出 bash 內部訊息：$out" ;;
+  *) ok "--add 結尾缺 --repo 值沒有炸出 bash 內部訊息" ;;
+esac
+eq "--add 結尾缺 --repo 值檔案沒被動" "$snap" "$(snapshot)"
+
+# 截斷的 --add：只給到 path，line／severity／note 全部缺——比單缺 note 更接近
+# 真實世界最可能發生的輸入方式（打到一半、複製貼上斷在中間）。
+snap="$(snapshot)"
+if bash "$S" --add 4919 app/a.rb >/dev/null 2>&1; then
+  fail "截斷的 --add 應退出非 0"
+else
+  ok "截斷的 --add（缺 line/severity/note）退出非 0"
+fi
+eq "截斷的 --add 檔案沒被動" "$snap" "$(snapshot)"
+
 # --- Critical 3：candidates.json 不存在時的診斷訊息本身不能炸掉 ------------
 # 全形逗號緊接在 $C 後面會被 bash 的識別字詞法一起吃掉，在 zh_TW.UTF-8 語系
 # 下會變成「C: 未綁定的變數」，本來要診斷問題的那行訊息本身變成新問題。
