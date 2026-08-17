@@ -93,5 +93,63 @@ mmf="$(backtest_metrics "$mf" "$multi_review")"
 eq "未被選中的兩筆算未對應"           "2" "$(printf '%s' "$mmf" | jq -r '.unmatched')"
 eq "嚴重度吻合分母只算命中的一筆(不是三筆)" "1" "$(printf '%s' "$mmf" | jq -r '.severity_rate')"
 
+# Fix round 2 — CRITICAL 1：unmatched 原本只比 comment 的 line 值,不管
+# comment 是哪一個(位置)、在哪個檔案。app/g.rb:200 命中之後,unmatched 判斷
+# 若還在用 line 值,會把「行號剛好也是 200 但完全是另一個檔案」的 app/h.rb
+# comment 誤判成命中——因為兩者的 .line 都是 200,line 值比對分不出來。
+crit1_expected='[{"path":"app/g.rb","line":200,"severity":"HIGH","note":"跟 h.rb 的 comment 行號一樣但是不同檔案"}]'
+crit1_review='{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+ {"path":"app/g.rb","line":200,"body":"這則才是真的命中","severity":"HIGH"},
+ {"path":"app/h.rb","line":200,"body":"跟上面同行號,但完全是另一個檔案,不該被當命中","severity":"LOW"}
+]}'
+mc1="$(backtest_match "$crit1_review" "$crit1_expected" 5)"
+rc1="$(backtest_metrics "$mc1" "$crit1_review")"
+eq "跨檔案同行號的 comment 不能被誤判成命中" "1" "$(printf '%s' "$rc1" | jq -r '.unmatched')"
+
+# Fix round 2 — IMPORTANT 2：兩個 expected finding 的容差窗重疊,搶同一顆
+# comment。app/k.rb:100 跟 app/k.rb:103 都在 tolerance 5 內看得到唯一一則
+# app/k.rb:101 的 comment。照 (path, line) 排序,line 100 那筆先處理、先搶到；
+# line 103 那筆沒有其他候選,只能算漏抓——不能兩個 expected 都各自宣稱命中
+# 同一顆 comment。
+overlap_expected='[
+ {"path":"app/k.rb","line":103,"severity":"MEDIUM","note":"排序後較晚處理,候選被搶走"},
+ {"path":"app/k.rb","line":100,"severity":"HIGH","note":"排序後較早處理,先搶到"}
+]'
+overlap_review='{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+ {"path":"app/k.rb","line":101,"body":"兩個 expected 的容差窗都罩得到,只能被搶一次","severity":"HIGH"}
+]}'
+mo="$(backtest_match "$overlap_review" "$overlap_expected" 5)"
+# 輸出順序照原始 expected 陣列順序(103 在前、100 在後),跟排序處理順序是兩件事。
+eq "重疊容差窗:先搶到的那個(line 100)命中" "101" \
+  "$(printf '%s' "$mo" | jq -r '.[] | select(.expected.line == 100) | .matched.line')"
+eq "重疊容差窗:候選被搶走的那個(line 103)算漏抓" "null" \
+  "$(printf '%s' "$mo" | jq -r '.[] | select(.expected.line == 103) | .matched')"
+ro="$(backtest_metrics "$mo" "$overlap_review")"
+eq "重疊容差窗不會讓 missed 少算(該漏抓的還是漏抓)" "1" "$(printf '%s' "$ro" | jq -r '.missed')"
+eq "重疊容差窗不會讓 severity_agree 被同一顆 comment 重複計算" "1" \
+  "$(printf '%s' "$ro" | jq -r '.severity_agree')"
+
+# Fix round 2 — IMPORTANT 3a：容差窗內兩則候選距離打平(genuine tie)時,選
+# review.comments 陣列裡排比較前面的那一筆——這是目前的既定行為,之前沒有任何
+# fixture 造出真正的 tie(Gap F 那組 c2 距離 0 是唯一最近,不是 tie),所以「把
+# 候選陣列反過來讓 tie 選到另一筆」這種改法完全不會被踩到。這裡直接釘住結果。
+tie_expected='[{"path":"app/tie.rb","line":100,"severity":"HIGH","note":"兩則候選距離打平"}]'
+tie_review='{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+ {"path":"app/tie.rb","line":98,"body":"距離 2,陣列裡排第一個","severity":"HIGH"},
+ {"path":"app/tie.rb","line":102,"body":"距離也是 2,陣列裡排第二個","severity":"LOW"}
+]}'
+mt="$(backtest_match "$tie_review" "$tie_expected" 5)"
+eq "距離打平時選陣列裡排前面的那一筆" "98" "$(printf '%s' "$mt" | jq -r '.[0].matched.line')"
+
+# Fix round 2 — IMPORTANT 3b：沒給容差引數時預設是 5,是校準過的值。這裡的
+# comment 離期望的行號差 6——預設 5 的話應該漏抓,預設被悄悄改成 6(或更大)
+# 就會變成命中,藉此釘住預設值本身,不只是「有給引數時容差生效」這件事。
+default_tol_expected='[{"path":"app/def.rb","line":50,"severity":"HIGH","note":"驗證預設容差是 5"}]'
+default_tol_review='{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+ {"path":"app/def.rb","line":56,"body":"距離 6,預設容差 5 應該漏抓","severity":"HIGH"}
+]}'
+mdt="$(backtest_match "$default_tol_review" "$default_tol_expected")"
+eq "不給容差引數時預設值是 5(距離 6 應該漏抓)" "null" "$(printf '%s' "$mdt" | jq -r '.[0].matched')"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
