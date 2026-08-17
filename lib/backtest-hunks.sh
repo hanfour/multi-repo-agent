@@ -11,13 +11,15 @@ backtest_hunks_of() {
 }
 
 # B 用分號串接再透過 ENVIRON 傳給 awk。兩個原因：
-#   1. 不能傳多行字串。macOS 的 awk 會報 `newline in string`，整個判斷靜默失效，
-#      重疊一律變成「否」，而且不會有錯誤訊息。
+#   1. tr '\n' ';' 是 load-bearing。gawk/mawk（CI 用 ubuntu-latest）會將 split(lines[1], p, " ")
+#      拆成每個空白符包括換行，失落第一個區間之後的所有範圍，無聲遺漏真正的缺陷。
+#      BWK awk（macOS）的非標準行為會分割 ";" 卻遇到換行，所以兩邊都需要 tr。
 #   2. 用 ENVIRON 而不是 -v。這裡的值只有數字與分號，-v 的反斜線跳脫咬不到，
 #      但全 repo 一律不用 -v 傳計算出來的字串，不留「這裡可以」的例外給人抄。
 backtest_ranges_overlap() {
   local a="$1" b="$2"
   [[ -z "$a" || -z "$b" ]] && return 1
+  # tr '\n' ';' 轉換是必要的，見上面的註解。
   BT_RANGES_B="$(printf '%s' "$b" | tr '\n' ';')" awk '
     BEGIN {
       n = split(ENVIRON["BT_RANGES_B"], lines, ";")

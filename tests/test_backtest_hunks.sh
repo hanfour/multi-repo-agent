@@ -9,6 +9,16 @@ ok()   { echo "PASS: $1"; pass=$((pass+1)); }
 fail() { echo "FAIL: $1"; errors=$((errors+1)); }
 eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] got [$3]"; fi; }
 
+# --- 靜態檢查：backtest_ranges_overlap 必須用 tr '\n' ';' 轉換
+# 原因：gawk/mawk 會將 split(lines[1], p, " ") 拆成每個空白符，包括換行；
+# 在 CI（ubuntu-latest）上會失落第一個區間之後的所有範圍，無聲遺漏真正的缺陷。
+func_body=$(sed -n '/^backtest_ranges_overlap()/,/^}/p' "$MRA_DIR/lib/backtest-hunks.sh")
+if [[ "$func_body" == *"tr '\n' ';'"* ]]; then
+  ok "tr '\\n' ';' 轉換存在"
+else
+  fail "tr '\\n' ';' 轉換遺漏（會在 gawk/mawk 上失敗）"
+fi
+
 # 取自 acme/rails-app-1#4919 的真實 hunk header
 patch=$(cat <<'P'
 @@ -92,7 +92,7 @@ def update
