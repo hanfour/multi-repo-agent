@@ -18,6 +18,12 @@ case "$*" in
     printf '%s' '{"files":[{"filename":"app/c.rb","patch":"@@ -1,2 +1,2 @@\n w"}]}' ;;
   *"commits/eee555"*)
     printf '%s' '{"files":[{"filename":"app/b.rb","patch":"@@ -60,3 +60,3 @@ def y\n z"}]}' ;;
+  *"commits/ggg777"*)
+    printf '%s' '{"files":[{"filename":"app/a.rb","patch":"@@ -98,7 +98,7 @@ def update\n p"}]}' ;;
+  *"commits/hhh888"*)
+    printf '%s' '{"files":[{"filename":"app/a.rb","patch":"@@ -85,8 +85,8 @@ def update\n q"}]}' ;;
+  *"commits/iii999"*)
+    printf '%s' '{"files":[{"filename":"app/a.rb","patch":"@@ -99,7 +99,7 @@ def update\n r"}]}' ;;
   *"commits?since"*|*"commits?"*)
     printf '%s' '[{"sha":"own999","commit":{"message":"fix(x): the PR itself"}},
                   {"sha":"aaa111","commit":{"message":"fix(y): overlapping fix"}},
@@ -83,6 +89,23 @@ eq "不同檔案不重疊" "[]" "$(backtest_overlap "$a" "$c" | jq -c .)"
 # 同檔案、不同行號,是唯一能分辨「照路徑比對」跟「照行號比對」的案例。
 d="$(backtest_commit_ranges acme/rails-app-1 eee555)"
 eq "同檔不同行不重疊" "[]" "$(backtest_overlap "$a" "$d" | jq -c .)"
+
+# 邊界相接(inclusive)測試。PR 的 app/a.rb 區間是 92-98。
+# ggg777 的起點(98)剛好等於 PR 的終點——fix commit 接著 PR 新增的最後一行
+# 往下寫,是常見的真實形狀,必須算重疊,不能因為邊界改成 exclusive 就憑空消失。
+e="$(backtest_commit_ranges acme/rails-app-1 ggg777)"
+eq "邊界相接(fix 起點=PR 終點)算重疊" "1" "$(backtest_overlap "$a" "$e" | jq 'length')"
+
+# hhh888 的終點(92)剛好等於 PR 的起點——另一個方向的邊界相接,同樣必須算重疊。
+# 跟上面那筆各自對應 jq 比對式裡不同的那一半（$rb[0] <= $ra[1] / $ra[0] <= $rb[1]）,
+# 任一半被改成 exclusive 都只會弄壞其中一筆,不會互相遮蔽。
+f="$(backtest_commit_ranges acme/rails-app-1 hhh888)"
+eq "邊界相接(fix 終點=PR 起點)算重疊" "1" "$(backtest_overlap "$a" "$f" | jq 'length')"
+
+# iii999 的起點(99)在 PR 終點(98)之後,是真正不相鄰、沒有交集,必須不算重疊——
+# 用來確保上面兩筆邊界相接測試不是靠「全部都算重疊」矇混過關。
+g="$(backtest_commit_ranges acme/rails-app-1 iii999)"
+eq "相鄰不重疊" "[]" "$(backtest_overlap "$a" "$g" | jq -c .)"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
