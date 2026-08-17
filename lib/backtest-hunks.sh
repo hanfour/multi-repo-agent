@@ -7,8 +7,11 @@
 backtest_hunks_of() {
   grep -oE '^@@ -[0-9,]+ \+[0-9]+(,[0-9]+)? @@' \
     | sed -E 's/^@@ -[0-9,]+ \+([0-9]+)(,([0-9]+))? @@/\1 \3/' \
-    | awk '{ len = ($2 == "" ? 1 : $2); print $1, $1 + len - 1 }'
+    | awk '{ len = ($2 == "" ? 1 : $2); if (len > 0) print $1, $1 + len - 1 }'
 }
+# 注意：純刪除的 hunk（`@@ -5,3 +5,0 @@`）長度為 0，不產生區間。
+# PR 純粹刪除行時不引入新行，無可指派行號的概念，所以區間集為空。
+# 這是誠實的結果，不是遺漏。
 
 # B 用分號串接再透過 ENVIRON 傳給 awk。兩個原因：
 #   1. tr '\n' ';' 是 load-bearing。gawk/mawk（CI 用 ubuntu-latest）會將 split(lines[1], p, " ")
@@ -18,6 +21,7 @@ backtest_hunks_of() {
 #      但全 repo 一律不用 -v 傳計算出來的字串，不留「這裡可以」的例外給人抄。
 backtest_ranges_overlap() {
   local a="$1" b="$2"
+  # 防禦性檢查：兩邊都必須非空。變更此處邏輯時務必同時更新測試的空區間斷言。
   [[ -z "$a" || -z "$b" ]] && return 1
   # tr '\n' ';' 轉換是必要的，見上面的註解。
   BT_RANGES_B="$(printf '%s' "$b" | tr '\n' ';')" awk '
@@ -30,7 +34,8 @@ backtest_ranges_overlap() {
     }
     NF == 2 {
       for (i = 1; i <= n; i++)
-        if (bs[i] != "" && $1 <= be[i] && bs[i] <= $2) { found = 1; exit }
+        # 跳過逆序的範圍（純刪除 hunk 產生的無效區間）。
+        if (bs[i] != "" && bs[i] <= be[i] && $1 <= be[i] && bs[i] <= $2) { found = 1; exit }
     }
     END { exit !found }
   ' <<< "$a"

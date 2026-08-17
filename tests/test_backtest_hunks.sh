@@ -54,5 +54,28 @@ if backtest_ranges_overlap "1 5" "10 20
 if backtest_ranges_overlap "" "10 20"; then fail "空區間應為假"; else ok "空區間為假"; fi
 if backtest_ranges_overlap "10 20" ""; then fail "空區間應為假"; else ok "空區間為假(反向)"; fi
 
+# --- 純刪除 hunk（新檔側長度 0）不產生區間
+eq "純刪除無區間" "" "$(printf '@@ -5,3 +5,0 @@\n' | backtest_hunks_of)"
+
+# 混合 patch：純刪除 + 正常 hunk，只產生正常的區間
+patch_mixed=$(cat <<'P'
+@@ -5,3 +5,0 @@
+@@ -10,2 +10,3 @@
+P
+)
+eq "混合刪除與新增" "10 12" "$(printf '%s\n' "$patch_mixed" | backtest_hunks_of)"
+
+# 逆序範圍（無效區間）不應與任何東西重疊
+if backtest_ranges_overlap "20 10" "15 25"; then fail "逆序範圍應為假"; else ok "逆序範圍不重疊"; fi
+
+# 靜態檢查：backtest_ranges_overlap 的空區間防禦守衛必須存在
+# 變更 || 為 && 或刪除此行，都會導致此測試失敗。
+overlap_func=$(sed -n '/^backtest_ranges_overlap()/,/^}/p' "$MRA_DIR/lib/backtest-hunks.sh")
+if grep -q '\[\[ -z "\$a" || -z "\$b" \]\]' <<< "$overlap_func"; then
+  ok "空區間防禦守衛存在"
+else
+  fail "空區間防禦守衛遺漏（會在邊界條件失敗）"
+fi
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
