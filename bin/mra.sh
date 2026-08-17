@@ -12,7 +12,7 @@ MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # tests/test_lib_loader.sh fails if a lib/*.sh exists that this list omits.
 MRA_LIBS=(
   colors claude-invoke review-verdict args security-log backtest-hunks
-  backtest-groundtruth
+  backtest-groundtruth backtest-metrics
   project-path url-policy validate config project-memory
   preflight detect-type sync branch branch-ops
   review-select pr-ops deps repos init
