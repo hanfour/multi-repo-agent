@@ -41,17 +41,33 @@ prs="$(backtest_merged_prs "$REPO" "$LIMIT")"
 
 result='[]'
 n_pr="$(printf '%s' "$prs" | jq 'length')"
+n_candidates=0
+n_failed=0
 for ((i = 0; i < n_pr; i++)); do
   pr="$(printf '%s' "$prs" | jq -r ".[$i].n")"
   merged="$(printf '%s' "$prs" | jq -r ".[$i].merged_at")"
   own="$(printf '%s' "$prs" | jq -r ".[$i].merge_commit_sha")"
 
-  fixes="$(backtest_fix_commits "$REPO" "$pr" "$merged" "$own" "$DAYS")" || continue
+  # 這兩個 lookup 的失敗跟「這個 PR 沒有候選」是兩種不同的事，不能用同一個
+  # continue 混在一起：gh 對某個 org 的 /commits 端點局部中斷時，
+  # backtest_fix_commits／backtest_pr_ranges 會回非 0（見函式庫檔頭），
+  # 這是 API 壞了，不是「查過、確定沒有 fix commit／沒有 PR 區間」。混在一起
+  # 的後果是整個 repo 因為 API 中斷什麼候選都找不到，卻印出跟「這個 repo
+  # 本來就沒有候選」一模一樣的乾淨結尾（候選 0 筆、結束碼 0）——回測基準集
+  # 因此悄悄少掉一整個 repo，而且完全沒有痕跡。
+  if ! fixes="$(backtest_fix_commits "$REPO" "$pr" "$merged" "$own" "$DAYS")"; then
+    n_failed=$((n_failed + 1))
+    continue
+  fi
   [[ "$(printf '%s' "$fixes" | jq 'length' 2>/dev/null)" -eq 0 ]] 2>/dev/null && continue
 
-  pr_ranges="$(backtest_pr_ranges "$REPO" "$pr")" || continue
+  if ! pr_ranges="$(backtest_pr_ranges "$REPO" "$pr")"; then
+    n_failed=$((n_failed + 1))
+    continue
+  fi
   # PR 的 hunk 全是純刪除時區間集為空——這是誠實的結果（見
-  # lib/backtest-hunks.sh 檔頭註解），不用回頭比對檔名硬湊候選。
+  # lib/backtest-hunks.sh 檔頭註解），不用回頭比對檔名硬湊候選，這種情況
+  # 不算失敗。
   [[ "$pr_ranges" == "{}" ]] && continue
 
   hits='[]'
@@ -68,11 +84,22 @@ for ((i = 0; i < n_pr; i++)); do
   done
 
   [[ "$(printf '%s' "$hits" | jq 'length')" -eq 0 ]] && continue
+  n_candidates=$((n_candidates + 1))
   result="$(printf '%s' "$result" | jq \
     --arg repo "$REPO" --argjson pr "$pr" --arg merged "$merged" --argjson h "$hits" \
     '. + [{repo: $repo, pr: $pr, merged_at: $merged, fix_commits: $h,
            confirmed: null, expected_findings: []}]')"
 done
+
+# 有任何一個 PR 的 lookup 失敗，這整趟掃描就不算完整：不能寫出一份看起來
+# 像「掃過這個 repo、結果就是這樣」的 candidates.json——不管是全新檔案還是
+# 疊在舊檔上面，都會讓沒查到的 PR 永遠消失在紀錄裡，之後也不會有人知道要
+# 重跑。直接結束，完全不碰 $OUT，舊檔（不管是不是這個 repo、也不管
+# confirmed 填了什麼）原封不動留著。
+if ((n_failed > 0)); then
+  printf 'LOOKUP_FAILED\t%s\t%d\t%d\n' "$REPO" "$n_failed" "$n_pr" >&2
+  exit 1
+fi
 
 # 合併：鍵是 (repo, pr) 的聯集，不是這次跑出來的 $result 的鍵集合。
 #
@@ -133,5 +160,9 @@ if ! mv "$OUT_TMP" "$OUT"; then
   exit 1
 fi
 
-echo "候選 $(jq 'length' "$OUT") 筆 → $OUT"
+# 掃了幾筆 PR、這次找到幾筆候選、失敗幾筆（這裡一定是 0，非 0 在上面已經
+# exit 1）都要印出來——不然掃 3 筆跟掃 100 筆會印出同一種「乾淨結尾」，
+# 沒有東西能分辨這次到底掃了多少。
+echo "掃描 $n_pr 筆 merged PR，本次候選 $n_candidates 筆，失敗 0 筆 → $REPO"
+echo "候選（累計，所有 repo）$(jq 'length' "$OUT") 筆 → $OUT"
 echo "未確認 $(jq '[.[] | select(.confirmed == null)] | length' "$OUT") 筆，執行 Task 4 的人工確認"
