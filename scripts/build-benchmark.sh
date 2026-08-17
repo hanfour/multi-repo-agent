@@ -36,8 +36,32 @@ if [[ ! -f "$OUT" ]]; then
   fi
 fi
 
-prs="$(backtest_merged_prs "$REPO" "$LIMIT")"
-[[ -z "$prs" || "$prs" == "[]" ]] && { echo "沒有 merged PR：$REPO" >&2; exit 1; }
+# PR 列表本身讀不到跟「這個 repo 真的沒有任何已合併 PR」是兩回事，不能用
+# 同一句話、同一個結束方式收尾：這一版事故的起點就是 /pulls 正常、/commits
+# 中斷，但反過來（/pulls 中斷、/commits 正常）後果更重——外層／內層兩個
+# 計數器都還沒開始跑，這裡一失敗，整個 repo 連候選名單都生不出來，卻只會
+# 印出「沒有 merged PR」，跟一個真的沒有任何已合併 PR 的 repo 長得一模一樣。
+# backtest_merged_prs 內部是 gh api ... | jq '[...]'，gh 失敗時 jq 多半也
+# 跟著失敗、$prs 會是空字串（不是合法的 "[]"）；用 -z 這個額外檢查兜底，
+# 避免萬一 jq 成功但輸出詭異地是空字串，也一併當失敗處理，不要冒然當成
+# 合法的空 repo。
+if ! prs="$(backtest_merged_prs "$REPO" "$LIMIT")" || [[ -z "$prs" ]]; then
+  # 這裡沒有 n_failed_pr／n_failed_commit 可以印——迴圈根本還沒開始，兩個
+  # 計數器都是初始值，印出來只會誤導成「查了 0 筆都沒失敗」。故意用
+  # "listing" 這個字取代數字欄位，讓這行的形狀跟下面 PR／commit 層級的
+  # LOOKUP_FAILED（第三欄一定是數字）一眼就分得出來：這一行代表 repo 列表
+  # 本身讀不到，是完全不同的診斷，要往 /pulls 端點查，不是往個別 PR／
+  # commit 查。
+  printf 'LOOKUP_FAILED\t%s\tlisting\n' "$REPO" >&2
+  exit 1
+fi
+if [[ "$prs" == "[]" ]]; then
+  # 合法的空 repo：查得到 PR 列表、列表本身就是空的。這是正常結果，要
+  # exit 0，不能跟上面「列表讀不到」共用同一種結束方式，否則兩種情況又會
+  # 變回分不清楚。
+  echo "沒有 merged PR（合法的空 repo）：$REPO"
+  exit 0
+fi
 
 result='[]'
 n_pr="$(printf '%s' "$prs" | jq 'length')"
