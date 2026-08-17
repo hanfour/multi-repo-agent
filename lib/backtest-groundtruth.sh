@@ -88,6 +88,10 @@ backtest_commit_ranges() {
   _backtest_ranges_from_files "$files"
 }
 
+# 邊界刻意用 <=（inclusive）而不是 <：fix hunk 從 PR 新增區間的最後一行接著往下寫,
+# 是很常見的真實形狀（在 PR 剛加的那段結尾繼續補東西）。若邊界改成 exclusive,
+# 這種候選會憑空消失——而漏掉的候選補不回來,跟 lib/backtest-hunks.sh 的
+# backtest_ranges_overlap 用同一個判準，是同一件事的兩份保險。
 backtest_overlap() {
   local a="$1" b="$2"
   jq -n --argjson a "$a" --argjson b "$b" '
