@@ -32,6 +32,18 @@ ok()   { echo "PASS: $1"; pass=$((pass+1)); }
 fail() { echo "FAIL: $1"; errors=$((errors+1)); }
 eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] got [$3]"; fi; }
 
+# 參數解析：三種情況都不打 gh，純粹測 CLI 本身的行為。
+help_out="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --help 2>&1)"
+eq "--help 結束碼 0" "0" "$?"
+if [[ "$help_out" == *"用法"* ]]; then ok "--help 印用法"; else fail "--help 印用法 — 沒看到「用法」：$help_out"; fi
+
+bash "$MRA_DIR/scripts/build-benchmark.sh" --bogus-flag >/dev/null 2>&1
+eq "未知參數結束碼非 0" "1" "$?"
+
+# --repo 缺值：不能吃掉下一個參數當成 repo 名稱，也不能靜默地用空字串繼續跑。
+bash "$MRA_DIR/scripts/build-benchmark.sh" --repo >/dev/null 2>&1
+eq "缺 --repo 值結束碼非 0" "1" "$?"
+
 bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --limit 10 >/dev/null 2>&1
 eq "退出碼 0" "0" "$?"
 
@@ -51,6 +63,26 @@ jq '.[0].confirmed = true | .[0].expected_findings = ["SQL injection risk"]' "$C
 bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --limit 10 >/dev/null 2>&1
 eq "重跑保留人工結果" "true" "$(jq -r '.[0].confirmed' "$C")"
 eq "重跑保留 expected_findings" '["SQL injection risk"]' "$(jq -c '.[0].expected_findings' "$C")"
+
+# candidates.json 是所有 repo 共用的同一個檔案。幫 acme/rails-app-1 重新建一次，不能
+# 連帶動到 acme/nest-monorepo-2.0 的列——這是舊版「用這次的結果當合併基底」會
+# 犯的錯：這次沒跑到的 repo／PR 全部被當成不存在而刪掉。
+#
+# 故意用同一個 PR 編號（4919）：如果合併鍵只看 pr、不看 repo，$old 的查表
+# 會把兩個 repo 的列撞成同一個鍵，光看「repo B 的列還在不在」測不出這個錯
+# （兩種錯的症狀都是「repo B 的列不見了」），還要另外驗 repo A 自己的欄位
+# 有沒有被撞鍵污染，才分得出「整列被刪掉」跟「鍵撞在一起」是兩個不同的錯。
+jq '. + [{"repo":"acme/nest-monorepo-2.0","pr":4919,"merged_at":"2026-01-01T00:00:00Z",
+          "fix_commits":[],"confirmed":true,"expected_findings":["dup pr number test"]}]' \
+  "$C" > "$C.tmp" && mv "$C.tmp" "$C"
+bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --limit 10 >/dev/null 2>&1
+eq "跨 repo 隔離：兩個 repo 的列都在" "2" "$(jq 'length' "$C")"
+eq "跨 repo 隔離：repo B 的 confirmed 不受影響" "true" \
+  "$(jq -r '.[] | select(.repo == "acme/nest-monorepo-2.0" and .pr == 4919) | .confirmed' "$C")"
+eq "跨 repo 隔離：repo B 的 expected_findings 不受影響" '["dup pr number test"]' \
+  "$(jq -c '.[] | select(.repo == "acme/nest-monorepo-2.0" and .pr == 4919) | .expected_findings' "$C")"
+eq "跨 repo 隔離：合鍵含 repo（repo A 自己的欄位沒被同號的 repo B 污染）" '["SQL injection risk"]' \
+  "$(jq -c '.[] | select(.repo == "acme/rails-app-1" and .pr == 4919) | .expected_findings' "$C")"
 
 # 合併輸入若已損毀（不是合法 JSON），要清掉壞掉的 candidates.json 並以非 0
 # 結束，不能留著讓下一輪看起來像是延用上一輪的結果，也不能留下沒搬成功的

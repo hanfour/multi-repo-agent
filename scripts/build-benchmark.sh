@@ -74,8 +74,26 @@ for ((i = 0; i < n_pr; i++)); do
            confirmed: null, expected_findings: []}]')"
 done
 
-# 合併：已存在的 (repo, pr) 保留舊的 confirmed 與 expected_findings，其餘欄位
-# 用這次重新算出來的值蓋過去。
+# 合併：鍵是 (repo, pr) 的聯集，不是這次跑出來的 $result 的鍵集合。
+#
+# 這支腳本一次只認一個 --repo，但 candidates.json 是所有 repo 共用的同一個
+# 檔案。早期版本用 $result（這次的結果）當合併的基底、把舊檔的值疊上去——
+# 這代表舊檔裡「這次沒跑到」的每一列都會消失：同一個 PR 這次沒有重現
+# （14 天視窗會漂移，舊候選本來就會定期不再命中）、或單純是別的 repo 的列
+# （幫 acme/rails-app-1 重建一次，會把 acme/nest-monorepo-2.0 的每一列全部刪掉）。
+# 兩種情況都會無聲弄丟已經花掉 API 成本才找到的候選，以及已經花掉人工審查
+# 成本才填的 confirmed／expected_findings——這正是這支腳本存在的理由要防
+# 的那種遺失。
+#
+# 正確作法：以聯集為準。
+#   只在舊檔出現 → 原封不動地留著（即使 confirmed 還是 null，那也是已經
+#     花過 API 成本才找到的候選，不能因為這次沒重新命中就當作沒發生過）。
+#   只在這次結果出現 → 用這次的值，confirmed/expected_findings 是新的
+#     null/[]。
+#   兩邊都有 → 機器算出來的欄位用這次的新值蓋過去，但 confirmed 與
+#     expected_findings 原封不動地從舊檔留下來。
+# 鍵一定要用 (repo, pr) 兩個欄位一起組，不能只用 pr：不同 repo 的 PR 編號
+# 會撞。
 #
 # 寫檔一定先落到同目錄下的 .tmp、驗過 jq 退出碼才 mv 進正式檔名，mv 也要驗
 # 退出碼：候選集不進 git，沒有第二份副本，寫壞了就是永久遺失人工確認。
@@ -89,11 +107,20 @@ done
 OUT_TMP="$OUT.tmp"
 if ! jq -s '
   (.[0] | map({key: (.repo + "#" + (.pr | tostring)), value: .}) | from_entries) as $old
-  | .[1] | map(
-      ($old[.repo + "#" + (.pr | tostring)]) as $prev
-      | if $prev then .confirmed = $prev.confirmed
-                      | .expected_findings = $prev.expected_findings
-        else . end)
+  | (.[1] | map({key: (.repo + "#" + (.pr | tostring)), value: .}) | from_entries) as $new
+  | (($old | keys) + ($new | keys) | unique) as $keys
+  | [ $keys[] as $k
+      | if ($new[$k] != null) then
+          if ($old[$k] != null) then
+            ($new[$k] | .confirmed = $old[$k].confirmed
+                       | .expected_findings = $old[$k].expected_findings)
+          else
+            $new[$k]
+          end
+        else
+          $old[$k]
+        end
+    ]
 ' "$OUT" <(printf '%s' "$result") > "$OUT_TMP"; then
   echo "MERGE_FAILED：候選合併失敗，$OUT 已損毀，清掉重來" >&2
   rm -f "$OUT_TMP" "$OUT"
