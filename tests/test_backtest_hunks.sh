@@ -65,8 +65,22 @@ P
 )
 eq "混合刪除與新增" "10 12" "$(printf '%s\n' "$patch_mixed" | backtest_hunks_of)"
 
+# --- 逆序區間（起 > 迄）兩側都要擋。A 側與 B 側是各自獨立的程式路徑：
+# A 側靠 awk pattern 的 `$1 <= $2`，B 側靠迴圈裡的 `bs[i] <= be[i]`。
+# 下面兩個斷言各自只對一側的守衛敏感，拿掉哪一側就紅哪一個，不會互相遮蔽。
+
+# 只有 A 側逆序：拿掉 pattern 的 $1 <= $2 會誤判成重疊（5<=10 且 1<=4）。
+if backtest_ranges_overlap "5 4" "1 10"; then fail "A 側逆序應為假"; else ok "A 側逆序不重疊"; fi
+
+# 只有 B 側逆序：拿掉迴圈裡的 bs[i] <= be[i] 會誤判成重疊（1<=4 且 5<=10）。
+if backtest_ranges_overlap "1 10" "5 4"; then fail "B 側逆序應為假"; else ok "B 側逆序不重疊"; fi
+
 # 逆序範圍（無效區間）不應與任何東西重疊
 if backtest_ranges_overlap "20 10" "15 25"; then fail "逆序範圍應為假"; else ok "逆序範圍不重疊"; fi
+
+# 逆序記錄是「跳過」不是「整組作廢」：同一組裡合法的區間仍要能命中。
+if backtest_ranges_overlap "5 4
+10 20" "15 25"; then ok "逆序記錄不影響同組其他區間"; else fail "同組合法區間應仍為真"; fi
 
 # 靜態檢查：backtest_ranges_overlap 的空區間防禦守衛必須存在
 # 變更 || 為 && 或刪除此行，都會導致此測試失敗。
