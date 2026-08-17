@@ -56,6 +56,12 @@ case "${1:-}" in
     LABEL_A="${2:-}"; LABEL_B="${3:-}"
     [[ -n "$LABEL_A" && -n "$LABEL_B" ]] || {
       echo "用法：run-backtest.sh --compare <label_a> <label_b>" >&2; exit 1; }
+    # 兩個 label 一樣就是同一份 summary.json 硬比自己：印出來的兩欄一定
+    # 一模一樣，看起來像「新舊沒差別」，但其實根本沒比到東西，多半是打錯其中
+    # 一個 label。與其印一份沒有資訊量、還可能被誤讀成「真的沒差」的表，不如
+    # 直接擋下來讓使用者發現打錯了。
+    [[ "$LABEL_A" != "$LABEL_B" ]] || {
+      echo "SAME_LABEL：--compare 的兩個 label 都是 ${LABEL_A}，沒有東西可比" >&2; exit 1; }
     SUM_A="$BENCH_DIR/runs/$LABEL_A/summary.json"
     SUM_B="$BENCH_DIR/runs/$LABEL_B/summary.json"
     for f in "$SUM_A" "$SUM_B"; do
@@ -66,11 +72,19 @@ case "${1:-}" in
     # 變數、或漏改其中一次呼叫的檔名，讓兩欄印出同一份資料。
     JSON_A="$(cat "$SUM_A")" || { echo "READ_FAILED：讀取 ${SUM_A} 失敗" >&2; exit 1; }
     JSON_B="$(cat "$SUM_B")" || { echo "READ_FAILED：讀取 ${SUM_B} 失敗" >&2; exit 1; }
+    # 壞掉的 summary.json（存在但不是合法 JSON）在這裡一次擋下來，用自己的
+    # token 給乾淨診斷——不要放給下面逐鍵解析時才失敗，那樣使用者看到的會是
+    # jq 自己吐的 parse error（一長串看起來像 stack trace 的訊息），而不是
+    # 一句講得清楚「哪個檔案壞掉」的話。
+    jq -e . >/dev/null 2>&1 <<<"$JSON_A" || {
+      echo "SUMMARY_MALFORMED：${SUM_A} 不是合法 JSON" >&2; exit 1; }
+    jq -e . >/dev/null 2>&1 <<<"$JSON_B" || {
+      echo "SUMMARY_MALFORMED：${SUM_B} 不是合法 JSON" >&2; exit 1; }
     printf '%-18s %10s %10s\n' "指標" "$LABEL_A" "$LABEL_B"
     for k in expected_total missed miss_rate comments_total unmatched unmatched_rate severity_agree severity_rate; do
-      VAL_A="$(printf '%s' "$JSON_A" | jq -r --arg k "$k" '.[$k]')" ||
+      VAL_A="$(printf '%s' "$JSON_A" | jq -r --arg k "$k" '.[$k]' 2>/dev/null)" ||
         { echo "READ_FAILED：解析 ${SUM_A} 失敗" >&2; exit 1; }
-      VAL_B="$(printf '%s' "$JSON_B" | jq -r --arg k "$k" '.[$k]')" ||
+      VAL_B="$(printf '%s' "$JSON_B" | jq -r --arg k "$k" '.[$k]' 2>/dev/null)" ||
         { echo "READ_FAILED：解析 ${SUM_B} 失敗" >&2; exit 1; }
       printf '%-18s %10s %10s\n' "$k" "$VAL_A" "$VAL_B"
     done
@@ -99,6 +113,19 @@ n_conf="$(jq '[.[] | select(.confirmed == true)] | length' "$C")" ||
   { echo "READ_FAILED：讀取 ${C} 失敗" >&2; exit 1; }
 if [[ "$n_conf" -eq 0 ]]; then
   echo "NO_CONFIRMED：基準集裡沒有 confirmed==true 的 PR，先跑 scripts/review-benchmark.sh 完成人工確認" >&2
+  exit 1
+fi
+
+# (repo, pr) 是每個 PR 輸出檔的鍵，同一個鍵在 confirmed==true 裡出現兩次，
+# 第二筆會直接讀到第一筆跑出來的快取檔、再算一次、再疊加進彙總——不是報錯，
+# 是悄悄把同一個 PR 的 match／comment 多算一輪，把 expected_total、
+# comments_total 等等全部墊高。這種數字錯得不明顯，比噴錯還危險，所以擋在
+# 開始跑之前，不要留給重複計算自己去攤平。
+dup_keys="$(jq -r '
+  [.[] | select(.confirmed == true) | "\(.repo)#\(.pr)"]
+  | group_by(.) | map(select(length > 1) | .[0]) | .[]' "$C")"
+if [[ -n "$dup_keys" ]]; then
+  echo "DUPLICATE_PR：基準集裡有重複的 confirmed PR：$(tr '\n' ' ' <<<"$dup_keys")" >&2
   exit 1
 fi
 
