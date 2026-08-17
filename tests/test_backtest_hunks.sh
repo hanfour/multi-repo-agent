@@ -12,8 +12,9 @@ eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] go
 # --- 靜態檢查：backtest_ranges_overlap 必須用 tr '\n' ';' 轉換
 # 原因：gawk/mawk 會將 split(lines[1], p, " ") 拆成每個空白符，包括換行；
 # 在 CI（ubuntu-latest）上會失落第一個區間之後的所有範圍，無聲遺漏真正的缺陷。
+# 斷言須匹配實際呼叫形狀，不被註解綁定：| tr '\n' ';')" awk
 func_body=$(sed -n '/^backtest_ranges_overlap()/,/^}/p' "$MRA_DIR/lib/backtest-hunks.sh")
-if [[ "$func_body" == *"tr '\n' ';'"* ]]; then
+if grep -q "| tr '\\\\n' ';')\" awk" <<< "$func_body"; then
   ok "tr '\\n' ';' 轉換存在"
 else
   fail "tr '\\n' ';' 轉換遺漏（會在 gawk/mawk 上失敗）"
