@@ -33,7 +33,15 @@ case "$*" in
                   {"sha":"aaa111","commit":{"message":"fix(y): overlapping fix"}},
                   {"sha":"bbb222","commit":{"message":"fix(z): unrelated file"}}]' ;;
   *"pulls?state=closed"*)
-    printf '%s' '[{"number":4919,"merged_at":"2026-08-10T09:09:52Z","merge_commit_sha":"own999"}]' ;;
+    # 第四個獨立開關：讓 PR 列表本身（/pulls）失敗，commits／pr-files 都
+    # 正常。跟另外三個開關獨立、不會互相觸發。
+    if [[ "${MRA_TEST_PULLS_FAIL:-0}" == "1" ]]; then exit 1; fi
+    case "$*" in
+      # 專門給「合法空 repo」測試用：查得到列表，列表本身是空的，
+      # 不能跟上面的 PULLS_FAIL 開關共用同一種結束方式。
+      *"repos/acme/empty-repo/"*) printf '%s' '[]' ;;
+      *) printf '%s' '[{"number":4919,"merged_at":"2026-08-10T09:09:52Z","merge_commit_sha":"own999"}]' ;;
+    esac ;;
 esac
 exit 0
 SHIM
@@ -209,6 +217,60 @@ if [[ "$(cat "$TMP/lookup_fail3.out")" != *"候選（累計"* ]]; then
   ok "lookup 失敗（commit-ranges）不印出成功摘要（沒走到合併／寫檔那段）"
 else
   fail "lookup 失敗（commit-ranges）不印出成功摘要（沒走到合併／寫檔那段） — stdout: $(cat "$TMP/lookup_fail3.out")"
+fi
+
+# 第四個、也是後果最重的事故形狀：PR 列表本身（/pulls）讀不到，commits／
+# pr-files 都正常。這一版事故剛好是 /pulls 正常、/commits 中斷；如果反過來，
+# 外層／內層兩個計數器根本還沒開始跑，整個 repo 連候選名單都生不出來，卻
+# 只會印出跟「這個 repo 真的沒有已合併 PR」一模一樣的訊息——這是三個既有
+# 開關都測不到的第四種形狀。
+cp "$C" "$TMP/candidates.before4"
+MRA_TEST_PULLS_FAIL=1 bash "$MRA_DIR/scripts/build-benchmark.sh" \
+  --repo acme/wh-app --limit 10 >"$TMP/lookup_fail4.out" 2>"$TMP/lookup_fail4.err"
+rc=$?
+eq "lookup 失敗（pulls 列表）結束碼非 0" "1" "$rc"
+
+lf4_line="$(grep '^LOOKUP_FAILED' "$TMP/lookup_fail4.err" || true)"
+if [[ -n "$lf4_line" ]]; then
+  ok "lookup 失敗（pulls 列表）LOOKUP_FAILED 有印出"
+else
+  fail "lookup 失敗（pulls 列表）LOOKUP_FAILED 有印出 — stderr: $(cat "$TMP/lookup_fail4.err")"
+fi
+IFS=$'\t' read -r _ lf4_repo lf4_marker <<< "$lf4_line"
+eq "lookup 失敗（pulls 列表）標出 repo" "acme/wh-app" "$lf4_repo"
+# 這一條是本輪的核心：形狀要跟 PR／commit 層級的 LOOKUP_FAILED 不一樣
+# （用 "listing" 這個字，不是數字），操作者一看就知道是 repo 列表本身
+# 讀不到，不是「某些 PR／commit 查不到」，要往完全不同的地方查。
+eq "lookup 失敗（pulls 列表）標出 listing 標記" "listing" "$lf4_marker"
+
+eq "lookup 失敗（pulls 列表）不寫入該 repo 的候選列" "0" \
+  "$(jq '[.[] | select(.repo == "acme/wh-app")] | length' "$C")"
+if diff -q "$TMP/candidates.before4" "$C" >/dev/null 2>&1; then
+  ok "lookup 失敗（pulls 列表）完全不動舊檔（逐位元組相同）"
+else
+  fail "lookup 失敗（pulls 列表）完全不動舊檔（逐位元組相同） — 檔案被動過"
+fi
+if [[ "$(cat "$TMP/lookup_fail4.out")" != *"候選（累計"* ]]; then
+  ok "lookup 失敗（pulls 列表）不印出成功摘要（沒走到合併／寫檔那段）"
+else
+  fail "lookup 失敗（pulls 列表）不印出成功摘要（沒走到合併／寫檔那段） — stdout: $(cat "$TMP/lookup_fail4.out")"
+fi
+
+# 合法的空 repo：查得到 PR 列表、列表本身就是空的，是正常結果，要跟上面
+# 「列表讀不到」分得清清楚楚——不能 exit 1，也不能印 LOOKUP_FAILED，兩者
+# 混在一起就是本輪要修的那個缺陷本身。這條斷言存在的目的就是證明兩個案例
+# 不會互相塌陷成同一種結果。
+empty_out="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/empty-repo --limit 10 2>&1)"
+eq "合法空 repo 結束碼 0" "0" "$?"
+if [[ "$empty_out" == *"沒有 merged PR"* ]]; then
+  ok "合法空 repo 印出專屬訊息"
+else
+  fail "合法空 repo 印出專屬訊息 — stdout: $empty_out"
+fi
+if [[ "$empty_out" != *"LOOKUP_FAILED"* ]]; then
+  ok "合法空 repo 不印 LOOKUP_FAILED（兩者不會互相塌陷）"
+else
+  fail "合法空 repo 不印 LOOKUP_FAILED（兩者不會互相塌陷） — stdout: $empty_out"
 fi
 
 # 合併輸入若已損毀（不是合法 JSON），要清掉壞掉的 candidates.json 並以非 0
