@@ -17,8 +17,13 @@ case "$*" in
     printf '%s' '[{"filename":"app/a.rb","patch":"@@ -92,7 +92,7 @@ def update\n x"},
                   {"filename":"app/b.rb","patch":"@@ -10,5 +10,5 @@ def x\n y"}]' ;;
   *"commits/aaa111"*)
+    # 第三個獨立開關：只讓單一 commit 的查詢（內層、每個 fix commit 各一次）
+    # 失敗，commits 列表跟 pulls 都正常——這是目前唯一會漏收候選、卻完全
+    # 沒有痕跡的形狀，跟外層兩個開關各自獨立、不會互相觸發。
+    if [[ "${MRA_TEST_COMMITSHA_FAIL:-0}" == "1" ]]; then exit 1; fi
     printf '%s' '{"files":[{"filename":"app/a.rb","patch":"@@ -95,2 +95,4 @@ def update\n z"}]}' ;;
   *"commits/bbb222"*)
+    if [[ "${MRA_TEST_COMMITSHA_FAIL:-0}" == "1" ]]; then exit 1; fi
     printf '%s' '{"files":[{"filename":"app/c.rb","patch":"@@ -1,2 +1,2 @@\n w"}]}' ;;
   *"commits?since"*|*"commits?"*)
     # 模擬真實事故：org 的 /commits 端點局部中斷（404），/pulls 端點不受影響。
@@ -115,9 +120,13 @@ if [[ -n "$lf_line" ]]; then
 else
   fail "LOOKUP_FAILED 有印出 — stderr: $(cat "$TMP/lookup_fail.err")"
 fi
-IFS=$'\t' read -r _ lf_repo lf_failed _ <<< "$lf_line"
+IFS=$'\t' read -r _ lf_repo lf_outer lf_inner _ <<< "$lf_line"
 eq "LOOKUP_FAILED 標出 repo" "acme/nest-app-2" "$lf_repo"
-eq "LOOKUP_FAILED 標出失敗筆數" "1" "$lf_failed"
+# fix-commits 是外層 lookup，失敗要算進 PR 層的計數，不能混進內層（commit
+# 層）的計數——這條連同 pr-ranges 那組、inner 那組一起，才能證明報告真的
+# 分得出外層跟內層失敗是哪一種。
+eq "LOOKUP_FAILED 標出外層（PR lookup）失敗筆數" "1" "$lf_outer"
+eq "LOOKUP_FAILED 標出內層（commit lookup）失敗筆數" "0" "$lf_inner"
 
 eq "lookup 失敗不寫入該 repo 的候選列" "0" \
   "$(jq '[.[] | select(.repo == "acme/nest-app-2")] | length' "$C")"
@@ -151,9 +160,10 @@ if [[ -n "$lf2_line" ]]; then
 else
   fail "lookup 失敗（pr-ranges）LOOKUP_FAILED 有印出 — stderr: $(cat "$TMP/lookup_fail2.err")"
 fi
-IFS=$'\t' read -r _ lf2_repo lf2_failed _ <<< "$lf2_line"
+IFS=$'\t' read -r _ lf2_repo lf2_outer lf2_inner _ <<< "$lf2_line"
 eq "lookup 失敗（pr-ranges）標出 repo" "acme/bl-app" "$lf2_repo"
-eq "lookup 失敗（pr-ranges）標出失敗筆數" "1" "$lf2_failed"
+eq "lookup 失敗（pr-ranges）標出外層（PR lookup）失敗筆數" "1" "$lf2_outer"
+eq "lookup 失敗（pr-ranges）標出內層（commit lookup）失敗筆數" "0" "$lf2_inner"
 
 eq "lookup 失敗（pr-ranges）不寫入該 repo 的候選列" "0" \
   "$(jq '[.[] | select(.repo == "acme/bl-app")] | length' "$C")"
@@ -161,6 +171,44 @@ if diff -q "$TMP/candidates.before2" "$C" >/dev/null 2>&1; then
   ok "lookup 失敗（pr-ranges）完全不動舊檔（逐位元組相同）"
 else
   fail "lookup 失敗（pr-ranges）完全不動舊檔（逐位元組相同） — 檔案被動過"
+fi
+
+# 第三個事故形狀：commits 列表跟 pulls 都正常，只有單一 commit 的查詢（內層、
+# 迴圈裡對每個 fix commit 各查一次）失敗。這是三個開關裡最隱蔽的一種——
+# 原本的 || continue 只會讓這個 fix commit 被當成「沒有重疊」，PR 本身的
+# 判斷照樣往下走，不會有任何非 0 結束碼、也不會有任何訊息，一個真正有缺陷
+# 的候選就這樣悄悄從基準集消失，比整個 repo 交白卷還難發現。
+# fixes = [aaa111, bbb222] 兩筆，開關讓兩個 commits/<sha> 端點都失敗，內層
+# 失敗筆數應該是 2（每個 fix commit 各算一次，不是每個 PR 算一次）。
+cp "$C" "$TMP/candidates.before3"
+MRA_TEST_COMMITSHA_FAIL=1 bash "$MRA_DIR/scripts/build-benchmark.sh" \
+  --repo acme/lg-app --limit 10 >"$TMP/lookup_fail3.out" 2>"$TMP/lookup_fail3.err"
+rc=$?
+eq "lookup 失敗（commit-ranges）結束碼非 0" "1" "$rc"
+
+lf3_line="$(grep '^LOOKUP_FAILED' "$TMP/lookup_fail3.err" || true)"
+if [[ -n "$lf3_line" ]]; then
+  ok "lookup 失敗（commit-ranges）LOOKUP_FAILED 有印出"
+else
+  fail "lookup 失敗（commit-ranges）LOOKUP_FAILED 有印出 — stderr: $(cat "$TMP/lookup_fail3.err")"
+fi
+IFS=$'\t' read -r _ lf3_repo lf3_outer lf3_inner _ <<< "$lf3_line"
+eq "lookup 失敗（commit-ranges）標出 repo" "acme/lg-app" "$lf3_repo"
+# 這兩條是這一輪修法的核心：內層失敗不能算進外層的計數，外層要維持 0。
+eq "lookup 失敗（commit-ranges）標出外層（PR lookup）失敗筆數" "0" "$lf3_outer"
+eq "lookup 失敗（commit-ranges）標出內層（commit lookup）失敗筆數" "2" "$lf3_inner"
+
+eq "lookup 失敗（commit-ranges）不寫入該 repo 的候選列" "0" \
+  "$(jq '[.[] | select(.repo == "acme/lg-app")] | length' "$C")"
+if diff -q "$TMP/candidates.before3" "$C" >/dev/null 2>&1; then
+  ok "lookup 失敗（commit-ranges）完全不動舊檔（逐位元組相同）"
+else
+  fail "lookup 失敗（commit-ranges）完全不動舊檔（逐位元組相同） — 檔案被動過"
+fi
+if [[ "$(cat "$TMP/lookup_fail3.out")" != *"候選（累計"* ]]; then
+  ok "lookup 失敗（commit-ranges）不印出成功摘要（沒走到合併／寫檔那段）"
+else
+  fail "lookup 失敗（commit-ranges）不印出成功摘要（沒走到合併／寫檔那段） — stdout: $(cat "$TMP/lookup_fail3.out")"
 fi
 
 # 合併輸入若已損毀（不是合法 JSON），要清掉壞掉的 candidates.json 並以非 0
