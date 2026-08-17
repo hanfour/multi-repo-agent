@@ -10,6 +10,10 @@ cat > "$TMP/bin/gh" <<'SHIM'
 #!/usr/bin/env bash
 case "$*" in
   *"pulls/4919/files"*)
+    # 另一個獨立的開關：只讓 pr-ranges 這條 lookup 失敗，commits 端點正常。
+    # 用來把 A（fix-commits 失敗）跟 B（pr-ranges 失敗）測成兩條不會互相
+    # 觸發的路徑——fix_commits 失敗會在到達這裡之前就 continue 掉。
+    if [[ "${MRA_TEST_PRFILES_FAIL:-0}" == "1" ]]; then exit 1; fi
     printf '%s' '[{"filename":"app/a.rb","patch":"@@ -92,7 +92,7 @@ def update\n x"},
                   {"filename":"app/b.rb","patch":"@@ -10,5 +10,5 @@ def x\n y"}]' ;;
   *"commits/aaa111"*)
@@ -17,6 +21,9 @@ case "$*" in
   *"commits/bbb222"*)
     printf '%s' '{"files":[{"filename":"app/c.rb","patch":"@@ -1,2 +1,2 @@\n w"}]}' ;;
   *"commits?since"*|*"commits?"*)
+    # 模擬真實事故：org 的 /commits 端點局部中斷（404），/pulls 端點不受影響。
+    # 開關用環境變數，其他測試不用改就自動不受影響。
+    if [[ "${MRA_TEST_COMMITS_FAIL:-0}" == "1" ]]; then exit 1; fi
     printf '%s' '[{"sha":"own999","commit":{"message":"fix(x): the PR itself (#4919)"}},
                   {"sha":"aaa111","commit":{"message":"fix(y): overlapping fix"}},
                   {"sha":"bbb222","commit":{"message":"fix(z): unrelated file"}}]' ;;
@@ -44,8 +51,14 @@ eq "未知參數結束碼非 0" "1" "$?"
 bash "$MRA_DIR/scripts/build-benchmark.sh" --repo >/dev/null 2>&1
 eq "缺 --repo 值結束碼非 0" "1" "$?"
 
-bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --limit 10 >/dev/null 2>&1
+run1_out="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --limit 10 2>&1)"
 eq "退出碼 0" "0" "$?"
+# 成功時也要回報掃了幾筆 PR：掃 3 筆跟掃 100 筆不能印出同一種乾淨結尾。
+if [[ "$run1_out" == *"掃描 1 筆"* ]]; then
+  ok "成功時回報掃描筆數"
+else
+  fail "成功時回報掃描筆數 — stdout: $run1_out"
+fi
 
 C="$TMP/bench/candidates.json"
 if [[ -s "$C" ]]; then ok "candidates.json 產出"; else fail "candidates.json 沒產出"; fi
@@ -83,6 +96,72 @@ eq "跨 repo 隔離：repo B 的 expected_findings 不受影響" '["dup pr numbe
   "$(jq -c '.[] | select(.repo == "acme/nest-monorepo-2.0" and .pr == 4919) | .expected_findings' "$C")"
 eq "跨 repo 隔離：合鍵含 repo（repo A 自己的欄位沒被同號的 repo B 污染）" '["SQL injection risk"]' \
   "$(jq -c '.[] | select(.repo == "acme/rails-app-1" and .pr == 4919) | .expected_findings' "$C")"
+
+# org 的 /commits 端點局部中斷（404），/pulls 端點正常——這是真實發生過的
+# 事故形狀，不是編造的邊界案例。backtest_fix_commits 對每一筆 PR 都會失敗，
+# 這跟「這個 repo 本來就沒有候選」是兩回事：混在一起會讓整個 repo 的候選
+# 悄悄消失，還印出跟「沒有候選」一模一樣的乾淨結尾。用一個新 repo 名稱測，
+# 確定：(1) 這個 repo 不會有任何候選列被寫進去，(2) 檔案裡其他每一個位元組
+# ——包括別的 repo 的列、包括已經填好的 confirmed——完全不受影響。
+cp "$C" "$TMP/candidates.before"
+MRA_TEST_COMMITS_FAIL=1 bash "$MRA_DIR/scripts/build-benchmark.sh" \
+  --repo acme/nest-app-2 --limit 10 >"$TMP/lookup_fail.out" 2>"$TMP/lookup_fail.err"
+rc=$?
+eq "lookup 失敗結束碼非 0" "1" "$rc"
+
+lf_line="$(grep '^LOOKUP_FAILED' "$TMP/lookup_fail.err" || true)"
+if [[ -n "$lf_line" ]]; then
+  ok "LOOKUP_FAILED 有印出"
+else
+  fail "LOOKUP_FAILED 有印出 — stderr: $(cat "$TMP/lookup_fail.err")"
+fi
+IFS=$'\t' read -r _ lf_repo lf_failed _ <<< "$lf_line"
+eq "LOOKUP_FAILED 標出 repo" "acme/nest-app-2" "$lf_repo"
+eq "LOOKUP_FAILED 標出失敗筆數" "1" "$lf_failed"
+
+eq "lookup 失敗不寫入該 repo 的候選列" "0" \
+  "$(jq '[.[] | select(.repo == "acme/nest-app-2")] | length' "$C")"
+if diff -q "$TMP/candidates.before" "$C" >/dev/null 2>&1; then
+  ok "lookup 失敗完全不動舊檔（逐位元組相同）"
+else
+  fail "lookup 失敗完全不動舊檔（逐位元組相同） — 檔案被動過"
+fi
+# 失敗時合併／寫檔那段完全不該執行到——不能只看檔案內容剛好沒變（這個
+# fixture 剛好 0 個新候選，光比對內容測不出「其實還是走到寫檔那段」），
+# 要直接驗證成功摘要那幾行完全沒印出來。
+if [[ "$(cat "$TMP/lookup_fail.out")" != *"候選（累計"* ]]; then
+  ok "lookup 失敗不印出成功摘要（沒走到合併／寫檔那段）"
+else
+  fail "lookup 失敗不印出成功摘要（沒走到合併／寫檔那段） — stdout: $(cat "$TMP/lookup_fail.out")"
+fi
+
+# 同一個事故形狀，但換成只讓 pr-ranges 這條 lookup 失敗（commits 端點正常）。
+# fix-commits 失敗會在還沒碰到 pr-ranges 之前就 continue 掉，所以上面那個
+# 測試測不到「pr-ranges 失敗」這條路徑有沒有一樣被算成失敗，需要另一個獨立
+# 案例才分得出兩條路徑是不是各自都有處理，不是只處理了其中一條。
+cp "$C" "$TMP/candidates.before2"
+MRA_TEST_PRFILES_FAIL=1 bash "$MRA_DIR/scripts/build-benchmark.sh" \
+  --repo acme/bl-app --limit 10 >"$TMP/lookup_fail2.out" 2>"$TMP/lookup_fail2.err"
+rc=$?
+eq "lookup 失敗（pr-ranges）結束碼非 0" "1" "$rc"
+
+lf2_line="$(grep '^LOOKUP_FAILED' "$TMP/lookup_fail2.err" || true)"
+if [[ -n "$lf2_line" ]]; then
+  ok "lookup 失敗（pr-ranges）LOOKUP_FAILED 有印出"
+else
+  fail "lookup 失敗（pr-ranges）LOOKUP_FAILED 有印出 — stderr: $(cat "$TMP/lookup_fail2.err")"
+fi
+IFS=$'\t' read -r _ lf2_repo lf2_failed _ <<< "$lf2_line"
+eq "lookup 失敗（pr-ranges）標出 repo" "acme/bl-app" "$lf2_repo"
+eq "lookup 失敗（pr-ranges）標出失敗筆數" "1" "$lf2_failed"
+
+eq "lookup 失敗（pr-ranges）不寫入該 repo 的候選列" "0" \
+  "$(jq '[.[] | select(.repo == "acme/bl-app")] | length' "$C")"
+if diff -q "$TMP/candidates.before2" "$C" >/dev/null 2>&1; then
+  ok "lookup 失敗（pr-ranges）完全不動舊檔（逐位元組相同）"
+else
+  fail "lookup 失敗（pr-ranges）完全不動舊檔（逐位元組相同） — 檔案被動過"
+fi
 
 # 合併輸入若已損毀（不是合法 JSON），要清掉壞掉的 candidates.json 並以非 0
 # 結束，不能留著讓下一輪看起來像是延用上一輪的結果，也不能留下沒搬成功的
