@@ -1,14 +1,28 @@
 #!/usr/bin/env bash
 # 回測基準集的 ground truth 候選判定。
 #
-# 判定：PR 合併後 N 天內，有 message 含 fix/hotfix/bug（任意位置的子字串比對）
-# 的 commit 改到同一檔案，且行號區間與 PR 的改動重疊。
+# 判定：PR 合併後 N 天內，有 commit message 標題（第一行）含 fix/hotfix/bugfix/bug
+# 或 修正/修復/修掉（任意位置的子字串比對，中英文都算）的 commit 改到同一檔案，
+# 且行號區間與 PR 的改動重疊。
 #
-# 子字串比對而非錨定在 message 開頭：實測 acme/rails-app-1 300 筆真實 commit
-# message，子字串比對命中 31 筆、錨定在開頭只命中 14 筆——這個團隊不是每個
-# fix commit 都寫 `fix(scope):`，常見的還有 `FIN-264 fix: ...`、
-# `ITP-3045 fix: ...`、`Fix team split ...`、`[Bugfix] ...` 這類前面帶
-# ticket 編號或大寫字首的寫法，錨定會漏掉 55% 的真 fix commit。
+# 標題子字串比對而非錨定在標題開頭：這個團隊不是每個 fix commit 都寫
+# `fix(scope):`，常見的還有 `FIN-264 fix: ...`、`ITP-3045 fix: ...`、
+# `Fix team split ...`、`[Bugfix] ...`、`[ODM] 上刊通報 修正轉檔` 這類前面
+# 帶 ticket 編號、大寫字首、或中文描述的寫法，fix 詞彙落在句子中間。錨定在
+# 開頭會漏掉這類真 fix commit（實測 acme/rails-app-1 300 筆真實 commit，錨定比
+# 子字串比對少命中超過一半）。
+#
+# 中英文詞彙都要收：只比對英文 fix/hotfix/bug，300 筆裡有 52 筆「完全沒出現
+# 任何英文 fix 字樣、只用中文寫」的真 fix commit 會被漏掉（例：「修正 function
+# 不存在問題」），佔真 fix commit 的四成。基準集的用途是拿去測別的工具漏抓
+# 率，分母本身就漏 4 成，量出來的數字沒有意義。
+#
+# 只看第一行、不看整個 message body：GitHub squash merge 會把每個子 commit
+# 的訊息都摺進 body。一個標題叫「雜項調整」的 batch PR，body 裡隨便一行
+# `fix rubocop`／`fix rspec` 這種 lint／測試收尾就會讓整個 PR 被誤收——那是
+# 雜訊，不是真正在修的東西，而且這個 batch PR 通常跟候選要問的那個 PR 毫無
+# 關係。標題才是這次 commit 對自己下的結論。
+#
 # 兩種誤判的代價不對稱：誤收的候選還要通過行號重疊比對、最後仍有人工確認
 # 這一關；誤刪的候選則永遠不會出現，之後也補不回來。候選命中率本來就只有
 # 12.5%，母體已經很窄，寧可多留、不能漏掉。
@@ -45,18 +59,21 @@ backtest_fix_commits() {
   local repo="$1" pr="$2" merged="$3" own="$4" days="${5:-14}"
   local until; until="$(backtest_window_end "$merged" "$days")"
   # gh api 的 --jq 不接受 --arg，所以這裡 pipe 給 jq 而不是用 --jq。
-  # fix/hotfix/bug 是任意位置的子字串比對（見檔頭註解的理由），所以額外排除
-  # `Merge ` 開頭的合併 commit——像 `Merge pull request #4873 from
-  # acme/misc-20260513-fix-seq` 這種訊息，分支名裡常帶 "fix" 字樣，
-  # 子字串比對會誤收，但這只是合併雜訊，不是真正的 fix commit。
+  # fix 詞彙（中英文，見檔頭註解的理由）只比對標題（第一行），不看整個
+  # message body——這兩個改動要一起上：只限定標題、不擴詞彙，中文 fix
+  # commit 還是漏掉；只擴詞彙、不限定標題，squash body 的雜訊還是混進來。
+  # `Merge ` 開頭的合併 commit 額外排除——像 `Merge pull request #4873 from
+  # acme/misc-20260513-fix-seq` 這種標題，分支名裡常帶 "fix" 字樣，子字串
+  # 比對會誤收，但這只是合併雜訊，不是真正的 fix commit。
   gh api "repos/$repo/commits?since=$merged&until=$until&per_page=100" 2>/dev/null \
     | jq --arg own "$own" --arg pr "$pr" '
       [ .[]
+        | (.commit.message | split("\n")[0]) as $title
         | select(.sha != $own)
-        | select(.commit.message | test("fix|hotfix|bug"; "i"))
-        | select(.commit.message | test("^Merge "; "i") | not)
+        | select($title | test("fix|hotfix|bugfix|bug|修正|修復|修掉"; "i"))
+        | select($title | test("^Merge "; "i") | not)
         | select(.commit.message | test("#" + $pr + "\\b") | not)
-        | {sha: .sha, message: (.commit.message | split("\n")[0])} ]'
+        | {sha: .sha, message: $title} ]'
 }
 
 # 內部用：把 [{filename, patch}] 轉成 {"<path>": [[起,迄], ...]}

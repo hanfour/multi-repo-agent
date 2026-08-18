@@ -30,7 +30,12 @@ case "$*" in
                   {"sha":"bbb222","commit":{"message":"fix(z): unrelated file"}},
                   {"sha":"ccc333","commit":{"message":"feat(w): add new endpoint"}},
                   {"sha":"ddd444","commit":{"message":"fix(q): mentions the PR (#4919)"}},
-                  {"sha":"fff666","commit":{"message":"Merge pull request #4873 from acme/misc-20260513-fix-seq"}}]' ;;
+                  {"sha":"fff666","commit":{"message":"Merge pull request #4873 from acme/misc-20260513-fix-seq"}},
+                  {"sha":"jjj000","commit":{"message":"修正 function 不存在問題"}},
+                  {"sha":"kkk111","commit":{"message":"修復 API 逾時問題"}},
+                  {"sha":"lll222","commit":{"message":"雜項調整 20260316\nfix rubocop\nfix rspec"}},
+                  {"sha":"mmm333","commit":{"message":"季度盤點作業\n本次一併修正相關欄位對應"}},
+                  {"sha":"nnn444","commit":{"message":"[ODM] 上刊通報 修正轉檔"}}]' ;;
   *"pulls?state=closed"*)
     printf '%s' '[{"number":4919,"merged_at":"2026-08-10T09:09:52Z","merge_commit_sha":"own999"},
                   {"number":4918,"merged_at":null,"merge_commit_sha":null}]' ;;
@@ -51,9 +56,35 @@ eq "14 天視窗" "2026-08-24T09:09:52Z" "$(backtest_window_end 2026-08-10T09:09
 eq "7 天視窗"  "2026-08-17T09:09:52Z" "$(backtest_window_end 2026-08-10T09:09:52Z 7)"
 
 # 排除自己的 merge commit(own999)、帶 #4919 的 commit(own999、ddd444)、
-# Merge commit(fff666)、以及非 fix 的 commit(ccc333)
-eq "候選 fix commit" '["aaa111","bbb222"]' \
+# Merge commit(fff666)、非 fix 的 commit(ccc333)、以及標題沒有 fix 意涵、
+# fix 字樣只出現在 squash body 裡的 commit(lll222、mmm333)
+eq "候選 fix commit" '["aaa111","bbb222","jjj000","kkk111","nnn444"]' \
   "$(backtest_fix_commits acme/rails-app-1 4919 2026-08-10T09:09:52Z own999 14 | jq -c '[.[].sha]')"
+
+# 標題只有中文、完全沒出現任何英文 fix 字樣,也要收(修正)
+eq "中文 修正 被收入" "true" \
+  "$(backtest_fix_commits acme/rails-app-1 4919 2026-08-10T09:09:52Z own999 14 | jq 'any(.[]; .sha == "jjj000")')"
+
+# 標題只有中文、完全沒出現任何英文 fix 字樣,也要收(修復)
+eq "中文 修復 被收入" "true" \
+  "$(backtest_fix_commits acme/rails-app-1 4919 2026-08-10T09:09:52Z own999 14 | jq 'any(.[]; .sha == "kkk111")')"
+
+# 英文 fix(scope): 仍然要收,既有行為沒有被新規則弄壞
+eq "英文 fix(scope) 仍收入" "true" \
+  "$(backtest_fix_commits acme/rails-app-1 4919 2026-08-10T09:09:52Z own999 14 | jq 'any(.[]; .sha == "aaa111")')"
+
+# 標題沒有 fix 意涵,squash 進 body 的英文 fix 字樣不該讓它被收
+eq "body 帶英文 fix 不收" "false" \
+  "$(backtest_fix_commits acme/rails-app-1 4919 2026-08-10T09:09:52Z own999 14 | jq 'any(.[]; .sha == "lll222")')"
+
+# 標題沒有 fix 意涵,squash 進 body 的中文修正字樣不該讓它被收
+eq "body 帶中文修正不收" "false" \
+  "$(backtest_fix_commits acme/rails-app-1 4919 2026-08-10T09:09:52Z own999 14 | jq 'any(.[]; .sha == "mmm333")')"
+
+# fix 詞彙出現在標題句子中間、不是開頭——這個團隊的標題不是 conventional
+# commit 格式,錨定在開頭會漏掉這種真候選。
+eq "修正 出現在句中仍收" "true" \
+  "$(backtest_fix_commits acme/rails-app-1 4919 2026-08-10T09:09:52Z own999 14 | jq 'any(.[]; .sha == "nnn444")')"
 
 # 隔離測試:own999 的 message 沒有帶 #4919,#pr 排除攔不到它,只有靠 sha 排除。
 # 拿掉「排除自己的 merge commit」這個條件時,只有這筆會現身。
