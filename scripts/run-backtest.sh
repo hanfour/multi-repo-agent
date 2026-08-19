@@ -237,6 +237,33 @@ if [[ "$prs" -eq 0 ]]; then
   exit 1
 fi
 
+# 覆蓋率下限：$prs 不是 0，不代表算出來的三個指標可用。ALL_REVIEWS_FAILED
+# 防的是「完全沒跑成」，沒防「跑成的太少」，那是同一種假象更隱蔽的版本。
+# 實測過：38 筆裡 34 筆因為 claude OAuth session 過期跑到一半失敗，只剩不
+# 具代表性的前 4 筆算出指標，其中 severity_rate 剛好是完美的 1.0，單看
+# 這幾個數字會誤判成「這個模式大幅優於現況」，而不是「只跑了 4 筆」。
+#
+# 一份 summary 的用途是拿去跟另一份比(--compare)。分母差距太大時，兩個
+# 數字之間的差異主要來自樣本、不是規則：這種情況下與其產出一份需要人自己
+# 記得「那次只跑了 4 筆」才能正確解讀的檔案，不如不產出，讓失敗長成一個
+# 明確的退出碼，而不是一份看起來正常的 summary.json。
+#
+# 門檻預設 0.8，可用 MRA_BACKTEST_MIN_COVERAGE 調整；設成 0 等同停用這道
+# 檢查(成功比例永遠 >= 0，不可能小於 0)。剛好等於門檻算通過(用 < 不用
+# <=)。輸入先驗證是不是合法數字，不合法時用自己的 token 擋下來，不要讓
+# 使用者看到 jq 自己吐的 parse error。
+MIN_COVERAGE="${MRA_BACKTEST_MIN_COVERAGE:-0.8}"
+if ! jq -n --argjson m "$MIN_COVERAGE" 'true' >/dev/null 2>&1; then
+  echo "MIN_COVERAGE_INVALID：MRA_BACKTEST_MIN_COVERAGE=${MIN_COVERAGE} 不是合法數字" >&2
+  exit 1
+fi
+coverage="$(jq -n --argjson p "$prs" --argjson n "$n_conf" '$p / $n')"
+if jq -n --argjson c "$coverage" --argjson m "$MIN_COVERAGE" -e '$c < $m' >/dev/null; then
+  coverage_display="$(jq -n --argjson c "$coverage" '($c * 10000 | round) / 10000')"
+  echo "COVERAGE_TOO_LOW：成功納入彙總 ${prs} 筆，confirmed 共 ${n_conf} 筆，實際比例 ${coverage_display}，低於門檻 ${MIN_COVERAGE}。這一輪的數字不可用，不是 review 品質問題，請查各 PR 的 .err 檔找失敗原因" >&2
+  exit 1
+fi
+
 aggregate_review="$(jq -n --argjson c "$all_comments" '{status: "COMMENT", summary: "aggregate", comments: $c}')"
 summary_metrics="$(backtest_metrics "$all_matches" "$aggregate_review")" ||
   { echo "METRICS_FAILED：計算彙總指標失敗" >&2; exit 1; }

@@ -440,8 +440,14 @@ esac
 SHIM
 chmod +x "$TMP/bin-incomplete/mra"
 
+# 這個 fixture 只有 3 筆 confirmed、成功納入彙總的只有 1 筆(9202)，比例
+# 1/3 遠低於覆蓋率下限的預設門檻 0.8。這支測試驗的是「incomplete／failed
+# 的 PR 有沒有被正確排除」這件事本身，不是覆蓋率門檻的行為(那條在
+# tests/test_run_backtest_coverage.sh 另外測)，用
+# MRA_BACKTEST_MIN_COVERAGE=0 停用門檻，這個 fixture 才不用為了配合門檻
+# 硬湊更多 confirmed 筆數，模糊掉它原本要驗的事。
 out_inc="$(PATH="$TMP/bin-incomplete:$PATH" MRA_BENCHMARK_DIR="$INC_DIR" \
-  bash "$S" --label incomplete-test 2>"$TMP/incomplete.err")"
+  MRA_BACKTEST_MIN_COVERAGE=0 bash "$S" --label incomplete-test 2>"$TMP/incomplete.err")"
 rc_inc=$?
 eq "1 筆 incomplete + 1 筆 failed + 1 筆正常時退出碼仍是 0" "0" "$rc_inc"
 has "終端機摘要行也印出 incomplete／failed 筆數" "$out_inc" "incomplete=1 failed=1"
