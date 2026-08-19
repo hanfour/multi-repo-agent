@@ -344,10 +344,10 @@ has   "standard 模式傳 --strategy standard 給 mra" "$argv_standard" "--strat
 has   "standard 模式傳 --provider codex 給 mra" "$argv_standard" "--provider codex"
 lacks "standard 模式不傳 --personas 給 mra" "$argv_standard" "--personas"
 
-# --- codex model 覆蓋 -------------------------------------------------------
-# config.json 的 review.models.codex 是共用設定（在版控內），回測不改它，改用
-# mra review 的 --model 旗標。兩種模式都要帶：providerMode 預設 codex，
-# personas 模式一樣走到同一個 provider。
+# --- standard 模式的衍生 config：改 models.codex／codexReasoningEffort，
+# providerMode 不被改動 -------------------------------------------------------
+# config.json 的 review.models.codex 是共用設定（在版控內），回測不改它，
+# 從共用設定衍生一份副本，用 MRA_CONFIG 指過去。
 cfg_dir="$TMP/derived"; mkdir -p "$cfg_dir"
 out_cfg="$(MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CONFIG_DIR="$cfg_dir" \
   "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cfg.err")"
@@ -356,15 +356,71 @@ eq "產生衍生設定時退出碼 0" "0" "$rc_cfg"
 eq "產生衍生設定時仍印出 stub JSON 原樣" "$STUB_REVIEW_JSON" "$out_cfg"
 derived="$cfg_dir/mra-backtest-config.json"
 if [[ -s "$derived" ]]; then ok "衍生設定檔有寫出來"; else fail "衍生設定檔沒寫出來：$derived"; fi
-eq "衍生設定的 codex model 是 gpt-5.5" "gpt-5.5" "$(jq -r '.review.models.codex' "$derived" 2>/dev/null)"
-eq "衍生設定的 reasoning effort 是 xhigh" "xhigh" "$(jq -r '.review.codexReasoningEffort' "$derived" 2>/dev/null)"
+eq "standard 模式：衍生設定的 codex model 是 gpt-5.5" "gpt-5.5" \
+  "$(jq -r '.review.models.codex' "$derived" 2>/dev/null)"
+eq "standard 模式：衍生設定的 reasoning effort 是 xhigh" "xhigh" \
+  "$(jq -r '.review.codexReasoningEffort' "$derived" 2>/dev/null)"
+eq "standard 模式：providerMode 不被改動，維持共用設定的原值 codex" "codex" \
+  "$(jq -r '.review.providerMode' "$derived" 2>/dev/null)"
 eq "來源 config.json 沒有被改動" "gpt-5.6-luna" \
   "$(jq -r '.review.models.codex' "$FAKE/config.json" 2>/dev/null)"
+
+# 上面那條斷言只驗「值剛好是 codex」，驗不出「這個值到底是被程式碼動過還是
+# 本來就沒被動」。共用設定裡 providerMode 本來就是 codex，就算 standard
+# 模式的衍生邏輯手滑寫死 providerMode = "codex"，這條斷言照樣會過，測不出
+# 差異。這裡把來源設定的 providerMode 暫時改成一個真實情況不會出現的值，
+# 驗證 standard 模式衍生完之後這個怪值原封不動地留著，證明程式碼真的完全
+# 沒碰這個鍵，不是巧合對上同一個值。驗完要把 $FAKE/config.json 換回來，
+# 後面其他斷言都依賴它維持原本內容。
+orig_fake_config="$(cat "$FAKE/config.json")"
+jq '.review.providerMode = "sentinel-untouched-marker"' "$FAKE/config.json" > "$TMP/fake-config-sentinel.json"
+mv "$TMP/fake-config-sentinel.json" "$FAKE/config.json"
+rm -f "$cfg_dir/mra-backtest-config.json"
+MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CONFIG_DIR="$cfg_dir" \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json >/dev/null 2>&1
+eq "standard 模式真的完全沒碰 providerMode 這個鍵(不是剛好都是 codex)" \
+  "sentinel-untouched-marker" "$(jq -r '.review.providerMode' "$derived" 2>/dev/null)"
+printf '%s' "$orig_fake_config" > "$FAKE/config.json"
 # 只檢查衍生檔的內容不夠：export 掉了的話 mra 仍讀共用設定，機制整個失效而
 # 測試照樣綠。這一條斷言 mra 真的收到指向衍生檔的 MRA_CONFIG。
 has "mra 收到指向衍生設定的 MRA_CONFIG" "$(cat "$ENV_LOG")" "MRA_CONFIG=$derived"
 
-# 呼叫端自己指定 MRA_CONFIG 時，adapter 不覆蓋。
+# --- personas 模式的衍生 config：改 providerMode／models.claude，
+# models.codex／codexReasoningEffort 維持來源檔原值，不被動 -----------------
+# 這是這一輪要修的核心：上一版只改 models.codex，但 personas／debate 底下
+# 個別 agent 呼叫預設走 claude(lib/review-personas.sh:59)，共用
+# providerMode 又是 codex，解析出來的 model 名稱被送去給 claude，claude
+# 不認得那個名字，整批失敗(實測：claude failed: "gpt-5.5" is not a model
+# this version of Claude Code recognizes)。
+PCFG_DIR="$TMP/derived-personas"; mkdir -p "$PCFG_DIR"
+out_pcfg="$(MRA_BACKTEST_CONFIG_DIR="$PCFG_DIR" \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/pcfg.err")"
+rc_pcfg=$?
+eq "personas 模式產生衍生設定時退出碼 0" "0" "$rc_pcfg"
+eq "personas 模式產生衍生設定時仍印出 stub JSON 原樣" "$STUB_REVIEW_JSON" "$out_pcfg"
+pderived="$PCFG_DIR/mra-backtest-config.json"
+if [[ -s "$pderived" ]]; then
+  ok "personas 模式衍生設定檔有寫出來"
+else
+  fail "personas 模式衍生設定檔沒寫出來：$pderived"
+fi
+eq "personas 模式：providerMode 被改成 claude" "claude" \
+  "$(jq -r '.review.providerMode' "$pderived" 2>/dev/null)"
+eq "personas 模式：models.claude 是預設值 sonnet" "sonnet" \
+  "$(jq -r '.review.models.claude' "$pderived" 2>/dev/null)"
+eq "personas 模式：models.codex 維持來源檔原值，沒被動過" "gpt-5.6-luna" \
+  "$(jq -r '.review.models.codex' "$pderived" 2>/dev/null)"
+eq "personas 模式：codexReasoningEffort 維持來源檔原值，沒被動過" "max" \
+  "$(jq -r '.review.codexReasoningEffort' "$pderived" 2>/dev/null)"
+
+# --- MRA_BACKTEST_CLAUDE_MODEL 可覆蓋 personas 模式的預設 model -----------
+PCFG_DIR2="$TMP/derived-personas-2"; mkdir -p "$PCFG_DIR2"
+MRA_BACKTEST_CONFIG_DIR="$PCFG_DIR2" MRA_BACKTEST_CLAUDE_MODEL=opus \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json >/dev/null 2>&1
+eq "MRA_BACKTEST_CLAUDE_MODEL 會覆蓋預設值" "opus" \
+  "$(jq -r '.review.models.claude' "$PCFG_DIR2/mra-backtest-config.json" 2>/dev/null)"
+
+# --- 呼叫端自己指定 MRA_CONFIG 時，adapter 不覆蓋 --------------------------
 rm -f "$ENV_LOG"
 caller_cfg="$TMP/caller-config.json"
 cp "$FAKE/config.json" "$caller_cfg"
@@ -387,7 +443,9 @@ eq "MRA_BACKTEST_CODEX_EFFORT 會覆蓋預設值" "high" \
 # --- adapter 有寫出執行條件回報檔(cond 檔)，內容是它實際用的值 ------------
 # run-backtest.sh 是呼叫端，看不到這裡衍生出來的設定；adapter 才是唯一
 # 知道「這次實際用了什麼」的地方，MRA_BACKTEST_COND_FILE 有設時要主動
-# 回報，不能讓呼叫端自己去猜(猜過一次，猜錯了)。
+# 回報，不能讓呼叫端自己去猜(猜過一次，猜錯了)。欄位原本叫 codex_model，
+# personas 模式跑的是 claude，填進一個叫 codex_model 的鍵本身就是錯的值，
+# 跟這一輪要修的問題同一類，改名成 model，另外加一個 provider 欄位。
 COND_FILE_TEST="$TMP/run-conditions-test.json"
 rm -f "$COND_FILE_TEST"
 write_gh_stub "$BASE_SHA" 0
@@ -404,9 +462,11 @@ if [[ -s "$COND_FILE_TEST" ]]; then
 else
   fail "cond 檔沒有被寫出來：$COND_FILE_TEST"
 fi
-eq "cond 檔的 codex_model 是這次實際用的值(不是預設的 gpt-5.5)" "gpt-cond-test" \
-  "$(jq -r '.codex_model' "$COND_FILE_TEST")"
-eq "cond 檔的 reasoning_effort 是這次實際用的值" "super" \
+eq "standard 模式 cond 檔的 model 是這次實際用的值(不是預設的 gpt-5.5)" \
+  "gpt-cond-test" "$(jq -r '.model' "$COND_FILE_TEST")"
+eq "standard 模式 cond 檔的 provider 是 codex" "codex" \
+  "$(jq -r '.provider' "$COND_FILE_TEST")"
+eq "standard 模式 cond 檔的 reasoning_effort 是這次實際用的值" "super" \
   "$(jq -r '.reasoning_effort' "$COND_FILE_TEST")"
 eq "cond 檔的 review_mode 是這次實際用的值(standard)" "standard" \
   "$(jq -r '.review_mode' "$COND_FILE_TEST")"
@@ -424,7 +484,20 @@ MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CONFIG_DIR="$cfg_dir" \
   MRA_BACKTEST_COND_FILE="$COND_FILE_TEST" \
   "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json >/dev/null 2>&1
 eq "換 MRA_BACKTEST_CODEX_MODEL 重跑後，cond 檔內容跟著變" "gpt-cond-test-2" \
-  "$(jq -r '.codex_model' "$COND_FILE_TEST")"
+  "$(jq -r '.model' "$COND_FILE_TEST")"
+
+# --- personas 模式的 cond 檔：provider／model 是 claude／sonnet，
+# reasoning_effort 是 JSON null，不是空字串也不是省略這個鍵 -----------------
+PCOND_FILE_TEST="$TMP/run-conditions-personas-test.json"
+rm -f "$PCOND_FILE_TEST"
+MRA_BACKTEST_CONFIG_DIR="$PCFG_DIR" MRA_BACKTEST_COND_FILE="$PCOND_FILE_TEST" \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json >/dev/null 2>&1
+eq "personas 模式 cond 檔的 provider 是 claude" "claude" \
+  "$(jq -r '.provider' "$PCOND_FILE_TEST")"
+eq "personas 模式 cond 檔的 model 是 sonnet" "sonnet" \
+  "$(jq -r '.model' "$PCOND_FILE_TEST")"
+eq "personas 模式 cond 檔的 reasoning_effort 是 JSON null(不是字串、不是省略)" \
+  "null" "$(jq -e '.reasoning_effort' "$PCOND_FILE_TEST")"
 
 # --- MRA_BACKTEST_COND_FILE 沒設時，adapter 不寫檔也不報錯 -----------------
 out_nocond="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/nocond.err")"
