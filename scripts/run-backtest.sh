@@ -136,6 +136,12 @@ if ! mkdir -p "$OUT"; then
 fi
 
 all_matches='[]'; all_comments='[]'; prs=0
+# 三個「不計入本次彙總」的類別，各自獨立計數＋記清單，跟 prs(成功納入彙總
+# 的筆數)並列寫進 summary.json：光印到 stderr 不夠，這個回測要回報的結論
+# 本身就包含「今天的設定在幾個真實 PR 上跑不完／跑失敗」，不能只讓人在跑的
+# 當下看一眼 log 就沒了，之後回頭看 summary.json 也要查得到。
+incomplete_list='[]'; n_incomplete=0
+failed_list='[]'; n_failed=0
 for ((i = 0; i < n_conf; i++)); do
   item="$(jq -c "[.[] | select(.confirmed == true)] | .[$i]" "$C")"
   repo="$(printf '%s' "$item" | jq -r '.repo')"
@@ -147,16 +153,43 @@ for ((i = 0; i < n_conf; i++)); do
   # 編號會撞。
   safe_repo="${repo//\//__}"
   f="$OUT/${safe_repo}__${pr}.json"
+  # stderr 不再丟進 /dev/null，改存進同目錄的 .err 檔：實跑時 review 沒跑完
+  # (codex/claude per-attempt timeout、探索預算燒光…)完全找不到原因，因為
+  # 診斷訊息(含 lib/review.sh 在 MRA_REVIEW_EMIT_JSON=1 時改道 stderr 印的
+  # log_progress／log_info／log_warn)全被丟掉了。這是回測用的暫存目錄，不
+  # 進版控，不用擔心體積(單筆實測 1.78MB)。
+  errf="$OUT/${safe_repo}__${pr}.err"
 
   if [[ ! -s "$f" ]]; then
-    if ! "$MRA_CMD" review "$repo" --pr "$pr" --strategy personas --json > "$f" 2>/dev/null; then
-      echo "REVIEW_FAILED：${repo}#${pr} 的 review 失敗，這個 PR 不計入本次彙總" >&2
+    if ! "$MRA_CMD" review "$repo" --pr "$pr" --strategy personas --json > "$f" 2>"$errf"; then
+      echo "REVIEW_FAILED：${repo}#${pr} 的 review 失敗，詳見 ${errf}，這個 PR 不計入本次彙總" >&2
       rm -f "$f"
+      n_failed=$((n_failed + 1))
+      failed_list="$(jq -n --argjson a "$failed_list" --arg k "${repo}#${pr}" '$a + [$k]')"
       continue
     fi
   fi
   if ! jq -e '.comments' "$f" >/dev/null 2>&1; then
     echo "REVIEW_SHAPE_INVALID：${f} 不符合 review 輸出格式，這個 PR 不計入本次彙總" >&2
+    continue
+  fi
+
+  # status=="COMMENT" 只可能是 REVIEW_INCOMPLETE：inline schema 只允許
+  # APPROVED/CHANGES_REQUESTED(見 lib/review.sh 對 single-pass inline 分支
+  # 的註解)，COMMENT 是 _review_singlepass_body(lib/review-json.sh)在 raw
+  # 為空或找不到完成 sentinel 時的專屬產物。形狀完全合法(comments 陣列
+  # 照樣存在，可能是空的)，但內容是假的，不是「跑完了、零發現」。不擋下來
+  # 的話，一次沒跑完的 review 會被當成「跑完了、零發現」，那個 PR 的
+  # expected finding 全數計入漏抓，跟檔頭寫的 false-green 是同一種形狀：
+  # 失敗長得像一個合理的數字。
+  status="$(jq -r '.status' "$f" 2>/dev/null)"
+  if [[ "$status" == "COMMENT" ]]; then
+    echo "REVIEW_INCOMPLETE：${repo}#${pr} 的 review 沒有跑完(status=COMMENT)，詳見 ${errf}，這個 PR 不計入本次彙總" >&2
+    # 輸出檔一定要刪：留著的話下次續跑會被上面的 -s 判定成「已經有結果」
+    # 而跳過，這個 PR 就永遠不會重跑，永遠卡在跑不完的狀態。
+    rm -f "$f"
+    n_incomplete=$((n_incomplete + 1))
+    incomplete_list="$(jq -n --argjson a "$incomplete_list" --arg k "${repo}#${pr}" '$a + [$k]')"
     continue
   fi
 
@@ -191,7 +224,11 @@ summary_metrics="$(backtest_metrics "$all_matches" "$aggregate_review")" ||
 
 _write_summary "$OUT/summary.json" \
   --argjson m "$summary_metrics" --argjson prs "$prs" --arg label "$LABEL" \
-  '$m + {prs: $prs, label: $label}' || exit 1
+  --argjson incomplete_count "$n_incomplete" --argjson incomplete_prs "$incomplete_list" \
+  --argjson failed_count "$n_failed" --argjson failed_prs "$failed_list" \
+  '$m + {prs: $prs, label: $label,
+         incomplete_count: $incomplete_count, incomplete_prs: $incomplete_prs,
+         failed_count: $failed_count, failed_prs: $failed_prs}' || exit 1
 
-echo "label=$LABEL prs=$prs"
+echo "label=$LABEL prs=$prs incomplete=$n_incomplete failed=$n_failed"
 jq -r '"漏抓率 \(.miss_rate)  未對應率 \(.unmatched_rate)  嚴重度吻合率 \(.severity_rate)"' "$OUT/summary.json"
