@@ -105,9 +105,15 @@ case "$*" in
      {"path":"app/c3.rb","line":3,"body":"x","severity":"MEDIUM"},
      {"path":"app/extra5.rb","line":99,"body":"x","severity":"LOW"}]}' ;;
   *"--pr 8104"*)
+    echo "codex transient failure (ec=142)" >&2
     exit 1 ;;
   *"--pr 8105"*)
-    printf '%s' '{"status":"COMMENT","summary":"x","comments":[
+    # status 故意用 CHANGES_REQUESTED，不是 COMMENT：inline schema 底下
+    # COMMENT 專屬於 REVIEW_INCOMPLETE(見 lib/review.sh)，一份帶著 2 筆真的
+    # comments 的完整 review 不可能合法地是 COMMENT。這裡就是要測「零期望
+    # findings 不代表零 comments」，用 COMMENT 反而會被新加的
+    # REVIEW_INCOMPLETE 檢查誤判成沒跑完而排除，語意上就錯了。
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
      {"path":"app/e1.rb","line":1,"body":"x","severity":"LOW"},
      {"path":"app/e2.rb","line":2,"body":"x","severity":"LOW"}]}' ;;
   *"--pr 8106"*|*"--pr 8107"*)
@@ -150,6 +156,24 @@ eq "未對應數 4(位移要以 comment 累積數為準，不是 match 累積數
 eq "未對應率 0.36"                        "0.36" "$(jq -r '.unmatched_rate' "$S1")"
 eq "嚴重度吻合數 6"                       "6"    "$(jq -r '.severity_agree' "$S1")"
 eq "嚴重度吻合率 0.86"                     "0.86" "$(jq -r '.severity_rate' "$S1")"
+
+# --- REVIEW_FAILED(8104)不只印到 stderr，也要進 summary.json ---------------
+eq "failed_count 是 1(8104)"              "1"    "$(jq -r '.failed_count' "$S1")"
+eq "failed_prs 清單裡有 acme/rails-app-1#8104"   "acme/rails-app-1#8104" "$(jq -r '.failed_prs[0]' "$S1")"
+eq "這個基準集沒有 status=COMMENT 的 PR，incomplete_count 是 0" "0" \
+  "$(jq -r '.incomplete_count' "$S1")"
+eq "incomplete_prs 是空陣列" "[]" "$(jq -c '.incomplete_prs' "$S1")"
+
+# --- REVIEW_FAILED 的 stderr 不再丟進 /dev/null，改存進 .err 檔 ------------
+ERR_8104="$R/acme__rails-app-1__8104.err"
+if [[ -s "$ERR_8104" ]]; then
+  ok "8104 的 .err 檔有寫出診斷內容(不是空的或不存在)"
+else
+  fail ".err 檔是空的或不存在：$ERR_8104"
+fi
+has ".err 檔內容包含真正的失敗原因(codex transient failure)" \
+  "$(cat "$ERR_8104")" "codex transient failure"
+has "REVIEW_FAILED 訊息指出 .err 檔路徑" "$err_baseline_text" "$ERR_8104"
 
 # --- mra shim：after label(輸出跟 baseline 完全不同，--compare 才有東西可比)
 cat > "$TMP/bin/mra" <<'SHIM'
@@ -319,6 +343,122 @@ notol_body="$(jq -S 'del(.label)' "$TOL_DIR/runs/notol/summary.json")"
 tol5_body="$(jq -S 'del(.label)' "$TOL_DIR/runs/tol5/summary.json")"
 eq "省略 --tolerance 跟明講 --tolerance 5 結果相同(預設值真的是 5)" \
   "$notol_body" "$tol5_body"
+
+# --- status=="COMMENT" 只可能是 REVIEW_INCOMPLETE，不能被當成「零發現」計
+# 入彙總：inline schema 只允許 APPROVED/CHANGES_REQUESTED(見 lib/review.sh)，
+# COMMENT 是 _review_singlepass_body 在 raw 為空或找不到完成 sentinel 時的
+# 專屬產物。混進彙總的話，一次沒跑完的 review 會被當成「零發現」，那個 PR
+# 的 expected finding 全數算成漏抓。用獨立的 MRA_BENCHMARK_DIR，不要動到
+# 上面主要 fixture 的 candidates.json。
+#
+# 9201=incomplete(status=COMMENT，expected 1 筆，完全不該計入彙總)
+# 9202=正常(status=CHANGES_REQUESTED，命中 1 筆)
+# 9203=failed(mra 本身 exit 1)
+INC_DIR="$TMP/bench-incomplete"
+mkdir -p "$INC_DIR" "$TMP/bin-incomplete"
+cat > "$INC_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":9201,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/a.rb","line":10,"severity":"HIGH","note":"a"}]},
+ {"repo":"acme/rails-app-1","pr":9202,"merged_at":"2026-08-02T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/b.rb","line":20,"severity":"HIGH","note":"b"}]},
+ {"repo":"acme/rails-app-1","pr":9203,"merged_at":"2026-08-03T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/c.rb","line":30,"severity":"HIGH","note":"c"}]}
+]
+J
+cat > "$TMP/bin-incomplete/mra" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"--pr 9201"*)
+    echo "[review] running claude (sonnet)..." >&2
+    echo "codex transient failure (ec=142)" >&2
+    printf '%s' '{"status":"COMMENT","comments":[]}' ;;
+  *"--pr 9202"*)
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+     {"path":"app/b.rb","line":20,"body":"x","severity":"HIGH"}]}' ;;
+  *"--pr 9203"*)
+    echo "some diagnostic noise before dying" >&2
+    exit 1 ;;
+  *)
+    echo "unexpected mra invocation: $*" >&2; exit 1 ;;
+esac
+SHIM
+chmod +x "$TMP/bin-incomplete/mra"
+
+out_inc="$(PATH="$TMP/bin-incomplete:$PATH" MRA_BENCHMARK_DIR="$INC_DIR" \
+  bash "$S" --label incomplete-test 2>"$TMP/incomplete.err")"
+rc_inc=$?
+eq "1 筆 incomplete + 1 筆 failed + 1 筆正常時退出碼仍是 0" "0" "$rc_inc"
+has "終端機摘要行也印出 incomplete／failed 筆數" "$out_inc" "incomplete=1 failed=1"
+
+INC_RUN="$INC_DIR/runs/incomplete-test"
+S_INC="$INC_RUN/summary.json"
+
+eq "incomplete 的 PR 不計入 expected_total(只有 9202 的 1 筆)" "1" \
+  "$(jq -r '.expected_total' "$S_INC")"
+eq "prs 只算成功納入彙總的 1 筆(9202)" "1" "$(jq -r '.prs' "$S_INC")"
+eq "incomplete_count 是 1" "1" "$(jq -r '.incomplete_count' "$S_INC")"
+eq "incomplete_prs 清單裡是 acme/rails-app-1#9201" "acme/rails-app-1#9201" \
+  "$(jq -r '.incomplete_prs[0]' "$S_INC")"
+eq "failed_count 是 1(9203)" "1" "$(jq -r '.failed_count' "$S_INC")"
+eq "failed_prs 清單裡是 acme/rails-app-1#9203" "acme/rails-app-1#9203" \
+  "$(jq -r '.failed_prs[0]' "$S_INC")"
+
+err_inc_text="$(cat "$TMP/incomplete.err")"
+has "stderr 印出 REVIEW_INCOMPLETE" "$err_inc_text" "REVIEW_INCOMPLETE"
+has "REVIEW_INCOMPLETE 訊息指名 acme/rails-app-1#9201" "$err_inc_text" "acme/rails-app-1#9201"
+has "REVIEW_INCOMPLETE 訊息裡有 status=COMMENT 的字樣" "$err_inc_text" "status=COMMENT"
+
+if [[ -e "$INC_RUN/acme__rails-app-1__9201.json" ]]; then
+  fail "incomplete(9201)的輸出檔沒有被刪掉，下次續跑會被 -s 誤判成已完成而跳過"
+else
+  ok "incomplete(9201)的輸出檔有被刪掉(下次續跑才會真的重跑)"
+fi
+
+ERR_9201="$INC_RUN/acme__rails-app-1__9201.err"
+if [[ -s "$ERR_9201" ]]; then
+  ok "9201 的 .err 檔有寫出診斷內容"
+else
+  fail ".err 檔是空的或不存在：$ERR_9201"
+fi
+has ".err 檔內容包含真正的診斷訊息(codex transient failure)" \
+  "$(cat "$ERR_9201")" "codex transient failure"
+has "REVIEW_INCOMPLETE 訊息指出 .err 檔路徑" "$err_inc_text" "$ERR_9201"
+
+ERR_9203="$INC_RUN/acme__rails-app-1__9203.err"
+if [[ -s "$ERR_9203" ]]; then
+  ok "9203(failed)的 .err 檔有寫出診斷內容"
+else
+  fail ".err 檔是空的或不存在：$ERR_9203"
+fi
+has "REVIEW_FAILED(9203)訊息指出 .err 檔路徑" "$err_inc_text" "$ERR_9203"
+
+# --- 續跑時 incomplete 的 PR 真的會被重跑，不會被 -s 卡住而永遠跳過 --------
+cat > "$TMP/bin-incomplete/mra" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"--pr 9201"*)
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+     {"path":"app/a.rb","line":10,"body":"x","severity":"HIGH"}]}' ;;
+  *"--pr 9202"*)
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+     {"path":"app/b.rb","line":20,"body":"x","severity":"HIGH"}]}' ;;
+  *"--pr 9203"*)
+    printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}' ;;
+  *)
+    echo "unexpected mra invocation: $*" >&2; exit 1 ;;
+esac
+SHIM
+chmod +x "$TMP/bin-incomplete/mra"
+PATH="$TMP/bin-incomplete:$PATH" MRA_BENCHMARK_DIR="$INC_DIR" \
+  bash "$S" --label incomplete-test >/dev/null 2>&1
+eq "續跑(同一個 label)後 9201 真的重跑成功，prs 變成 3" "3" \
+  "$(jq -r '.prs' "$S_INC")"
+eq "續跑後 incomplete_count 歸零(9201 這次跑完了)" "0" \
+  "$(jq -r '.incomplete_count' "$S_INC")"
 
 # --- 沒有任何 confirmed=true 時要明講，不要輸出空的 summary 假裝跑過 -----
 jq 'map(.confirmed = false)' "$C" > "$TMP/c.json"
