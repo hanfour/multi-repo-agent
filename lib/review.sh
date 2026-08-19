@@ -35,6 +35,24 @@ if ! declare -F _review_file_owner_uid >/dev/null 2>&1; then
   }
 fi
 
+# review_project() 一路上有不少 log_progress／log_info／log_warn，這三個預設
+# 就是印到 stdout(lib/colors.sh 只有 log_error 走 stderr，理由是 caller 常把
+# 函式的 stdout 當回傳值接住，錯誤訊息混進去會被悄悄吞掉)。這在終端機模式下
+# 沒問題，人本來就會同時看到進度跟結果；但 MRA_REVIEW_EMIT_JSON=1 時，
+# review_project 的 stdout 要被呼叫端(scripts/backtest-review-adapter.sh)直接
+# 當合法 JSON 餵給 jq，這些進度訊息一旦混進 review_json 前面，jq 解析必炸。
+#
+# 用法：_review_maybe_stderr_log log_info "訊息" "review"。旗標開啟時轉呼叫
+# stderr 版本，旗標關閉(預設)時原封不動呼叫原本的 log_* 函式，行為不變。
+_review_maybe_stderr_log() {
+  local fn="$1"; shift
+  if [[ "${MRA_REVIEW_EMIT_JSON:-}" == "1" ]]; then
+    "$fn" "$@" >&2
+  else
+    "$fn" "$@"
+  fi
+}
+
 review_project() {
   local workspace="$1"
   shift
@@ -169,7 +187,7 @@ review_project() {
     [[ -n "$_pr_slug" ]] && _pr_head=$(gh api "repos/$_pr_slug/pulls/$pr_number" --jq '.head.sha' 2>/dev/null || true)
     _local_head=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || true)
     if [[ -z "$_pr_head" ]]; then
-      log_warn "could not read the head of PR #$pr_number — reviewing whatever '$project_dir' is checked out at" "review"
+      _review_maybe_stderr_log log_warn "could not read the head of PR #$pr_number — reviewing whatever '$project_dir' is checked out at" "review"
     elif [[ "$_pr_head" != "$_local_head" ]]; then
       log_error "review: $project is checked out at ${_local_head:0:7}, but PR #$pr_number's head is ${_pr_head:0:7} — reviewing it now would review different code and report it as this PR. Run 'gh pr checkout $pr_number' in $project_dir first." "review"
       return 1
@@ -256,9 +274,9 @@ review_project() {
   fi
 
   # --- Log context ---
-  log_progress "reviewing $project (type: $project_type, base: $base_ref, strategy: $strategy, provider: $(review_provider_label "$review_provider" "$model"))" "review"
-  [[ "$has_api_change" == "true" ]] && log_warn "API change detected — loading consumer context" "review"
-  [[ -n "$consumers" ]] && log_info "consumers: $consumers" "review"
+  _review_maybe_stderr_log log_progress "reviewing $project (type: $project_type, base: $base_ref, strategy: $strategy, provider: $(review_provider_label "$review_provider" "$model"))" "review"
+  [[ "$has_api_change" == "true" ]] && _review_maybe_stderr_log log_warn "API change detected — loading consumer context" "review"
+  [[ -n "$consumers" ]] && _review_maybe_stderr_log log_info "consumers: $consumers" "review"
 
   # --- PKB: Use knowledge base if available ---
   local pkb_context="" use_pkb=false
@@ -269,7 +287,7 @@ review_project() {
     # Module summaries loaded only by debate Agent B (full tier) when needed
     pkb_context=$(pkb_build_context "$project_dir" "$relevant_modules" "standard")
     use_pkb=true
-    log_info "PKB available — using knowledge base (modules: ${relevant_modules:-all})" "review"
+    _review_maybe_stderr_log log_info "PKB available — using knowledge base (modules: ${relevant_modules:-all})" "review"
   fi
   # --- Structural context (issue #25): symbol-level blast radius + affected
   # tests from an existing codegraph index. Best-effort and capped — with no
@@ -284,7 +302,7 @@ ${structural_context}"
     else
       pkb_context="$structural_context"
     fi
-    log_info "structural context loaded (codegraph)" "review"
+    _review_maybe_stderr_log log_info "structural context loaded (codegraph)" "review"
   fi
 
   local review_instruction_context=""
@@ -297,7 +315,7 @@ ${pkb_context}"
     else
       pkb_context="$review_instruction_context"
     fi
-    log_info "untrusted repository review guidance loaded" "review"
+    _review_maybe_stderr_log log_info "untrusted repository review guidance loaded" "review"
   fi
 
   # --- PR discussion context: let the review see the PR's existing comments /
@@ -313,7 +331,7 @@ ${pkb_context}"
   local discussion_json=""
   if [[ -n "${MRA_REVIEW_SUPPLIED_CONTEXT:-}" ]]; then
     MRA_REVIEW_PR_DISCUSSION="$MRA_REVIEW_SUPPLIED_CONTEXT"
-    log_info "loaded supplied untrusted PR scope into review context" "review"
+    _review_maybe_stderr_log log_info "loaded supplied untrusted PR scope into review context" "review"
     # The integration path runs with no GitHub credential by design, so the
     # discussion cannot be fetched here — the caller supplies it or there is none.
     discussion_json="${MRA_REVIEW_SUPPLIED_DISCUSSION:-}"
@@ -332,7 +350,7 @@ $supplied_block"
     MRA_REVIEW_PR_DISCUSSION=$(printf '%s' "${scope_block:+$scope_block
 
 }${discussion_block}")
-    [[ -n "$MRA_REVIEW_PR_DISCUSSION" ]] && log_info "loaded existing PR discussion into review context" "review"
+    [[ -n "$MRA_REVIEW_PR_DISCUSSION" ]] && _review_maybe_stderr_log log_info "loaded existing PR discussion into review context" "review"
   fi
 
   # Our own earlier findings, and the replies to them, are framed separately:
@@ -346,7 +364,7 @@ $supplied_block"
 
 $MRA_REVIEW_PR_DISCUSSION"
       MRA_REVIEW_REBUTTED_LOCS=$(_review_rebutted_locations "$discussion_json")
-      log_info "prior findings answered on this PR must be adjudicated: $(printf '%s' "$MRA_REVIEW_REBUTTED_LOCS" | tr '\n' ' ')" "review"
+      _review_maybe_stderr_log log_info "prior findings answered on this PR must be adjudicated: $(printf '%s' "$MRA_REVIEW_REBUTTED_LOCS" | tr '\n' ' ')" "review"
     fi
   fi
 
@@ -381,7 +399,7 @@ $MRA_REVIEW_PR_DISCUSSION"
   # ---- Persona-based review path (opt-in via --personas) ----
   # Reuses the debate path's post-synthesis rendering via the _render_review_json helper.
   if [[ "$review_personas_flag" == "true" && -n "$force_strategy" ]]; then
-    log_warn "--strategy '$force_strategy' is ignored when --personas is set (persona path overrides strategy selection)" "review"
+    _review_maybe_stderr_log log_warn "--strategy '$force_strategy' is ignored when --personas is set (persona path overrides strategy selection)" "review"
   fi
   if [[ "$review_personas_flag" == "true" ]]; then
     # diff via review-diff.sh (mode/range_expr resolved above)
@@ -408,6 +426,15 @@ $MRA_REVIEW_PR_DISCUSSION"
   review_json=$(_review_enforce_adjudication "$review_json" "${MRA_REVIEW_REBUTTED_LOCS:-}")
   review_json=$(_review_enforce_premises "$review_json" "$project_dir")
 
+    # 回測旗標：只吐出 review_json 原樣本身，跳過人看格式渲染、通知與 PKB
+    # 自動更新。回測要跑幾十個 PR，渲染是多餘的；notify 會對每個 PR 送一次
+    # 通知；pkb auto update 會改動 persona 知識庫，讓「基準線」在跑的過程中
+    # 悄悄改變被測對象本身。預設（未設此 env）完全不受影響。
+    if [[ "${MRA_REVIEW_EMIT_JSON:-}" == "1" ]]; then
+      printf '%s\n' "$review_json"
+      return 0
+    fi
+
     _render_review_json "$review_json" "$output_mode" "$project_dir" "$pr_number" "personas" || return 1
     _review_notify_complete "$workspace" "$project" "$(_review_status_for_notify "$review_json")"
     _review_pkb_auto_update "$project" "$project_dir" "$persona_changed" "$output_language" "$review_json" "$review_provider" &
@@ -428,6 +455,14 @@ $MRA_REVIEW_PR_DISCUSSION"
     review_json=$(_review_enforce_premises "$review_json" "$project_dir")
 
     _review_emit_verdict "$review_json" "$project_dir"
+
+    # 回測旗標：與 personas 路徑同一個道理，只吐 JSON、跳過渲染／通知／PKB
+    # 自動更新。
+    if [[ "${MRA_REVIEW_EMIT_JSON:-}" == "1" ]]; then
+      printf '%s\n' "$review_json"
+      return 0
+    fi
+
     _render_review_json "$review_json" "$output_mode" "$project_dir" "$pr_number" "debate" || return 1
     _review_notify_complete "$workspace" "$project" "$(_review_status_for_notify "$review_json")"
 
