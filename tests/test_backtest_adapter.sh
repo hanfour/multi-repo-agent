@@ -384,6 +384,72 @@ eq "MRA_BACKTEST_CODEX_MODEL 會覆蓋預設值" "gpt-4.9" \
 eq "MRA_BACKTEST_CODEX_EFFORT 會覆蓋預設值" "high" \
   "$(jq -r '.review.codexReasoningEffort' "$derived" 2>/dev/null)"
 
+# --- adapter 有寫出執行條件回報檔(cond 檔)，內容是它實際用的值 ------------
+# run-backtest.sh 是呼叫端，看不到這裡衍生出來的設定；adapter 才是唯一
+# 知道「這次實際用了什麼」的地方，MRA_BACKTEST_COND_FILE 有設時要主動
+# 回報，不能讓呼叫端自己去猜(猜過一次，猜錯了)。
+COND_FILE_TEST="$TMP/run-conditions-test.json"
+rm -f "$COND_FILE_TEST"
+write_gh_stub "$BASE_SHA" 0
+write_mra_stub "$STUB_REVIEW_JSON" 0
+out_cond="$(MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CONFIG_DIR="$cfg_dir" \
+  MRA_BACKTEST_CODEX_MODEL=gpt-cond-test MRA_BACKTEST_CODEX_EFFORT=super \
+  MRA_BACKTEST_COND_FILE="$COND_FILE_TEST" \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cond.err")"
+rc_cond=$?
+eq "設了 MRA_BACKTEST_COND_FILE 時退出碼仍是 0" "0" "$rc_cond"
+eq "設了 MRA_BACKTEST_COND_FILE 時仍印出 stub JSON 原樣" "$STUB_REVIEW_JSON" "$out_cond"
+if [[ -s "$COND_FILE_TEST" ]]; then
+  ok "adapter 有寫出 cond 檔"
+else
+  fail "cond 檔沒有被寫出來：$COND_FILE_TEST"
+fi
+eq "cond 檔的 codex_model 是這次實際用的值(不是預設的 gpt-5.5)" "gpt-cond-test" \
+  "$(jq -r '.codex_model' "$COND_FILE_TEST")"
+eq "cond 檔的 reasoning_effort 是這次實際用的值" "super" \
+  "$(jq -r '.reasoning_effort' "$COND_FILE_TEST")"
+eq "cond 檔的 review_mode 是這次實際用的值(standard)" "standard" \
+  "$(jq -r '.review_mode' "$COND_FILE_TEST")"
+eq "cond 檔的 agent_max_turns 是預設值 40(這次沒有另外覆蓋)" "40" \
+  "$(jq -r '.agent_max_turns' "$COND_FILE_TEST")"
+eq "cond 檔的 worktree_isolated 是 adapter 自己回報的 true(隔離就是它做的)" \
+  "true" "$(jq -r '.worktree_isolated' "$COND_FILE_TEST")"
+eq "cond 檔的 mra_config_path 指到這次真正衍生出來的設定檔" "$derived" \
+  "$(jq -r '.mra_config_path' "$COND_FILE_TEST")"
+
+# 換個 model 重跑，驗證 cond 檔內容真的跟著換，不是釘死或殘留的舊值。
+rm -f "$COND_FILE_TEST"
+MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CONFIG_DIR="$cfg_dir" \
+  MRA_BACKTEST_CODEX_MODEL=gpt-cond-test-2 MRA_BACKTEST_CODEX_EFFORT=super \
+  MRA_BACKTEST_COND_FILE="$COND_FILE_TEST" \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json >/dev/null 2>&1
+eq "換 MRA_BACKTEST_CODEX_MODEL 重跑後，cond 檔內容跟著變" "gpt-cond-test-2" \
+  "$(jq -r '.codex_model' "$COND_FILE_TEST")"
+
+# --- MRA_BACKTEST_COND_FILE 沒設時，adapter 不寫檔也不報錯 -----------------
+out_nocond="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/nocond.err")"
+rc_nocond=$?
+eq "沒設 MRA_BACKTEST_COND_FILE 時退出碼仍是 0" "0" "$rc_nocond"
+eq "沒設 MRA_BACKTEST_COND_FILE 時仍印出 stub JSON 原樣" "$STUB_REVIEW_JSON" "$out_nocond"
+lacks "沒設 MRA_BACKTEST_COND_FILE 時不該印出 COND_FILE_WRITE_FAILED" \
+  "$(cat "$TMP/nocond.err")" "COND_FILE_WRITE_FAILED"
+
+# --- cond 檔寫入失敗時，adapter 的退出碼不變、review 輸出照常 --------------
+# 寫檔失敗只是記錄失敗，不該讓一次成功的 review 變成回報失敗，比照
+# WORKTREE_CLEANUP_FAILED 那組斷言的精神：只印警告到 stderr。
+COND_DIR_RO="$TMP/cond-readonly"
+mkdir -p "$COND_DIR_RO"
+chmod 555 "$COND_DIR_RO"
+out_condfail="$(MRA_BACKTEST_COND_FILE="$COND_DIR_RO/run-conditions.json" \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/condfail.err")"
+rc_condfail=$?
+chmod 755 "$COND_DIR_RO"
+eq "cond 檔目錄唯讀時退出碼仍是 0(寫入失敗不該讓成功的 review 變失敗)" \
+  "0" "$rc_condfail"
+eq "cond 檔目錄唯讀時仍印出 stub JSON 原樣" "$STUB_REVIEW_JSON" "$out_condfail"
+has "cond 檔寫入失敗有印出 COND_FILE_WRITE_FAILED 警告" \
+  "$(cat "$TMP/condfail.err")" "COND_FILE_WRITE_FAILED"
+
 # --- 不認得的 MRA_BACKTEST_REVIEW_MODE 值要報錯退出，不能默默 fallback -----
 rm -f "$ARGV_LOG"
 out_mode_invalid="$(MRA_BACKTEST_REVIEW_MODE=presonas "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>&1 >/dev/null)"

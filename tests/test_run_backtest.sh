@@ -179,18 +179,29 @@ has "REVIEW_FAILED 訊息指出 .err 檔路徑" "$err_baseline_text" "$ERR_8104"
 # 比，實際上可能是不同 tolerance／設定算出來的，沒有這些欄位完全看不出來 --
 eq "tolerance 記的是這次真的用的值(沒給 --tolerance，預設 5)" "5" \
   "$(jq -r '.tolerance' "$S1")"
-eq "review_mode 記的是沒設 MRA_BACKTEST_REVIEW_MODE 時的預設值 personas" \
-  "personas" "$(jq -r '.review_mode' "$S1")"
-eq "agent_max_turns 記的是沒設 MRA_REVIEW_AGENT_MAX_TURNS 時的預設值 40" \
-  "40" "$(jq -r '.agent_max_turns' "$S1")"
-eq "worktree_isolated 是 false(這支測試的 MRA_BACKTEST_CMD 是裸的 mra shim，不是 adapter)" \
-  "false" "$(jq -r '.worktree_isolated' "$S1")"
 eq "candidates_confirmed 是 5(8101-8105 五筆 confirmed=true，不是只算成功納入彙總的 prs)" \
   "5" "$(jq -r '.candidates_confirmed' "$S1")"
 eq "candidates_sha 是 candidates.json 內容的 sha256 前 16 碼" \
   "$(shasum -a 256 "$C" | cut -c1-16)" "$(jq -r '.candidates_sha' "$S1")"
 eq "candidates_sha 長度是 16 碼(不是完整 64 碼的 sha256)" "16" \
   "$(jq -r '.candidates_sha | length' "$S1")"
+
+# --- codex_model／reasoning_effort／review_mode／agent_max_turns／
+# worktree_isolated／mra_config_path：這支測試的 mra shim 是裸的假指令，
+# 不認得 MRA_BACKTEST_COND_FILE，run-backtest.sh 讀不到執行條件回報檔。
+# 這六個欄位這時候要一律是 null，conditions_source 要是 "unavailable"，
+# 絕對不能悄悄退回讀共用 $MRA_DIR/config.json 的值(那正是這次要修掉的
+# 東西：記錯的值比沒有欄位更糟)。用 -e 讀確定是 JSON null，不是字串
+# "null" 或空字串，jq -r 在這兩種狀況下印出來的文字剛好一樣，光看字面比
+# 不出差異。
+eq "沒有 cond 檔可讀時 codex_model 是 JSON null(不是字串)" "null" \
+  "$(jq -e '.codex_model' "$S1")"
+eq "沒有 cond 檔可讀時 reasoning_effort 是 null" "null" "$(jq -e '.reasoning_effort' "$S1")"
+eq "沒有 cond 檔可讀時 review_mode 是 null" "null" "$(jq -e '.review_mode' "$S1")"
+eq "沒有 cond 檔可讀時 agent_max_turns 是 null" "null" "$(jq -e '.agent_max_turns' "$S1")"
+eq "沒有 cond 檔可讀時 worktree_isolated 是 null" "null" "$(jq -e '.worktree_isolated' "$S1")"
+eq "沒有 cond 檔可讀時 mra_config_path 是 null" "null" "$(jq -e '.mra_config_path' "$S1")"
+eq "conditions_source 記成 unavailable" "unavailable" "$(jq -r '.conditions_source' "$S1")"
 
 # --- mra shim：after label(輸出跟 baseline 完全不同，--compare 才有東西可比)
 cat > "$TMP/bin/mra" <<'SHIM'
@@ -381,8 +392,8 @@ eq "重跑後 tolerance 欄位變成 2(不是還停在第一次跑的 5)" "2" \
   "$(jq -r '.tolerance' "$TOL_DIR/runs/tol5/summary.json")"
 eq "重跑後 missed 也跟著 tolerance=2 重算(變成 1，不是還停在 tolerance=5 算出的 0)" \
   "1" "$(jq -r '.missed' "$TOL_DIR/runs/tol5/summary.json")"
-eq "重跑後 review_mode 這種跟 tolerance 無關的執行條件欄位維持不變" \
-  "personas" "$(jq -r '.review_mode' "$TOL_DIR/runs/tol5/summary.json")"
+eq "重跑後 conditions_source 這種跟 tolerance 無關的欄位維持不變" \
+  "unavailable" "$(jq -r '.conditions_source' "$TOL_DIR/runs/tol5/summary.json")"
 
 # --- status=="COMMENT" 只可能是 REVIEW_INCOMPLETE，不能被當成「零發現」計
 # 入彙總：inline schema 只允許 APPROVED/CHANGES_REQUESTED(見 lib/review.sh)，
@@ -500,62 +511,107 @@ eq "續跑(同一個 label)後 9201 真的重跑成功，prs 變成 3" "3" \
 eq "續跑後 incomplete_count 歸零(9201 這次跑完了)" "0" \
   "$(jq -r '.incomplete_count' "$S_INC")"
 
-# --- codex_model／reasoning_effort：呼叫端指定 MRA_CONFIG 時，記的是那份
-# 設定檔的值，不是共用的 $MRA_DIR/config.json -------------------------------
-CFG_DIR="$TMP/bench-cfg"
-mkdir -p "$CFG_DIR" "$TMP/bin-cfg"
-cat > "$CFG_DIR/candidates.json" <<'J'
+# --- codex_model／reasoning_effort／review_mode／agent_max_turns／
+# worktree_isolated／mra_config_path：這六個不是 run-backtest.sh 自己知道
+# 的東西，run-backtest.sh 只負責讀 $MRA_CMD 透過 MRA_BACKTEST_COND_FILE
+# 回報回來的內容，不自己猜、不 fallback 去讀共用 config.json(見這次改動
+# 的由來：上一版猜過，猜錯了，記錯的值比沒有欄位更糟)。這裡用一個會回報
+# cond 檔的 stub 模擬真正的 adapter，真正 adapter 自己寫 cond 檔那段邏輯
+# 由 tests/test_backtest_adapter.sh 驗。 -------------------------------------
+COND_DIR="$TMP/bench-cond"
+mkdir -p "$COND_DIR" "$TMP/bin-cond"
+cat > "$COND_DIR/candidates.json" <<'J'
 [
  {"repo":"acme/rails-app-1","pr":8601,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
   "confirmed":true,"expected_findings":[]}
 ]
 J
-cat > "$TMP/bin-cfg/mra" <<'SHIM'
+cat > "$TMP/bin-cond/mra" <<'SHIM'
 #!/usr/bin/env bash
+if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
+  jq -n '{codex_model:"gpt-9.9-test",reasoning_effort:"medium",
+          review_mode:"standard",agent_max_turns:99,
+          worktree_isolated:true,mra_config_path:"/fake/derived-config.json"}' \
+    > "$MRA_BACKTEST_COND_FILE"
+fi
 printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
 SHIM
-chmod +x "$TMP/bin-cfg/mra"
-FAKE_CFG="$TMP/fake-config.json"
-echo '{"review":{"models":{"codex":"gpt-9.9-test"},"codexReasoningEffort":"medium"}}' \
-  > "$FAKE_CFG"
-PATH="$TMP/bin-cfg:$PATH" MRA_BENCHMARK_DIR="$CFG_DIR" MRA_CONFIG="$FAKE_CFG" \
-  bash "$S" --label cfgtest >/dev/null 2>&1
-eq "呼叫端指定 MRA_CONFIG 時，codex_model 記的是那份設定檔的值" "gpt-9.9-test" \
-  "$(jq -r '.codex_model' "$CFG_DIR/runs/cfgtest/summary.json")"
-eq "呼叫端指定 MRA_CONFIG 時，reasoning_effort 記的是那份設定檔的值" "medium" \
-  "$(jq -r '.reasoning_effort' "$CFG_DIR/runs/cfgtest/summary.json")"
+chmod +x "$TMP/bin-cond/mra"
+PATH="$TMP/bin-cond:$PATH" MRA_BENCHMARK_DIR="$COND_DIR" \
+  bash "$S" --label condtest >/dev/null 2>&1
+S_COND="$COND_DIR/runs/condtest/summary.json"
+eq "cond 檔讀得到時，codex_model 是 adapter 實際回報的值" "gpt-9.9-test" \
+  "$(jq -r '.codex_model' "$S_COND")"
+eq "cond 檔讀得到時，reasoning_effort 是 adapter 實際回報的值" "medium" \
+  "$(jq -r '.reasoning_effort' "$S_COND")"
+eq "cond 檔讀得到時，review_mode 是 adapter 實際回報的值" "standard" \
+  "$(jq -r '.review_mode' "$S_COND")"
+eq "cond 檔讀得到時，agent_max_turns 是 adapter 實際回報的值" "99" \
+  "$(jq -r '.agent_max_turns' "$S_COND")"
+eq "cond 檔讀得到時，worktree_isolated 是 adapter 自己回報的 true" "true" \
+  "$(jq -r '.worktree_isolated' "$S_COND")"
+eq "cond 檔讀得到時，mra_config_path 是 adapter 實際回報的路徑" \
+  "/fake/derived-config.json" "$(jq -r '.mra_config_path' "$S_COND")"
+eq "cond 檔讀得到時，conditions_source 是 adapter" "adapter" \
+  "$(jq -r '.conditions_source' "$S_COND")"
 
-# 沒指定 MRA_CONFIG 時讀共用的 $MRA_DIR/config.json；用同一個 jq 表達式在
-# 測試裡獨立算一次「應該是什麼」，不是硬寫一個字面值。這樣共用 config.json
-# 之後改了，這條斷言不會變成一條測不出東西的殘留斷言。
-MRA_DIR_FOR_TEST="$(cd "$(dirname "$S")/.." && pwd)"
-expected_codex_model="$(jq -r '.review.models.codex // empty' "$MRA_DIR_FOR_TEST/config.json")"
-PATH="$TMP/bin-cfg:$PATH" MRA_BENCHMARK_DIR="$CFG_DIR" \
-  bash "$S" --label cfgdefault >/dev/null 2>&1
-eq "沒指定 MRA_CONFIG 時，codex_model 讀共用的 \$MRA_DIR/config.json" \
-  "$expected_codex_model" "$(jq -r '.codex_model' "$CFG_DIR/runs/cfgdefault/summary.json")"
+# 換一組不同的值、換個新 label 重跑(避免跟快取／同 label 重跑的情境混在
+# 一起)，驗證真的是「讀 stub 這次實際回報的內容」，不是釘死在測試裡的一組
+# 固定字面值湊巧對上。
+cat > "$TMP/bin-cond/mra" <<'SHIM'
+#!/usr/bin/env bash
+if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
+  jq -n '{codex_model:"gpt-different-model",reasoning_effort:"low",
+          review_mode:"personas",agent_max_turns:7,
+          worktree_isolated:true,mra_config_path:"/fake/other-config.json"}' \
+    > "$MRA_BACKTEST_COND_FILE"
+fi
+printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
+SHIM
+chmod +x "$TMP/bin-cond/mra"
+PATH="$TMP/bin-cond:$PATH" MRA_BENCHMARK_DIR="$COND_DIR" \
+  bash "$S" --label condtest2 >/dev/null 2>&1
+eq "stub 回報的內容換了，codex_model 也跟著變(不是釘死的值)" "gpt-different-model" \
+  "$(jq -r '.codex_model' "$COND_DIR/runs/condtest2/summary.json")"
 
-# --- worktree_isolated：MRA_BACKTEST_CMD 指到 backtest-review-adapter.sh
-# 時要記 true。判斷依據就是名字本身(見 run-backtest.sh 對這個欄位的註解)，
-# 這裡的 stub 不需要真的做隔離，只是要以那個檔名結尾，用來測偵測邏輯本身 --
-WTFLAG_DIR="$TMP/bench-wtflag"
-mkdir -p "$WTFLAG_DIR" "$TMP/bin-wtflag"
-cat > "$WTFLAG_DIR/candidates.json" <<'J'
+# --- 沒有 cond 檔可讀時，絕對不能悄悄退回共用 $MRA_DIR/config.json 的值 ---
+# 這是這次修正的核心：用一支「不知道 MRA_BACKTEST_COND_FILE 這個 env」的
+# 裸 stub，即使共用 config.json 裡有明確的 codex model 值，summary 裡的
+# codex_model 也必須是 null，不能是那個值。記錯的值比沒有欄位更糟：沒有
+# 欄位人會知道要去別處查，記了共用 config.json 的值，階段四會誤以為那就是
+# 這次實際用的 model。
+UNAVAIL_DIR="$TMP/bench-cond-unavail"
+mkdir -p "$UNAVAIL_DIR" "$TMP/bin-cond-unavail"
+cat > "$UNAVAIL_DIR/candidates.json" <<'J'
 [
- {"repo":"acme/rails-app-1","pr":8701,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+ {"repo":"acme/rails-app-1","pr":8602,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
   "confirmed":true,"expected_findings":[]}
 ]
 J
-FAKE_ADAPTER="$TMP/bin-wtflag/fake-backtest-review-adapter.sh"
-cat > "$FAKE_ADAPTER" <<'SHIM'
+cat > "$TMP/bin-cond-unavail/mra" <<'SHIM'
 #!/usr/bin/env bash
+# 故意完全不理會 MRA_BACKTEST_COND_FILE，模擬「呼叫的是裸 bin/mra.sh 或
+# 測試用的 stub，沒有 adapter 那層」的情境。
 printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
 SHIM
-chmod +x "$FAKE_ADAPTER"
-MRA_BENCHMARK_DIR="$WTFLAG_DIR" MRA_BACKTEST_CMD="$FAKE_ADAPTER" \
-  bash "$S" --label wtflag >/dev/null 2>&1
-eq "MRA_BACKTEST_CMD 指到 *backtest-review-adapter.sh 時 worktree_isolated 是 true" \
-  "true" "$(jq -r '.worktree_isolated' "$WTFLAG_DIR/runs/wtflag/summary.json")"
+chmod +x "$TMP/bin-cond-unavail/mra"
+PATH="$TMP/bin-cond-unavail:$PATH" MRA_BENCHMARK_DIR="$UNAVAIL_DIR" \
+  bash "$S" --label unavailtest >/dev/null 2>&1
+S_UNAVAIL="$UNAVAIL_DIR/runs/unavailtest/summary.json"
+
+MRA_DIR_FOR_TEST="$(cd "$(dirname "$S")/.." && pwd)"
+real_shared_codex_model="$(jq -r '.review.models.codex // empty' "$MRA_DIR_FOR_TEST/config.json")"
+if [[ -n "$real_shared_codex_model" ]]; then
+  ok "測試前提成立：共用 config.json 裡真的有填 codex model(${real_shared_codex_model})"
+else
+  fail "測試前提不成立：共用 config.json 沒有 .review.models.codex，下面測不出東西"
+fi
+eq "沒有 cond 檔時 codex_model 是 null，不是偷偷退回共用 config.json 的值" \
+  "null" "$(jq -r '.codex_model' "$S_UNAVAIL")"
+lacks "summary.json 裡不該出現共用 config.json 那個 codex model 值" \
+  "$(jq -c . "$S_UNAVAIL")" "$real_shared_codex_model"
+eq "沒有 cond 檔時 conditions_source 是 unavailable" "unavailable" \
+  "$(jq -r '.conditions_source' "$S_UNAVAIL")"
 
 # --- candidates_sha：候選集內容變了，這個值要跟著變，不是釘死的值或只看
 # 檔名／路徑。這是這次最重要的欄位：階段四若重建過候選集，分母就不同，這

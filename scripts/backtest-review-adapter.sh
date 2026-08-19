@@ -125,6 +125,46 @@ if [[ -z "${MRA_CONFIG:-}" ]]; then
   export MRA_CONFIG="$derived_config"
 fi
 
+# --- 回報實際用的執行條件給 run-backtest.sh ---------------------------------
+# run-backtest.sh 是呼叫這支 adapter 的父行程，看不到這裡衍生出來、只存在
+# 於這個子行程裡的東西。這支 adapter 才是唯一知道「這次實際用了什麼」的
+# 地方：自己衍生／解析 config、自己決定 review 模式、自己設 turn 上限、
+# 自己做 worktree 隔離。上一版讓 run-backtest.sh 自己用 MRA_CONFIG 沒設
+# 就讀共用 $MRA_DIR/config.json 去猜，猜錯了：呼叫端沒有自己指定
+# MRA_CONFIG 的常見情況下，上面那個 if 區塊會執行、衍生出一份覆蓋過
+# codex model／reasoning effort 的設定，但這份衍生設定只 export 進這個
+# 子行程自己的環境，run-backtest.sh 那個父行程永遠看不到，猜出來的值是
+# 共用 config.json 的原始值，不是這裡實際會用的值。
+#
+# MRA_BACKTEST_COND_FILE 有設時，把這些值寫成 JSON 回報；每次呼叫都覆寫
+# 同一個檔即可，不用累積(同一輪 --label 底下每個 PR 用的條件本來就一樣)。
+# 寫檔失敗只印警告，不影響退出碼：記錄失敗不該讓一次成功的 review 變成
+# 回報失敗。
+agent_max_turns="${MRA_REVIEW_AGENT_MAX_TURNS:-40}"
+
+# codex_model／reasoning_effort 讀的是這時候已經解出來、真正會生效的那份
+# $MRA_CONFIG(上面剛衍生出來的，或呼叫端指定、上面那個 if 整個沒執行的都
+# 一樣)，不是最前面那兩個「打算要用」的 $codex_model／$codex_effort：呼叫端
+# 自己指定 MRA_CONFIG 時，那兩個變數的值從來沒有真的被套用過，讀它們會
+# 回報錯的答案。
+effective_codex_model="$(jq -r '.review.models.codex // empty' "$MRA_CONFIG" 2>/dev/null)"
+effective_reasoning_effort="$(jq -r '.review.codexReasoningEffort // empty' "$MRA_CONFIG" 2>/dev/null)"
+
+if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
+  if ! jq -n \
+    --arg codex_model "$effective_codex_model" \
+    --arg reasoning_effort "$effective_reasoning_effort" \
+    --arg review_mode "$review_mode" \
+    --argjson agent_max_turns "$agent_max_turns" \
+    --arg mra_config_path "$MRA_CONFIG" \
+    '{codex_model: $codex_model, reasoning_effort: $reasoning_effort,
+      review_mode: $review_mode, agent_max_turns: $agent_max_turns,
+      worktree_isolated: true, mra_config_path: $mra_config_path}' \
+    > "$MRA_BACKTEST_COND_FILE" 2>/dev/null; then
+    echo "COND_FILE_WRITE_FAILED：無法寫入執行條件記錄 ${MRA_BACKTEST_COND_FILE}(不影響這次 review 本身的結果)" >&2
+  fi
+fi
+
 # owner/repo 取 / 後半當 workspace 內的專案名；沒有 / 就直接當專案名用。
 project="${repo##*/}"
 
@@ -265,7 +305,9 @@ fi
 # lib/review.sh 對這個旗標的說明，personas／debate／single-pass 三條路徑
 # 都支援)。
 #
-# MRA_REVIEW_AGENT_MAX_TURNS=40：對齊 pm-workspace-kit 的 reviewEnv
+# MRA_REVIEW_AGENT_MAX_TURNS(預設 40，見上面「回報實際用的執行條件」那段
+# 算出來的 $agent_max_turns，這裡直接沿用，不重算一次避免兩處算出不同的
+# 值)：對齊 pm-workspace-kit 的 reviewEnv
 # (packages/cli/src/adapters/mra-review-protocol.ts)，那裡設這個值是為了
 # 「rescue PKB-less／large PR 不要在探索中途被砍斷」。基準線沒設的話，等於
 # 拿比團隊實際使用時更嚴苛的條件在跑：實測 acme/rails-app-1#4829 就是探索
@@ -279,7 +321,7 @@ fi
 # gateway 沒放寬 timeout，這裡也不該偷偷放寬。
 range_expr="${base_sha}...${head_sha}"
 review_output="$(cd "$BT_WS" && MRA_REVIEW_EMIT_JSON=1 \
-  MRA_REVIEW_AGENT_MAX_TURNS="${MRA_REVIEW_AGENT_MAX_TURNS:-40}" \
+  MRA_REVIEW_AGENT_MAX_TURNS="$agent_max_turns" \
   bash "$MRA_DIR/bin/mra.sh" review "$project" --range "$range_expr" "${mode_args[@]}")"
 review_rc=$?
 if [[ $review_rc -ne 0 ]]; then
