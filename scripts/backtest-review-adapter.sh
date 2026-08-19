@@ -9,10 +9,23 @@
 #
 # 這支腳本接住 run-backtest.sh 呼叫的那個假想形狀，轉譯成真正 mra review 吃得下
 # 的呼叫：查出 PR 的 base/head SHA，確保兩個 commit 本地都在，改用
-# --range base..head(不是 --pr)，用 MRA_REVIEW_EMIT_JSON=1 拿到跟
+# --range base...head(不是 --pr)，用 MRA_REVIEW_EMIT_JSON=1 拿到跟
 # backtest_match 期待形狀一致的原始 JSON。
 #
-# 不加 --no-debate：回測要量的是預設的完整流程(含 debate)，不是精簡過的版本。
+# --range 用三點(base...head)，不是兩點(base..head)：兩點是「base 到 head
+# 的直接差異」，會把 base 分支在分歧之後自己的變更也算進來；GitHub 網頁上
+# PR 顯示的範圍、以及這個回測要量的範圍，是三點對稱差集(只有這個 PR 自己的
+# commit)。實測 acme/nest-monorepo-2.0#761：兩點算出 11 個檔案、三點算出 5 個，
+# GitHub 網頁顯示 5 個。兩點多出來的 6 個檔案是 base 分支的變更，reviewer 會
+# 對這個 PR 根本沒改過的程式碼產生 finding，同時墊高 comment 數與
+# unmatched 率，讓回測的分母本身就是錯的。
+#
+# 支援兩種 review 設定，透過 MRA_BACKTEST_REVIEW_MODE 選擇(見下方 case)：
+# personas(預設，走 lib/review.sh 的 persona 路徑)跟 standard(--strategy
+# standard --provider codex，對應團隊實際在用的設定，見 ~/.pmk/gateway.json)。
+#
+# 不加 --no-debate：personas 模式下回測要量的是預設的完整流程(含 debate)，
+# 不是精簡過的版本。
 #
 # 錯誤分類每一種都給自己的 token，尤其是「API 呼叫本身失敗」跟「查得到、但
 # 內容缺東西」不能混報。本專案已經因為這種混報付過四次代價(build-benchmark.sh
@@ -38,8 +51,8 @@ while [[ $# -gt 0 ]]; do
       pr="$2"; shift 2 ;;
     --strategy)
       # run-backtest.sh 目前照著假想的 mra CLI 形狀傳這個旗標，真正的
-      # mra review 用不到(--range 已經指定要 review 的範圍)，這裡吃掉、
-      # 不轉傳，不當錯誤。
+      # mra review 用不到(--range 已經指定要 review 的範圍，走哪種策略由
+      # MRA_BACKTEST_REVIEW_MODE 決定)，這裡吃掉、不轉傳，不當錯誤。
       [[ $# -ge 2 ]] || { echo "用法：--strategy 需要接一個值" >&2; exit 1; }
       shift 2 ;;
     --json)
@@ -59,6 +72,21 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$repo" ]] || { echo "用法：缺少 <owner/repo>" >&2; exit 1; }
 [[ -n "$pr" ]]   || { echo "用法：缺少 --pr <N>" >&2; exit 1; }
+
+# --- 決定要用哪一種 review 設定 ---------------------------------------------
+# 不認得的值要直接報錯退出，不要默默 fallback 成 personas：默默 fallback 會讓
+# 打錯字的 MRA_BACKTEST_REVIEW_MODE(例如 "presonas")看起來像是成功跑了
+# personas 模式，實際上使用者要的是別的設定，而且完全沒有訊號可以發現打錯了。
+review_mode="${MRA_BACKTEST_REVIEW_MODE:-personas}"
+case "$review_mode" in
+  personas)
+    mode_args=(--personas) ;;
+  standard)
+    mode_args=(--strategy standard --provider codex) ;;
+  *)
+    echo "REVIEW_MODE_INVALID：不認得的 MRA_BACKTEST_REVIEW_MODE 值「${review_mode}」，只接受 standard 或 personas" >&2
+    exit 1 ;;
+esac
 
 # owner/repo 取 / 後半當 workspace 內的專案名；沒有 / 就直接當專案名用。
 project="${repo##*/}"
@@ -88,30 +116,44 @@ if [[ -z "$base_sha" || -z "$head_sha" ]]; then
   exit 1
 fi
 
-# --- 確認兩個 commit 本地都在，不在就 fetch 一次再試 -----------------------
-# $1：commit SHA。回測要跑幾十個 PR，每筆都可能碰到 checkout 落後遠端的情況，
-# 缺一次不代表壞掉，先 fetch 一次是合理的自救；fetch 完仍然缺，才是真的要
-# 停下來、讓操作者知道要處理哪個 SHA。
+# --- 確認兩個 commit 本地都在，不在就 fetch 再試 ----------------------------
+# base 通常在本地(它是目標分支上的一個歷史 commit)，缺的話用一般的
+# `git fetch origin` 補；head 不一樣：PR 一旦合併，來源分支多半已經被刪掉，
+# 一般的 `git fetch origin` 用的預設 refspec(+refs/heads/*:refs/remotes/...)
+# 完全碰不到它，GitHub 對每個 PR(即使分支刪了)永遠保留 refs/pull/<N>/head
+# 這個 ref，必須明講去 fetch 這個 ref 才拿得到 commit 物件。實測
+# acme/rails-app-1#4829：plain fetch 前後 head 都不在本地，改成
+# `git fetch origin refs/pull/4829/head` 之後才拿到。38 筆候選幾乎全部是
+# 已合併、分支已刪的歷史 PR，不這樣做的話這裡幾乎每一筆都會落到
+# COMMIT_NOT_LOCAL，run-backtest.sh 會全數 REVIEW_FAILED、最後 ALL_REVIEWS_FAILED。
+#
+# $1：commit SHA。$2：省略時用一般 fetch 重試(給 base 用)；有給時當成
+# refspec 明講去 fetch 這個 ref(給 head 用，帶 refs/pull/<pr>/head)。
 _ensure_commit_local() {
-  local sha="$1"
+  local sha="$1" pull_ref="${2:-}"
   git -C "$project_dir" cat-file -e "${sha}^{commit}" 2>/dev/null && return 0
-  git -C "$project_dir" fetch origin >/dev/null 2>&1
+  if [[ -n "$pull_ref" ]]; then
+    git -C "$project_dir" fetch origin "$pull_ref" >/dev/null 2>&1
+  else
+    git -C "$project_dir" fetch origin >/dev/null 2>&1
+  fi
   git -C "$project_dir" cat-file -e "${sha}^{commit}" 2>/dev/null && return 0
   echo "COMMIT_NOT_LOCAL：${sha}" >&2
   return 1
 }
 _ensure_commit_local "$base_sha" || exit 1
-_ensure_commit_local "$head_sha" || exit 1
+_ensure_commit_local "$head_sha" "refs/pull/${pr}/head" || exit 1
 
 # --- 真正呼叫 mra review ----------------------------------------------------
 # 以 workspace 為工作目錄執行；MRA_REVIEW_EMIT_JSON=1 讓 lib/review.sh 直接吐
 # review_json 原樣，不渲染、不通知、不動 PKB(見 lib/review.sh 對這個旗標的
-# 說明)。不加 --no-debate：基準線要量的是預設的完整流程，含 debate。
+# 說明，personas／debate／single-pass 三條路徑都支援)。
+range_expr="${base_sha}...${head_sha}"
 review_output="$(cd "$WS" && MRA_REVIEW_EMIT_JSON=1 \
-  bash "$MRA_DIR/bin/mra.sh" review "$project" --range "${base_sha}..${head_sha}" --personas)"
+  bash "$MRA_DIR/bin/mra.sh" review "$project" --range "$range_expr" "${mode_args[@]}")"
 review_rc=$?
 if [[ $review_rc -ne 0 ]]; then
-  echo "REVIEW_CMD_FAILED：mra review ${project} --range ${base_sha}..${head_sha} --personas 退出碼 ${review_rc}" >&2
+  echo "REVIEW_CMD_FAILED：mra review ${project} --range ${range_expr} ${mode_args[*]} 退出碼 ${review_rc}" >&2
   exit 1
 fi
 
