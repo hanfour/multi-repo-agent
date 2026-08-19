@@ -424,13 +424,38 @@ $MRA_REVIEW_PR_DISCUSSION"
       "$(default_review_personas)" "$consumers" "$persona_lang" "$model" \
       "$claude_add_dirs_str" "$pkb_context" "$review_provider")"
 
-    local review_json
+    local review_json synth_exit
     review_json=$(run_synthesize \
       "$project" "$project_dir" "$persona_diff" "$persona_changed" \
       "$persona_findings" "" "$consumers" "$has_api_change" \
       "$persona_lang" "$model" "$persona_focused" "$mra_dir")
-  review_json=$(_review_enforce_adjudication "$review_json" "${MRA_REVIEW_REBUTTED_LOCS:-}")
-  review_json=$(_review_enforce_premises "$review_json" "$project_dir")
+    synth_exit=$?
+    # synthesize 的 claude_invoke 偶爾會安靜地失敗：5 個 persona 全部成功、
+    # mra 整體退出碼 0，但 synthesize 這一步吐出空字串或截斷輸出，兩個
+    # enforce 函式對無法解析的輸入原樣放行，最後印出一個空的 review_json。
+    # 絕對不能在這裡補一個 {"status":"APPROVED"} 頂上去，那是偽造核准，
+    # 是這個 repo 檔頭一再警告的 false green。觀測先於猜測：先把「實際
+    # 拿到什麼」印到 stderr，再退回中立的 REVIEW_INCOMPLETE，讓下游
+    # （run-backtest.sh）正確排除這個 PR，而不是誤判成核准。
+    #
+    # 實測抓到的第二個問題：synthesize 常常「沒有真的失敗」，只是把合法
+    # JSON 包在 ```json ... ``` 這種 markdown code fence 裡。debate 與
+    # single-pass 兩條路徑（見 _review_singlepass_body）都先用 extract_json
+    # 剝掉 fence 再驗證，personas 這裡漏了這一步，導致好幾份完整、高品質的
+    # review 被誤判成不合法、整份丟掉。取得輸出後先剝 fence，剝完才驗證，
+    # 仍然不合格才退回 REVIEW_INCOMPLETE：extract_json 對已經合法的 JSON、
+    # 空字串、抽不出東西的散文都是安全的原樣放行，不會把真正失敗的情況
+    # 「救」成合法。
+    review_json=$(extract_json "$review_json")
+    if [[ "$synth_exit" -ne 0 ]] || ! _validate_review_json "$review_json"; then
+      local synth_len synth_prefix
+      synth_len=$(printf '%s' "$review_json" | wc -c | tr -d '[:space:]')
+      synth_prefix=$(printf '%s' "$review_json" | head -c 200)
+      _review_maybe_stderr_log log_warn "persona synthesize 沒有產生合法的 review JSON：exit=${synth_exit}，長度=${synth_len} bytes，前 200 字元：${synth_prefix}" "review"
+      review_json=$(review_incomplete_json "persona synthesize 階段沒有完成或輸出不是合法 JSON（exit=${synth_exit}）。實際輸出的前 200 字元已印在 stderr 的診斷訊息裡。這不是核准，請重跑或改為人工檢視。")
+    fi
+    review_json=$(_review_enforce_adjudication "$review_json" "${MRA_REVIEW_REBUTTED_LOCS:-}")
+    review_json=$(_review_enforce_premises "$review_json" "$project_dir")
 
     # 回測旗標：只吐出 review_json 原樣本身，跳過人看格式渲染、通知與 PKB
     # 自動更新。回測要跑幾十個 PR，渲染是多餘的；notify 會對每個 PR 送一次
