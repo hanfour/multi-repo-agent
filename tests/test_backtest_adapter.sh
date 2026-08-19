@@ -353,6 +353,7 @@ out_cfg="$(MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CONFIG_DIR="$cfg_dir" 
   "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cfg.err")"
 rc_cfg=$?
 eq "產生衍生設定時退出碼 0" "0" "$rc_cfg"
+eq "產生衍生設定時仍印出 stub JSON 原樣" "$STUB_REVIEW_JSON" "$out_cfg"
 derived="$cfg_dir/mra-backtest-config.json"
 if [[ -s "$derived" ]]; then ok "衍生設定檔有寫出來"; else fail "衍生設定檔沒寫出來：$derived"; fi
 eq "衍生設定的 codex model 是 gpt-5.5" "gpt-5.5" "$(jq -r '.review.models.codex' "$derived" 2>/dev/null)"
@@ -369,12 +370,15 @@ caller_cfg="$TMP/caller-config.json"
 cp "$FAKE/config.json" "$caller_cfg"
 out_cfg_caller="$(MRA_BACKTEST_REVIEW_MODE=standard MRA_CONFIG="$caller_cfg" \
   "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cfg-caller.err")"
-eq "呼叫端指定 MRA_CONFIG 時退出碼 0" "0" "$?"
+rc_cfg_caller=$?
+eq "呼叫端指定 MRA_CONFIG 時退出碼 0" "0" "$rc_cfg_caller"
+eq "呼叫端指定 MRA_CONFIG 時仍印出 stub JSON 原樣" "$STUB_REVIEW_JSON" "$out_cfg_caller"
 has "呼叫端指定的 MRA_CONFIG 不被覆蓋" "$(cat "$ENV_LOG")" "MRA_CONFIG=$caller_cfg"
 
 out_cfg2="$(MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CONFIG_DIR="$cfg_dir" \
   MRA_BACKTEST_CODEX_MODEL=gpt-4.9 MRA_BACKTEST_CODEX_EFFORT=high \
   "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cfg2.err")"
+eq "覆蓋 model／effort 時仍印出 stub JSON 原樣" "$STUB_REVIEW_JSON" "$out_cfg2"
 eq "MRA_BACKTEST_CODEX_MODEL 會覆蓋預設值" "gpt-4.9" \
   "$(jq -r '.review.models.codex' "$derived" 2>/dev/null)"
 eq "MRA_BACKTEST_CODEX_EFFORT 會覆蓋預設值" "high" \
