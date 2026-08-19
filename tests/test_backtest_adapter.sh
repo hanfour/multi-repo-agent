@@ -23,6 +23,11 @@ has()  { case "$2" in *"$3"*) ok "$1" ;; *) fail "$1 — 沒看到「$3」：$2"
 lacks(){ case "$2" in *"$3"*) fail "$1 — 不該看到「$3」：$2" ;; *) ok "$1" ;; esac; }
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/backtest-adapter-test.XXXXXX")"
+# macOS 的 $TMPDIR 常帶結尾斜線，讓 mktemp 出來的路徑含一個多餘的雙斜線；
+# 子行程裡 `cd ... && pwd` 印出來的是 shell 正規化過的單斜線版本。這裡先
+# 正規化一次，後面所有拿 $TMP 組出來的路徑（包含要去比對 stub 印出的 pwd
+# 那幾條斷言）才會跟子行程看到的字串逐位元組一致。
+TMP="$(cd "$TMP" && pwd)"
 trap 'rm -rf "$TMP"' EXIT
 
 FAKE="$TMP/fake"
@@ -49,8 +54,19 @@ mkdir -p "$STUBBIN"
 export PATH="$STUBBIN:$PATH"
 
 WS="$TMP/ws"
-mkdir -p "$WS"
+mkdir -p "$WS/.collab"
 export MRA_BACKTEST_WORKSPACE="$WS"
+
+# worktree 隔離的平行 workspace 根目錄：固定指到這支測試自己的 $TMP 底下，
+# 不用預設值(${TMPDIR:-/tmp}/mra-backtest-ws)。預設值是系統共用路徑，測試
+# 用它會跟真的跑一次基準線互相污染，也不會隨這支測試的 $TMP 一起被清掉。
+WT_ROOT="$TMP/wtroot"
+export MRA_BACKTEST_WT_ROOT="$WT_ROOT"
+
+# workspace 層 metadata：只有這三個檔會被複製，manual-deps.json 故意不建，
+# 用來驗證「存在才複製，缺了不算錯」。
+echo '{"repos":"stub"}' > "$WS/.collab/repos.json"
+echo '{"deps":"stub"}' > "$WS/.collab/dep-graph.json"
 
 R="$WS/erp"
 git -C "$R" init -q -b main 2>/dev/null || { mkdir -p "$R"; git -C "$R" init -q -b main; }
@@ -59,6 +75,22 @@ printf 'one\n' > "$R/f.txt"; git -C "$R" add f.txt; git -C "$R" commit -q -m bas
 BASE_SHA="$(git -C "$R" rev-parse HEAD)"
 printf 'two\n' >> "$R/f.txt"; git -C "$R" add f.txt; git -C "$R" commit -q -m head
 HEAD_SHA="$(git -C "$R" rev-parse HEAD)"
+
+# 模擬使用者手邊正在做的事(真實情境：~/workspace/erp checkout 在
+# feature/account-management-with-estimates，有未提交的變更)：repo 目前
+# checkout 在 head_sha 之後的另一個 commit，還有未提交的變更。worktree
+# 隔離全程都不能碰這些，這支測試檔案的其他一切斷言(包含既有的)都要在這個
+# 前提還成立的狀態下通過，才能證明真的沒被動到。
+printf 'three\n' >> "$R/f.txt"; git -C "$R" add f.txt; git -C "$R" commit -q -m "later work in progress"
+ORIG_HEAD_SHA="$(git -C "$R" rev-parse HEAD)"
+printf 'uncommitted change\n' >> "$R/f.txt"
+printf 'another uncommitted file\n' > "$R/g.txt"
+ORIG_STATUS_LINES="$(git -C "$R" status --porcelain | wc -l | tr -d ' ')"
+
+# PKB：真實 repo 裡 .mra 被 gitignore，worktree 不會自動有，要驗證這裡的
+# 內容真的被實體複製過去（不是 symlink）。
+mkdir -p "$R/.mra/pkb"
+echo '{"convention":"stub"}' > "$R/.mra/pkb/example.json"
 
 STUB_REVIEW_JSON='{"status":"CHANGES_REQUESTED","summary":"stub","comments":[{"path":"app/a.rb","line":10,"severity":"HIGH","body":"x"}]}'
 
@@ -86,6 +118,11 @@ ARGV_LOG="$TMP/mra-argv.log"
 # MRA_REVIEW_AGENT_MAX_TURNS 是環境變數，不會出現在 $*(argv)裡，argv 紀錄檔
 # 驗不到「adapter 有沒有設這個 env」，另外開一個檔案專門記它。
 ENV_LOG="$TMP/mra-env.log"
+# worktree 相關的狀態要在 stub 執行的當下(worktree 還活著)就記下來：adapter
+# 執行完之後 worktree 會被清掉，事後才檢查會什麼都看不到。$project 是相對
+# 於 stub 自己 cwd(應該是 $BT_WS)的子目錄，等於 stub 自己站在 worktree 隔離
+# 之後的那個目錄裡，直接查看得到的東西就是 mra review 實際看到的東西。
+WT_LOG="$TMP/mra-wt.log"
 # 寫 mra.sh stub。$1：要印到 stdout 的內容。$2：exit code。
 write_mra_stub() {
   local out="$1" rc="${2:-0}"
@@ -94,6 +131,19 @@ write_mra_stub() {
 printf '%s\n' "\$*" > "$ARGV_LOG"
 printf 'MRA_REVIEW_AGENT_MAX_TURNS=%s\n' "\${MRA_REVIEW_AGENT_MAX_TURNS:-<unset>}" > "$ENV_LOG"
 printf 'MRA_CONFIG=%s\n' "\${MRA_CONFIG:-<unset>}" >> "$ENV_LOG"
+{
+  printf 'cwd=%s\n' "\$(pwd)"
+  printf 'worktree_head=%s\n' "\$(git -C erp rev-parse HEAD 2>&1)"
+  printf 'collab_files=%s\n' "\$(ls .collab 2>&1 | tr '\n' ',')"
+  if [[ -L erp/.mra ]]; then
+    printf 'mra_dir=SYMLINK\n'
+  elif [[ -d erp/.mra ]]; then
+    printf 'mra_dir=REALDIR\n'
+  else
+    printf 'mra_dir=MISSING\n'
+  fi
+  printf 'mra_pkb_files=%s\n' "\$(ls erp/.mra/pkb 2>&1 | tr '\n' ',')"
+} > "$WT_LOG"
 printf '%s' '$out'
 exit $rc
 EOF
@@ -107,6 +157,23 @@ out="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>
 rc=$?
 eq "正常路徑退出碼 0" "0" "$rc"
 eq "正常路徑印出 stub 回的 JSON 原樣" "$STUB_REVIEW_JSON" "$out"
+
+# --- worktree 隔離：mra 實際看到的是 worktree 那份，不是共用工作目錄 -------
+wt_log="$(cat "$WT_LOG")"
+has "mra 執行時的 cwd 是平行 workspace($WT_ROOT)，不是 \$WS" "$wt_log" "cwd=$WT_ROOT"
+has "worktree checkout 的是 PR head_sha" "$wt_log" "worktree_head=$HEAD_SHA"
+lacks "worktree checkout 的不是共用工作目錄目前的分支頭(later work in progress 那個 commit)" \
+  "$wt_log" "worktree_head=$ORIG_HEAD_SHA"
+has ".collab 的 repos.json 有被複製過去" "$wt_log" "repos.json"
+has ".collab 的 dep-graph.json 有被複製過去" "$wt_log" "dep-graph.json"
+lacks ".collab 沒有 manual-deps.json(來源本來就沒有，缺了不算錯)" \
+  "$wt_log" "manual-deps.json"
+has ".mra 是實體目錄，不是 symlink" "$wt_log" "mra_dir=REALDIR"
+has ".mra/pkb 底下的內容真的被複製過去" "$wt_log" "example.json"
+
+# --- 跑完之後 worktree 被移除，git worktree list 回到原本的筆數 -----------
+wt_count_after_happy="$(git -C "$R" worktree list | wc -l | tr -d ' ')"
+eq "正常路徑跑完後 git worktree list 只剩來源 repo 自己(1 筆)" "1" "$wt_count_after_happy"
 
 # --- owner/repo 正確拆成專案名：mra.sh 收到的是 erp，不是 acme/rails-app-1 -------
 argv="$(cat "$ARGV_LOG")"
@@ -235,6 +302,11 @@ rc_reviewfail=$?
 [[ $rc_reviewfail -ne 0 ]] && ok "review 指令失敗退出碼非 0" || fail "review 指令失敗應退出非 0，得到 $rc_reviewfail"
 has "review 指令失敗印出 REVIEW_CMD_FAILED" "$out_reviewfail" "REVIEW_CMD_FAILED"
 
+# review 失敗(這支 adapter 自己判定為失敗，退出非 0)時 worktree 也要被清掉，
+# 不能只在成功路徑才清：trap 綁的是 EXIT，不是「成功才清」。
+wt_count_after_failed_review="$(git -C "$R" worktree list | wc -l | tr -d ' ')"
+eq "review 指令失敗時 worktree 依然被清掉(回到 1 筆)" "1" "$wt_count_after_failed_review"
+
 # --- review 輸出不是 JSON → REVIEW_OUTPUT_INVALID ---------------------------
 write_mra_stub "this is not json" 0
 out_notjson="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>&1 >/dev/null)"
@@ -320,6 +392,93 @@ if [[ -e "$ARGV_LOG" ]]; then
 else
   ok "不認得的 REVIEW_MODE 在呼叫 gh／mra 之前就先擋下來(fail fast)"
 fi
+
+# --- 同路徑有殘留 worktree 時能自救：先清再建，不是直接失敗 ----------------
+# 手動先在目標路徑建一個「殘留」worktree(checkout 在 base_sha，不是這次要
+# 用的 head_sha，才能明確驗出最後拿到的是重建過的、checkout 在 head_sha 的
+# 那一份，不是殘留的舊版)，模擬前一次跑到一半被中斷、trap 沒機會清乾淨的
+# 情況。
+WT_TARGET="$WT_ROOT/erp"
+git -C "$R" worktree add --detach "$WT_TARGET" "$BASE_SHA" >/dev/null 2>&1
+if git -C "$R" worktree list | grep -qF "$WT_TARGET"; then
+  ok "測試前提成立：目標路徑已經有一個殘留 worktree(checkout 在 base_sha)"
+else
+  fail "測試前提不成立：沒能先建出殘留 worktree，下面測不出自救"
+fi
+
+write_gh_stub "$BASE_SHA" 0
+write_mra_stub "$STUB_REVIEW_JSON" 0
+out_rescue="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/rescue.err")"
+rc_rescue=$?
+eq "同路徑有殘留 worktree 時 adapter 仍能成功(自救，不是直接失敗)" "0" "$rc_rescue"
+eq "自救後仍印出 stub JSON 原樣" "$STUB_REVIEW_JSON" "$out_rescue"
+has "自救後 worktree checkout 的是這次真正要的 head_sha(不是殘留的 base_sha)" \
+  "$(cat "$WT_LOG")" "worktree_head=$HEAD_SHA"
+wt_count_after_rescue="$(git -C "$R" worktree list | wc -l | tr -d ' ')"
+eq "自救流程跑完後 worktree 一樣被清乾淨(回到 1 筆)" "1" "$wt_count_after_rescue"
+
+# --- git worktree add 本身失敗 → WORKTREE_ADD_FAILED，退出非 0 -------------
+# 把來源 repo 的 .git 改成唯讀，讓 `git worktree add` 寫自己的
+# .git/worktrees/<name> 記錄這一步失敗(worktree add 需要在來源 repo 的 .git
+# 底下建新的管理目錄)。這個技巧不會動到 $BT_WS，跟 metadata 複製那幾步互不
+# 干擾，乾淨地只讓 worktree add 這一步失敗。
+chmod -R 555 "$R/.git"
+out_wtaddfail="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>&1 >/dev/null)"
+rc_wtaddfail=$?
+chmod -R 755 "$R/.git"
+[[ $rc_wtaddfail -ne 0 ]] && ok "worktree add 失敗時退出碼非 0" \
+                          || fail "worktree add 失敗應退出非 0，得到 $rc_wtaddfail"
+has "worktree add 失敗印出 WORKTREE_ADD_FAILED" "$out_wtaddfail" "WORKTREE_ADD_FAILED"
+
+# --- 來源沒有 .mra 時不算錯，review 照樣成功 --------------------------------
+# 不是每個專案都已經建過 PKB；.mra 缺席是合法狀態，不該被當成錯誤擋下來。
+# 暫時把主要 fixture 的 .mra 搬開，驗完再搬回來，不要弄丟後面其他斷言在用
+# 的那份 .mra。
+mv "$R/.mra" "$TMP/mra-backup"
+write_gh_stub "$BASE_SHA" 0
+write_mra_stub "$STUB_REVIEW_JSON" 0
+out_nomra="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/nomra.err")"
+rc_nomra=$?
+mv "$TMP/mra-backup" "$R/.mra"
+eq "來源沒有 .mra 時退出碼仍是 0(缺席不算錯)" "0" "$rc_nomra"
+eq "來源沒有 .mra 時仍印出 stub JSON 原樣" "$STUB_REVIEW_JSON" "$out_nomra"
+has "來源沒有 .mra 時 worktree 裡也確實沒有 .mra(沒有憑空生出東西)" \
+  "$(cat "$WT_LOG")" "mra_dir=MISSING"
+lacks "來源沒有 .mra 時不該印出 PKB_COPY_FAILED" "$(cat "$TMP/nomra.err")" "PKB_COPY_FAILED"
+
+# --- 清理失敗只印警告，不改變退出碼 -----------------------------------------
+# 讓 mra stub 在還活著的時候(worktree 還存在)把 worktree 目錄整個標成
+# uchg(macOS 的 user-immutable flag)：這樣 review 本身照樣成功(stub 正常吐
+# 出合法 JSON、exit 0)，但事後 adapter 的清理(git worktree remove --force
+# 與 rm -rf 兩條路徑)都會因為這個 flag 而失敗，藉此驗證「清理失敗不會讓一次
+# 成功的 review 變成回報失敗」。測完要自己解除 flag，不然這支測試檔案自己
+# 最後的 $TMP 清理也會失敗。
+cat > "$FAKE/bin/mra.sh" <<EOF
+#!/usr/bin/env bash
+chflags uchg erp
+printf '%s' '$STUB_REVIEW_JSON'
+EOF
+chmod +x "$FAKE/bin/mra.sh"
+write_gh_stub "$BASE_SHA" 0
+out_cleanupfail="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cleanupfail.err")"
+rc_cleanupfail=$?
+eq "清理失敗不影響退出碼，review 本身成功仍是 0" "0" "$rc_cleanupfail"
+eq "清理失敗時仍印出 stub JSON 原樣(不是把清理失敗混進 review 結果)" \
+  "$STUB_REVIEW_JSON" "$out_cleanupfail"
+has "清理失敗有印出 WORKTREE_CLEANUP_FAILED 警告" \
+  "$(cat "$TMP/cleanupfail.err")" "WORKTREE_CLEANUP_FAILED"
+# 驗完手動解除 flag、清掉殘留，不要留給檔案結尾的 $TMP 清理去處理。
+chflags -R nouchg "$WT_ROOT/erp" 2>/dev/null
+rm -rf "$WT_ROOT/erp"
+git -C "$R" worktree prune >/dev/null 2>&1
+
+# --- 從頭到尾，來源 repo 的 HEAD 與未提交變更都沒被動過 ---------------------
+# 這支測試檔案跑到這裡已經呼叫過 adapter 十幾次，每一次都會建、清一次
+# worktree；這條斷言放在最後，等於驗證「所有這些呼叫加總起來」都沒有動到
+# 來源 repo 一絲一毫，不是只驗其中一次。
+eq "來源 repo 的 HEAD 全程沒有被動過" "$ORIG_HEAD_SHA" "$(git -C "$R" rev-parse HEAD)"
+eq "來源 repo 未提交變更的筆數全程沒有被動過" "$ORIG_STATUS_LINES" \
+  "$(git -C "$R" status --porcelain | wc -l | tr -d ' ')"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
