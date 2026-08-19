@@ -370,7 +370,19 @@ PROMPT
 # -----------------------------------------------------------------------
 # Synthesize: merge debate results into final structured review
 # Uses FOCUSED context (changed files only)
-# max-turns: 3
+#
+# max-turns: MRA_REVIEW_SYNTH_MAX_TURNS(預設 8)。這個函式被兩條路徑共用：
+# debate 路徑餵它 2 份 agent 結果，personas 路徑餵它 5 份，輸入量是 debate
+# 的 2.5 倍，findings 更多、要寫的 JSON 更長。實測 acme/rails-app-1#4832：3 輪在
+# debate(2 份輸入)下大概夠用，在 personas(5 份輸入)下不夠，會撞
+# max-turns 而失敗(claude_invoke 回 non-zero，最後整個 review 指令失敗，
+# 不是本來就有防線的「synthesize 產出不合法 JSON」那種安靜失敗)。
+# 不沿用 3：那是只驗過 debate 路徑(2 份輸入)的經驗值。
+# 不直接跳到 20(跟其他 agent 一樣的 MRA_REVIEW_AGENT_MAX_TURNS)：
+# synthesize 不做程式碼探索，只做彙整與去重，不需要跟探索型 agent 一樣的
+# 預算；放太寬只會讓真正卡住的情況更晚被發現。
+# 8 是 persona 本身的預設輪數(MRA_REVIEW_PERSONA_MAX_TURNS，見
+# lib/review-personas.sh)，取同一個量級，比 3 有足夠餘裕。
 # -----------------------------------------------------------------------
 run_synthesize() {
   # _-prefixed positionals are bound to keep the signature readable against the
@@ -439,7 +451,7 @@ Rules for line numbers:
   _review_without_github_credentials claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
-    --max-turns 3 \
+    --max-turns "${MRA_REVIEW_SYNTH_MAX_TURNS:-8}" \
     --disallowedTools "Write,Edit,NotebookEdit" \
     --setting-sources "project"
 }
