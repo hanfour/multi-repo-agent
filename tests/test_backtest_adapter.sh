@@ -70,12 +70,16 @@ EOF
 }
 
 ARGV_LOG="$TMP/mra-argv.log"
+# MRA_REVIEW_AGENT_MAX_TURNS 是環境變數，不會出現在 $*(argv)裡，argv 紀錄檔
+# 驗不到「adapter 有沒有設這個 env」，另外開一個檔案專門記它。
+ENV_LOG="$TMP/mra-env.log"
 # 寫 mra.sh stub。$1：要印到 stdout 的內容。$2：exit code。
 write_mra_stub() {
   local out="$1" rc="${2:-0}"
   cat > "$FAKE/bin/mra.sh" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "$ARGV_LOG"
+printf 'MRA_REVIEW_AGENT_MAX_TURNS=%s\n' "\${MRA_REVIEW_AGENT_MAX_TURNS:-<unset>}" > "$ENV_LOG"
 printf '%s' '$out'
 exit $rc
 EOF
@@ -100,6 +104,20 @@ lacks "不會把 --strategy 轉傳給 mra" "$argv" "--strategy"
 lacks "不會把 --json 轉傳給 mra" "$argv" "--json"
 has   "真正的 --personas 有被轉傳" "$argv" "--personas"
 has "轉成三點 --range base...head(不是兩點)" "$argv" "--range ${BASE_SHA}...${HEAD_SHA}"
+
+# --- MRA_REVIEW_AGENT_MAX_TURNS：預設補 40(對齊 ~/.pmk 的 gateway 設定) ---
+eq "呼叫端沒設時，adapter 幫忙補 MRA_REVIEW_AGENT_MAX_TURNS=40" \
+  "MRA_REVIEW_AGENT_MAX_TURNS=40" "$(cat "$ENV_LOG")"
+
+# --- 呼叫端已經設過的話，adapter 不覆蓋(操作者設的值要贏) ------------------
+rm -f "$ENV_LOG"
+out_turns_override="$(MRA_REVIEW_AGENT_MAX_TURNS=99 "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/turns-override.err")"
+rc_turns_override=$?
+eq "呼叫端已設 MRA_REVIEW_AGENT_MAX_TURNS 時退出碼仍是 0" "0" "$rc_turns_override"
+eq "呼叫端已設 MRA_REVIEW_AGENT_MAX_TURNS 時仍印出 stub JSON 原樣" \
+  "$STUB_REVIEW_JSON" "$out_turns_override"
+eq "呼叫端已設 MRA_REVIEW_AGENT_MAX_TURNS=99 時 adapter 不覆蓋，mra 收到 99" \
+  "MRA_REVIEW_AGENT_MAX_TURNS=99" "$(cat "$ENV_LOG")"
 
 # --- 專案目錄不存在 → PROJECT_NOT_FOUND，退出碼非 0 ------------------------
 out_missing="$("$ADAPTER" review acme/does-not-exist --pr 101 --strategy personas --json 2>&1 >/dev/null)"

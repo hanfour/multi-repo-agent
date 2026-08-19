@@ -148,8 +148,22 @@ _ensure_commit_local "$head_sha" "refs/pull/${pr}/head" || exit 1
 # 以 workspace 為工作目錄執行；MRA_REVIEW_EMIT_JSON=1 讓 lib/review.sh 直接吐
 # review_json 原樣，不渲染、不通知、不動 PKB(見 lib/review.sh 對這個旗標的
 # 說明，personas／debate／single-pass 三條路徑都支援)。
+#
+# MRA_REVIEW_AGENT_MAX_TURNS=40：對齊 pm-workspace-kit 的 reviewEnv
+# (packages/cli/src/adapters/mra-review-protocol.ts)，那裡設這個值是為了
+# 「rescue PKB-less／large PR 不要在探索中途被砍斷」。基準線沒設的話，等於
+# 拿比團隊實際使用時更嚴苛的條件在跑：實測 acme/rails-app-1#4829 就是探索
+# db/schema.rb(6489 行，這個 PR 本身只動 34 行)把 turn 預算燒光，被
+# per-attempt timeout(MRA_CLAUDE_TIMEOUT_SECONDS)砍斷，review 沒跑完，量到
+# 的漏抓率因此偏高，而且原因跟規則本身無關。呼叫端已經設過這個 env 就用
+# 呼叫端的值，操作者設的贏。
+#
+# 刻意不動 MRA_CLAUDE_TIMEOUT_SECONDS：基準線就是要量團隊現在真的會遇到的
+# 情況，包含會 timeout 這件事。turn 數上限對齊是因為 gateway 設定本身有設；
+# gateway 沒放寬 timeout，這裡也不該偷偷放寬。
 range_expr="${base_sha}...${head_sha}"
 review_output="$(cd "$WS" && MRA_REVIEW_EMIT_JSON=1 \
+  MRA_REVIEW_AGENT_MAX_TURNS="${MRA_REVIEW_AGENT_MAX_TURNS:-40}" \
   bash "$MRA_DIR/bin/mra.sh" review "$project" --range "$range_expr" "${mode_args[@]}")"
 review_rc=$?
 if [[ $review_rc -ne 0 ]]; then
