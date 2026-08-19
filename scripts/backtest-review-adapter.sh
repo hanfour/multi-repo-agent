@@ -181,10 +181,89 @@ _ensure_commit_local() {
 _ensure_commit_local "$base_sha" || exit 1
 _ensure_commit_local "$head_sha" "refs/pull/${pr}/head" || exit 1
 
-# --- 真正呼叫 mra review ----------------------------------------------------
-# 以 workspace 為工作目錄執行；MRA_REVIEW_EMIT_JSON=1 讓 lib/review.sh 直接吐
-# review_json 原樣，不渲染、不通知、不動 PKB(見 lib/review.sh 對這個旗標的
-# 說明，personas／debate／single-pass 三條路徑都支援)。
+# --- worktree 隔離：每個 PR 在自己的 worktree 上跑，不共用 $project_dir ----
+# _review_enforce_premises(lib/review-premise.sh)會刪掉「body 提到的 symbol
+# 在 repo 找不到」的 finding，查的是 $project_dir 當下 checkout 的那個分支，
+# 不是這次 --range 在審的版本。共用工作目錄平常 checkout 在使用者手邊正在做
+# 的分支，跟這次要審的歷史 PR head 完全是兩個版本，查錯版本，過濾器就會把
+# 「reviewer 抓對了、但當下 checkout 沒有那個 symbol」的 finding 錯殺掉。
+# 實測 acme/rails-app-1#4830：reviewer 正確抓到 compress_image 的問題，過濾器因為
+# 查的是使用者當下 checkout 的分支(不是 PR#4830 head)找不到這個 symbol，
+# 把它刪了，結果是 status=CHANGES_REQUESTED 但 comments:[]。PR 越舊，共用
+# 工作目錄跟 PR head 差得越遠，刪得越兇。這是回測方法本身引入的偏差，不是
+# 團隊使用時會發生的事(gateway 審的是剛開的 PR，工作目錄本來就是 PR head)。
+#
+# 用 git worktree 讓每個 PR 各自在一份 checkout 到自己 head 的副本上跑，不
+# 關掉 premise 過濾器：worktree 隔離比關掉過濾器更貼近「團隊真的在用的
+# 情況」，這是刻意的選擇。
+#
+# 平行 workspace 根目錄：mra 從 cwd 找 workspace(見 lib/project-path.sh)，
+# 呼叫 mra review 時要 cd 到這裡，不是真正的 $WS。
+BT_WS="${MRA_BACKTEST_WT_ROOT:-${TMPDIR:-/tmp}/mra-backtest-ws}"
+bt_project_dir="$BT_WS/$project"
+
+# 清理一定要綁 trap EXIT：review 跑完不管成功失敗、或中途哪一步提早 exit，
+# worktree 都要被移除，不能留給下一次跑到同一個 (repo, pr) 才發現路徑被佔用。
+# git worktree remove --force 失敗才退回 rm -rf + prune；這兩步都可能因為
+# 檔案系統異常(例如某個檔案被標成不可刪除)而失敗，失敗時只印警告，不
+# exit：清理失敗不該讓一次已經成功的 review 變成回報失敗，那樣的假訊號
+# 比清理失敗本身更誤導人。
+_bt_cleanup() {
+  [[ -d "$bt_project_dir" ]] || return 0
+  if ! git -C "$project_dir" worktree remove --force "$bt_project_dir" >/dev/null 2>&1; then
+    if ! rm -rf "$bt_project_dir" 2>/dev/null; then
+      echo "WORKTREE_CLEANUP_FAILED：無法移除 worktree ${bt_project_dir}，需要手動清理(不影響這次 review 本身的結果)" >&2
+    fi
+    git -C "$project_dir" worktree prune >/dev/null 2>&1
+  fi
+}
+trap _bt_cleanup EXIT
+
+# 自救：建立前先清掉同路徑的殘留(前一次跑到一半被中斷留下的)。這兩步的
+# 失敗都不該中止：先試 remove，失敗就 rm -rf，最後一定 prune 一次，把
+# git 內部記錄裡指向這個已經不存在路徑的 worktree 項目清掉，不然下一次
+# `worktree add` 會因為 git 記得這個路徑而拒絕。
+if ! git -C "$project_dir" worktree remove --force "$bt_project_dir" >/dev/null 2>&1; then
+  rm -rf "$bt_project_dir" 2>/dev/null
+fi
+git -C "$project_dir" worktree prune >/dev/null 2>&1
+
+# 複製 workspace 層 metadata：只複製這三個 mra 會讀的檔案，存在才複製，
+# 缺了不算錯(全新 workspace 本來就可能還沒有 manual-deps.json)。
+if ! mkdir -p "$BT_WS/.collab"; then
+  echo "WT_ROOT_MKDIR_FAILED：無法建立 ${BT_WS}/.collab" >&2
+  exit 1
+fi
+for _bt_meta in repos.json dep-graph.json manual-deps.json; do
+  [[ -f "$WS/.collab/$_bt_meta" ]] && cp "$WS/.collab/$_bt_meta" "$BT_WS/.collab/$_bt_meta"
+done
+
+# 一定要 --detach：這是歷史 PR 的 head，不是要開發的分支，不建分支、不動
+# $project_dir 的 HEAD。這支腳本全程都不對 $project_dir 做 checkout／
+# switch／reset，worktree 本來就是為了不用碰它才選的。
+if ! git -C "$project_dir" worktree add --detach "$bt_project_dir" "$head_sha" >/dev/null 2>&1; then
+  echo "WORKTREE_ADD_FAILED：git -C ${project_dir} worktree add --detach ${bt_project_dir} ${head_sha} 失敗" >&2
+  exit 1
+fi
+
+# 複製 PKB：一定要實體複製，不能 symlink。$project_dir/.mra 被 gitignore，
+# 新建的 worktree 不會有；pm-workspace-kit 的規格明講不能 symlink，因為
+# mra review 跑完後會回寫 PKB，symlink 會直接污染來源。我們的
+# MRA_REVIEW_EMIT_JSON 路徑雖然在回寫之前就 return 了，這裡還是照實體複製
+# 做，不要依賴「return 的位置以後也不會變」這個假設。沒有 .mra 就跳過，不
+# 算錯(不是每個專案都已經建過 PKB)。
+if [[ -d "$project_dir/.mra" ]]; then
+  if ! cp -R "$project_dir/.mra" "$bt_project_dir/.mra"; then
+    echo "PKB_COPY_FAILED：複製 ${project_dir}/.mra 到 ${bt_project_dir}/.mra 失敗" >&2
+    exit 1
+  fi
+fi
+
+# --- 真正呼叫 mra review：在 worktree 上跑 ----------------------------------
+# 以平行 workspace 為工作目錄執行(不是 $WS)；MRA_REVIEW_EMIT_JSON=1 讓
+# lib/review.sh 直接吐 review_json 原樣，不渲染、不通知、不動 PKB(見
+# lib/review.sh 對這個旗標的說明，personas／debate／single-pass 三條路徑
+# 都支援)。
 #
 # MRA_REVIEW_AGENT_MAX_TURNS=40：對齊 pm-workspace-kit 的 reviewEnv
 # (packages/cli/src/adapters/mra-review-protocol.ts)，那裡設這個值是為了
@@ -199,7 +278,7 @@ _ensure_commit_local "$head_sha" "refs/pull/${pr}/head" || exit 1
 # 情況，包含會 timeout 這件事。turn 數上限對齊是因為 gateway 設定本身有設；
 # gateway 沒放寬 timeout，這裡也不該偷偷放寬。
 range_expr="${base_sha}...${head_sha}"
-review_output="$(cd "$WS" && MRA_REVIEW_EMIT_JSON=1 \
+review_output="$(cd "$BT_WS" && MRA_REVIEW_EMIT_JSON=1 \
   MRA_REVIEW_AGENT_MAX_TURNS="${MRA_REVIEW_AGENT_MAX_TURNS:-40}" \
   bash "$MRA_DIR/bin/mra.sh" review "$project" --range "$range_expr" "${mode_args[@]}")"
 review_rc=$?
