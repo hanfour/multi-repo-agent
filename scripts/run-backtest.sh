@@ -135,6 +135,25 @@ if ! mkdir -p "$OUT"; then
   exit 1
 fi
 
+# codex_model／reasoning_effort／review_mode／agent_max_turns／
+# worktree_isolated 這五個不是 run-backtest.sh 自己知道的東西：$MRA_CMD
+# (可能是 adapter、可能是別的東西、也可能就是裸的 bin/mra.sh)才是唯一
+# 知道「這次實際用了什麼」的地方。上一版讓這支腳本自己用 MRA_CONFIG 沒設
+# 就讀共用 $MRA_DIR/config.json 去猜，猜錯了：adapter 內部衍生的設定只存
+# 在它自己的子行程裡，從來不會 export 回這裡，猜出來的值是共用
+# config.json 的原始值，不是 adapter 實際拿去跑 review 的值。記錯的值比
+# 沒有欄位更糟：沒有欄位時人會知道要去別處查，記了錯的值，階段四會以為
+# 兩輪跑在同樣條件下，而那正是這幾個欄位存在的唯一目的。
+#
+# 改法：每次呼叫 $MRA_CMD 都指定 MRA_BACKTEST_COND_FILE，讓它(如果認得
+# 這個 env)自己把實際用的條件寫成 JSON 回報到這個檔案；這裡只負責讀，
+# 讀不到就全部填 null，絕對不 fallback 去猜共用 config.json。
+# MRA_BACKTEST_CMD 指向不認得這個 env 的東西(例如測試用的 stub、或真正
+# 的 bin/mra.sh 本身，沒有 adapter 那層)時讀不到是正常情況，不是錯誤。
+# 同一輪 --label 底下每個 PR 用的條件本來就一樣，覆寫同一個檔即可，不用
+# 累積；檔名不進版控。
+COND_FILE="$OUT/run-conditions.json"
+
 all_matches='[]'; all_comments='[]'; prs=0
 # 三個「不計入本次彙總」的類別，各自獨立計數＋記清單，跟 prs(成功納入彙總
 # 的筆數)並列寫進 summary.json：光印到 stderr 不夠，這個回測要回報的結論
@@ -161,7 +180,7 @@ for ((i = 0; i < n_conf; i++)); do
   errf="$OUT/${safe_repo}__${pr}.err"
 
   if [[ ! -s "$f" ]]; then
-    if ! "$MRA_CMD" review "$repo" --pr "$pr" --strategy personas --json > "$f" 2>"$errf"; then
+    if ! MRA_BACKTEST_COND_FILE="$COND_FILE" "$MRA_CMD" review "$repo" --pr "$pr" --strategy personas --json > "$f" 2>"$errf"; then
       echo "REVIEW_FAILED：${repo}#${pr} 的 review 失敗，詳見 ${errf}，這個 PR 不計入本次彙總" >&2
       rm -f "$f"
       n_failed=$((n_failed + 1))
@@ -227,47 +246,48 @@ summary_metrics="$(backtest_metrics "$all_matches" "$aggregate_review")" ||
 # review 模式、model、reasoning effort、turn 上限、有沒有 worktree 隔離、
 # 基準集本身的內容，都會改變算出來的數字，也都要記，不能只記數字本身。
 # 這些欄位跟三個指標一樣走同一條 tmp→mv，不另外寫檔。
-review_mode="${MRA_BACKTEST_REVIEW_MODE:-personas}"
-agent_max_turns="${MRA_REVIEW_AGENT_MAX_TURNS:-40}"
-
-# codex model／reasoning effort：run-backtest.sh 是呼叫 adapter 的父行程，
-# 看不到 adapter 內部衍生出來、只存在於它自己那個子行程裡的 MRA_CONFIG
-# (見 scripts/backtest-review-adapter.sh「回測專用的 mra 設定」那段：沒有
-# export 回父行程，子行程結束就消失)。這裡記的是這個行程自己看得到的東西：
-# $MRA_CONFIG 有設(呼叫端自己指定過)就讀那份，沒設就讀共用的
-# $MRA_DIR/config.json。讀取失敗(檔案不存在或不是合法 JSON)不當成整個
-# 回測失敗，這兩個欄位只是補充的執行條件記錄，不是核心指標，讀不到就留空。
-cfg_path="${MRA_CONFIG:-$MRA_DIR/config.json}"
-codex_model="$(jq -r '.review.models.codex // empty' "$cfg_path" 2>/dev/null)"
-reasoning_effort="$(jq -r '.review.codexReasoningEffort // empty' "$cfg_path" 2>/dev/null)"
-
-# worktree_isolated：$MRA_CMD 有沒有指到 backtest-review-adapter.sh。沒指過去
-# 的話就是直接呼叫 bin/mra.sh，在共用工作目錄上跑，完全沒有 worktree 隔離
-# 這回事(見「每個 PR 用 git worktree 隔離到該 PR head」那次改動)。
-worktree_isolated=false
-[[ "$MRA_CMD" == *backtest-review-adapter.sh ]] && worktree_isolated=true
+#
+# codex_model／reasoning_effort／review_mode／agent_max_turns／
+# worktree_isolated／mra_config_path 這六個一律從 $COND_FILE 讀，絕對不
+# fallback 去讀共用的 $MRA_DIR/config.json 或用其他方式猜。猜過一次，
+# 猜錯了(見這次改動的由來)。$COND_FILE 讀不到(檔案不存在、是空的、或不是
+# 合法 JSON，例如 $MRA_CMD 根本不認得 MRA_BACKTEST_COND_FILE 這個 env)是
+# 正常情況，不是錯誤：這六個欄位全部填 null，conditions_source 記成
+# "unavailable"，讓看報告的人知道「這裡沒有東西」，不是「這裡有一個猜測
+# 出來、可能是錯的值」。
+if [[ -s "$COND_FILE" ]] && jq -e . "$COND_FILE" >/dev/null 2>&1; then
+  conditions_source="adapter"
+  conditions_json="$(jq -c '{codex_model: (.codex_model // null),
+                              reasoning_effort: (.reasoning_effort // null),
+                              review_mode: (.review_mode // null),
+                              agent_max_turns: (.agent_max_turns // null),
+                              worktree_isolated: (.worktree_isolated // null),
+                              mra_config_path: (.mra_config_path // null)}' "$COND_FILE")"
+else
+  conditions_source="unavailable"
+  conditions_json='{"codex_model":null,"reasoning_effort":null,"review_mode":null,"agent_max_turns":null,"worktree_isolated":null,"mra_config_path":null}'
+fi
 
 # candidates_sha：候選集內容的指紋，不是路徑或檔名。階段四若重建過候選集
 # (重跑 build-benchmark.sh 補新 PR、或人工確認的內容改了)，分母就不同，
 # 但沒有這個欄位的話完全看不出來。candidates_confirmed 是它的可讀版本，
-# 兩個都留：一個給人看差異方向，一個給程式精確比對是不是同一份。
+# 兩個都留：一個給人看差異方向，一個給程式精確比對是不是同一份。這兩個
+# 欄位是 run-backtest.sh 自己知道的東西，不受這次改動影響，維持原樣。
 candidates_sha="$(shasum -a 256 "$C" | cut -c1-16)"
 
 _write_summary "$OUT/summary.json" \
   --argjson m "$summary_metrics" --argjson prs "$prs" --arg label "$LABEL" \
   --argjson incomplete_count "$n_incomplete" --argjson incomplete_prs "$incomplete_list" \
   --argjson failed_count "$n_failed" --argjson failed_prs "$failed_list" \
-  --argjson tolerance "$TOL" --arg review_mode "$review_mode" \
-  --arg codex_model "$codex_model" --arg reasoning_effort "$reasoning_effort" \
-  --argjson agent_max_turns "$agent_max_turns" --argjson worktree_isolated "$worktree_isolated" \
+  --argjson tolerance "$TOL" \
+  --argjson conditions "$conditions_json" --arg conditions_source "$conditions_source" \
   --arg candidates_sha "$candidates_sha" --argjson candidates_confirmed "$n_conf" \
   '$m + {prs: $prs, label: $label,
          incomplete_count: $incomplete_count, incomplete_prs: $incomplete_prs,
          failed_count: $failed_count, failed_prs: $failed_prs,
-         tolerance: $tolerance, review_mode: $review_mode,
-         codex_model: $codex_model, reasoning_effort: $reasoning_effort,
-         agent_max_turns: $agent_max_turns, worktree_isolated: $worktree_isolated,
-         candidates_sha: $candidates_sha, candidates_confirmed: $candidates_confirmed}' || exit 1
+         tolerance: $tolerance,
+         candidates_sha: $candidates_sha, candidates_confirmed: $candidates_confirmed}
+   + $conditions + {conditions_source: $conditions_source}' || exit 1
 
 echo "label=$LABEL prs=$prs incomplete=$n_incomplete failed=$n_failed"
 jq -r '"漏抓率 \(.miss_rate)  未對應率 \(.unmatched_rate)  嚴重度吻合率 \(.severity_rate)"' "$OUT/summary.json"
