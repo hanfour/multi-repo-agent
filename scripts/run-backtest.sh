@@ -247,17 +247,22 @@ summary_metrics="$(backtest_metrics "$all_matches" "$aggregate_review")" ||
 # 基準集本身的內容，都會改變算出來的數字，也都要記，不能只記數字本身。
 # 這些欄位跟三個指標一樣走同一條 tmp→mv，不另外寫檔。
 #
-# codex_model／reasoning_effort／review_mode／agent_max_turns／
-# worktree_isolated／mra_config_path 這六個一律從 $COND_FILE 讀，絕對不
+# model／provider／reasoning_effort／review_mode／agent_max_turns／
+# worktree_isolated／mra_config_path 這七個一律從 $COND_FILE 讀，絕對不
 # fallback 去讀共用的 $MRA_DIR/config.json 或用其他方式猜。猜過一次，
 # 猜錯了(見這次改動的由來)。$COND_FILE 讀不到(檔案不存在、是空的、或不是
 # 合法 JSON，例如 $MRA_CMD 根本不認得 MRA_BACKTEST_COND_FILE 這個 env)是
-# 正常情況，不是錯誤：這六個欄位全部填 null，conditions_source 記成
+# 正常情況，不是錯誤：這七個欄位全部填 null，conditions_source 記成
 # "unavailable"，讓看報告的人知道「這裡沒有東西」，不是「這裡有一個猜測
 # 出來、可能是錯的值」。
+#
+# 欄位原本叫 codex_model：personas 模式跑的是 claude，填進一個叫
+# codex_model 的鍵本身就是錯的值，跟上一輪剛修掉的問題同一類，改名成
+# model，另外加一個 provider 欄位標明這個 model 是哪個 provider 的。
 if [[ -s "$COND_FILE" ]] && jq -e . "$COND_FILE" >/dev/null 2>&1; then
   conditions_source="adapter"
-  conditions_json="$(jq -c '{codex_model: (.codex_model // null),
+  conditions_json="$(jq -c '{model: (.model // null),
+                              provider: (.provider // null),
                               reasoning_effort: (.reasoning_effort // null),
                               review_mode: (.review_mode // null),
                               agent_max_turns: (.agent_max_turns // null),
@@ -265,7 +270,7 @@ if [[ -s "$COND_FILE" ]] && jq -e . "$COND_FILE" >/dev/null 2>&1; then
                               mra_config_path: (.mra_config_path // null)}' "$COND_FILE")"
 else
   conditions_source="unavailable"
-  conditions_json='{"codex_model":null,"reasoning_effort":null,"review_mode":null,"agent_max_turns":null,"worktree_isolated":null,"mra_config_path":null}'
+  conditions_json='{"model":null,"provider":null,"reasoning_effort":null,"review_mode":null,"agent_max_turns":null,"worktree_isolated":null,"mra_config_path":null}'
 fi
 
 # candidates_sha：候選集內容的指紋，不是路徑或檔名。階段四若重建過候選集

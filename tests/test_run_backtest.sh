@@ -186,16 +186,17 @@ eq "candidates_sha 是 candidates.json 內容的 sha256 前 16 碼" \
 eq "candidates_sha 長度是 16 碼(不是完整 64 碼的 sha256)" "16" \
   "$(jq -r '.candidates_sha | length' "$S1")"
 
-# --- codex_model／reasoning_effort／review_mode／agent_max_turns／
+# --- model／provider／reasoning_effort／review_mode／agent_max_turns／
 # worktree_isolated／mra_config_path：這支測試的 mra shim 是裸的假指令，
 # 不認得 MRA_BACKTEST_COND_FILE，run-backtest.sh 讀不到執行條件回報檔。
-# 這六個欄位這時候要一律是 null，conditions_source 要是 "unavailable"，
-# 絕對不能悄悄退回讀共用 $MRA_DIR/config.json 的值(那正是這次要修掉的
+# 這七個欄位這時候要一律是 null，conditions_source 要是 "unavailable"，
+# 絕對不能悄悄退回讀共用 $MRA_DIR/config.json 的值(那正是上一輪要修掉的
 # 東西：記錯的值比沒有欄位更糟)。用 -e 讀確定是 JSON null，不是字串
 # "null" 或空字串，jq -r 在這兩種狀況下印出來的文字剛好一樣，光看字面比
 # 不出差異。
-eq "沒有 cond 檔可讀時 codex_model 是 JSON null(不是字串)" "null" \
-  "$(jq -e '.codex_model' "$S1")"
+eq "沒有 cond 檔可讀時 model 是 JSON null(不是字串)" "null" \
+  "$(jq -e '.model' "$S1")"
+eq "沒有 cond 檔可讀時 provider 是 null" "null" "$(jq -e '.provider' "$S1")"
 eq "沒有 cond 檔可讀時 reasoning_effort 是 null" "null" "$(jq -e '.reasoning_effort' "$S1")"
 eq "沒有 cond 檔可讀時 review_mode 是 null" "null" "$(jq -e '.review_mode' "$S1")"
 eq "沒有 cond 檔可讀時 agent_max_turns 是 null" "null" "$(jq -e '.agent_max_turns' "$S1")"
@@ -511,13 +512,15 @@ eq "續跑(同一個 label)後 9201 真的重跑成功，prs 變成 3" "3" \
 eq "續跑後 incomplete_count 歸零(9201 這次跑完了)" "0" \
   "$(jq -r '.incomplete_count' "$S_INC")"
 
-# --- codex_model／reasoning_effort／review_mode／agent_max_turns／
-# worktree_isolated／mra_config_path：這六個不是 run-backtest.sh 自己知道
+# --- model／provider／reasoning_effort／review_mode／agent_max_turns／
+# worktree_isolated／mra_config_path：這七個不是 run-backtest.sh 自己知道
 # 的東西，run-backtest.sh 只負責讀 $MRA_CMD 透過 MRA_BACKTEST_COND_FILE
 # 回報回來的內容，不自己猜、不 fallback 去讀共用 config.json(見這次改動
 # 的由來：上一版猜過，猜錯了，記錯的值比沒有欄位更糟)。這裡用一個會回報
 # cond 檔的 stub 模擬真正的 adapter，真正 adapter 自己寫 cond 檔那段邏輯
-# 由 tests/test_backtest_adapter.sh 驗。 -------------------------------------
+# 由 tests/test_backtest_adapter.sh 驗。欄位原本叫 codex_model，personas
+# 模式跑的是 claude，填進一個叫 codex_model 的鍵本身就是錯的值，這一輪
+# 改名成 model，另外加一個 provider 欄位。 -----------------------------------
 COND_DIR="$TMP/bench-cond"
 mkdir -p "$COND_DIR" "$TMP/bin-cond"
 cat > "$COND_DIR/candidates.json" <<'J'
@@ -529,7 +532,7 @@ J
 cat > "$TMP/bin-cond/mra" <<'SHIM'
 #!/usr/bin/env bash
 if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
-  jq -n '{codex_model:"gpt-9.9-test",reasoning_effort:"medium",
+  jq -n '{model:"gpt-9.9-test",provider:"codex",reasoning_effort:"medium",
           review_mode:"standard",agent_max_turns:99,
           worktree_isolated:true,mra_config_path:"/fake/derived-config.json"}' \
     > "$MRA_BACKTEST_COND_FILE"
@@ -540,8 +543,10 @@ chmod +x "$TMP/bin-cond/mra"
 PATH="$TMP/bin-cond:$PATH" MRA_BENCHMARK_DIR="$COND_DIR" \
   bash "$S" --label condtest >/dev/null 2>&1
 S_COND="$COND_DIR/runs/condtest/summary.json"
-eq "cond 檔讀得到時，codex_model 是 adapter 實際回報的值" "gpt-9.9-test" \
-  "$(jq -r '.codex_model' "$S_COND")"
+eq "cond 檔讀得到時，model 是 adapter 實際回報的值" "gpt-9.9-test" \
+  "$(jq -r '.model' "$S_COND")"
+eq "cond 檔讀得到時，provider 是 adapter 實際回報的值" "codex" \
+  "$(jq -r '.provider' "$S_COND")"
 eq "cond 檔讀得到時，reasoning_effort 是 adapter 實際回報的值" "medium" \
   "$(jq -r '.reasoning_effort' "$S_COND")"
 eq "cond 檔讀得到時，review_mode 是 adapter 實際回報的值" "standard" \
@@ -561,7 +566,7 @@ eq "cond 檔讀得到時，conditions_source 是 adapter" "adapter" \
 cat > "$TMP/bin-cond/mra" <<'SHIM'
 #!/usr/bin/env bash
 if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
-  jq -n '{codex_model:"gpt-different-model",reasoning_effort:"low",
+  jq -n '{model:"gpt-different-model",provider:"codex",reasoning_effort:"low",
           review_mode:"personas",agent_max_turns:7,
           worktree_isolated:true,mra_config_path:"/fake/other-config.json"}' \
     > "$MRA_BACKTEST_COND_FILE"
@@ -571,15 +576,39 @@ SHIM
 chmod +x "$TMP/bin-cond/mra"
 PATH="$TMP/bin-cond:$PATH" MRA_BENCHMARK_DIR="$COND_DIR" \
   bash "$S" --label condtest2 >/dev/null 2>&1
-eq "stub 回報的內容換了，codex_model 也跟著變(不是釘死的值)" "gpt-different-model" \
-  "$(jq -r '.codex_model' "$COND_DIR/runs/condtest2/summary.json")"
+eq "stub 回報的內容換了，model 也跟著變(不是釘死的值)" "gpt-different-model" \
+  "$(jq -r '.model' "$COND_DIR/runs/condtest2/summary.json")"
+
+# --- personas 模式的 cond 檔：provider／model 是 claude／sonnet，
+# reasoning_effort 是 JSON null。這裡驗的是 run-backtest.sh 自己讀 cond
+# 檔的機制正確傳遞 null(不是把它讀成字串"null"或空字串)；claude 沒有
+# reasoning effort 這個概念，這是真正 adapter 在 personas 模式下會回報的
+# 形狀，adapter 自己怎麼產生這個 null 由 test_backtest_adapter.sh 驗。
+cat > "$TMP/bin-cond/mra" <<'SHIM'
+#!/usr/bin/env bash
+if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
+  jq -n '{model:"sonnet",provider:"claude",reasoning_effort:null,
+          review_mode:"personas",agent_max_turns:40,
+          worktree_isolated:true,mra_config_path:"/fake/personas-config.json"}' \
+    > "$MRA_BACKTEST_COND_FILE"
+fi
+printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
+SHIM
+chmod +x "$TMP/bin-cond/mra"
+PATH="$TMP/bin-cond:$PATH" MRA_BENCHMARK_DIR="$COND_DIR" \
+  bash "$S" --label condtest3 >/dev/null 2>&1
+S_COND3="$COND_DIR/runs/condtest3/summary.json"
+eq "personas cond 檔讀得到時，provider 是 claude" "claude" "$(jq -r '.provider' "$S_COND3")"
+eq "personas cond 檔讀得到時，model 是 sonnet" "sonnet" "$(jq -r '.model' "$S_COND3")"
+eq "personas cond 檔讀得到時，reasoning_effort 正確傳遞成 JSON null" "null" \
+  "$(jq -e '.reasoning_effort' "$S_COND3")"
 
 # --- 沒有 cond 檔可讀時，絕對不能悄悄退回共用 $MRA_DIR/config.json 的值 ---
-# 這是這次修正的核心：用一支「不知道 MRA_BACKTEST_COND_FILE 這個 env」的
-# 裸 stub，即使共用 config.json 裡有明確的 codex model 值，summary 裡的
-# codex_model 也必須是 null，不能是那個值。記錯的值比沒有欄位更糟：沒有
-# 欄位人會知道要去別處查，記了共用 config.json 的值，階段四會誤以為那就是
-# 這次實際用的 model。
+# 這是上一輪修正的核心，這一輪欄位改名後要繼續守住：用一支「不知道
+# MRA_BACKTEST_COND_FILE 這個 env」的裸 stub，即使共用 config.json 裡有
+# 明確的 codex model 值，summary 裡的 model 也必須是 null，不能是那個值。
+# 記錯的值比沒有欄位更糟：沒有欄位人會知道要去別處查，記了共用
+# config.json 的值，階段四會誤以為那就是這次實際用的 model。
 UNAVAIL_DIR="$TMP/bench-cond-unavail"
 mkdir -p "$UNAVAIL_DIR" "$TMP/bin-cond-unavail"
 cat > "$UNAVAIL_DIR/candidates.json" <<'J'
@@ -606,8 +635,8 @@ if [[ -n "$real_shared_codex_model" ]]; then
 else
   fail "測試前提不成立：共用 config.json 沒有 .review.models.codex，下面測不出東西"
 fi
-eq "沒有 cond 檔時 codex_model 是 null，不是偷偷退回共用 config.json 的值" \
-  "null" "$(jq -r '.codex_model' "$S_UNAVAIL")"
+eq "沒有 cond 檔時 model 是 null，不是偷偷退回共用 config.json 的值" \
+  "null" "$(jq -r '.model' "$S_UNAVAIL")"
 lacks "summary.json 裡不該出現共用 config.json 那個 codex model 值" \
   "$(jq -c . "$S_UNAVAIL")" "$real_shared_codex_model"
 eq "沒有 cond 檔時 conditions_source 是 unavailable" "unavailable" \

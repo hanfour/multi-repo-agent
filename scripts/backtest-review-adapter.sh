@@ -99,23 +99,55 @@ esac
 # gpt-5.6-luna 收，gpt-5.5 的上限是 xhigh，回 unsupported_value。兩個值都在
 # 同一個檔裡，而那個檔在版控內、是所有人共用的，不為了回測改它。
 #
-# 改法：從共用設定衍生一份只改這兩個值的副本，用 MRA_CONFIG 指過去
+# personas 模式另一個問題：personas／debate 底下個別 agent 呼叫預設走
+# claude(lib/review-personas.sh:59 的 provider 預設值就是 claude)，但共用
+# config.json 的 providerMode 是 codex。只改 models.codex 的話，解析出來的
+# 那個值(gpt-5.5)會被送去給 claude，claude 不認得那個名字，整批失敗
+# (實測：[debate] claude failed: "gpt-5.5" is not a model this version of
+# Claude Code recognizes)。standard 模式全程走 codex，沒有這個問題。
+#
+# 不能用 --provider claude 這個旗標繞過：config.json 的
+# review.allowUserOverride: false 會擋掉它(lib/review-provider.sh:58)，除非
+# 另外設 MRA_REVIEW_ADMIN_OVERRIDE=1。那是繞過檢查，不是設定，回測不該
+# 依賴一個要繞過安全機制才能跑的旗標。正確做法是在衍生 config 裡直接把
+# providerMode 設成 claude：那是「這一輪基準線的設定本身」，不是「使用者
+# 覆蓋」，不會觸發那道檢查。
+#
+# 改法：從共用設定衍生一份副本，內容依模式而不同，用 MRA_CONFIG 指過去
 # (lib/config.sh:3 的 MRA_CONFIG="${MRA_CONFIG:-$MRA_DIR/config.json}" 讓
 # 外部 env 優先)。好處是「這組基準線跑在什麼設定下」變成一個可以直接
 # diff 的檔案，階段四要重跑時條件完全可複製。
 #
-# 呼叫端已經指定 MRA_CONFIG 就用呼叫端的，不覆蓋。
+#   standard：只改 models.codex／codexReasoningEffort 這兩個值，
+#             providerMode 維持共用設定裡的原值(codex)。
+#   personas：把 providerMode 設成 claude、改 models.claude，完全不動
+#             models.codex／codexReasoningEffort：這兩個值跟 personas 模式
+#             要跑的東西無關，動了反而讓人誤以為 personas 模式也跟 codex
+#             設定有關。
+#
+# 呼叫端已經指定 MRA_CONFIG 就用呼叫端的，不覆蓋，也就不衍生。
 codex_model="${MRA_BACKTEST_CODEX_MODEL:-gpt-5.5}"
 codex_effort="${MRA_BACKTEST_CODEX_EFFORT:-xhigh}"
+claude_model="${MRA_BACKTEST_CLAUDE_MODEL:-sonnet}"
 if [[ -z "${MRA_CONFIG:-}" ]]; then
   derived_config="${MRA_BACKTEST_CONFIG_DIR:-${TMPDIR:-/tmp}}/mra-backtest-config.json"
   derived_tmp="${derived_config}.tmp"
-  if ! jq --arg m "$codex_model" --arg e "$codex_effort" \
-       '.review.models.codex = $m | .review.codexReasoningEffort = $e' \
-       "$MRA_DIR/config.json" > "$derived_tmp"; then
-    echo "CONFIG_DERIVE_FAILED：無法從 ${MRA_DIR}/config.json 產生回測設定" >&2
-    rm -f "$derived_tmp"
-    exit 1
+  if [[ "$review_mode" == "standard" ]]; then
+    if ! jq --arg m "$codex_model" --arg e "$codex_effort" \
+         '.review.models.codex = $m | .review.codexReasoningEffort = $e' \
+         "$MRA_DIR/config.json" > "$derived_tmp"; then
+      echo "CONFIG_DERIVE_FAILED：無法從 ${MRA_DIR}/config.json 產生回測設定" >&2
+      rm -f "$derived_tmp"
+      exit 1
+    fi
+  else
+    if ! jq --arg cm "$claude_model" \
+         '.review.providerMode = "claude" | .review.models.claude = $cm' \
+         "$MRA_DIR/config.json" > "$derived_tmp"; then
+      echo "CONFIG_DERIVE_FAILED：無法從 ${MRA_DIR}/config.json 產生回測設定" >&2
+      rm -f "$derived_tmp"
+      exit 1
+    fi
   fi
   if ! mv "$derived_tmp" "$derived_config"; then
     echo "CONFIG_PROMOTE_FAILED：無法寫入 ${derived_config}" >&2
@@ -142,22 +174,37 @@ fi
 # 回報失敗。
 agent_max_turns="${MRA_REVIEW_AGENT_MAX_TURNS:-40}"
 
-# codex_model／reasoning_effort 讀的是這時候已經解出來、真正會生效的那份
-# $MRA_CONFIG(上面剛衍生出來的，或呼叫端指定、上面那個 if 整個沒執行的都
-# 一樣)，不是最前面那兩個「打算要用」的 $codex_model／$codex_effort：呼叫端
-# 自己指定 MRA_CONFIG 時，那兩個變數的值從來沒有真的被套用過，讀它們會
-# 回報錯的答案。
-effective_codex_model="$(jq -r '.review.models.codex // empty' "$MRA_CONFIG" 2>/dev/null)"
-effective_reasoning_effort="$(jq -r '.review.codexReasoningEffort // empty' "$MRA_CONFIG" 2>/dev/null)"
+# provider／model／reasoning_effort 讀的是這時候已經解出來、真正會生效的
+# 那份 $MRA_CONFIG(上面剛衍生出來的，或呼叫端指定、上面那個 if 整個沒執行
+# 的都一樣)，不是最前面那幾個「打算要用」的變數：呼叫端自己指定 MRA_CONFIG
+# 時，那些變數的值從來沒有真的被套用過，讀它們會回報錯的答案。
+#
+# provider 看的是 .review.providerMode，不是直接照 $review_mode 硬翻
+# (personas→claude、standard→codex)：這樣萬一呼叫端自己指定一份
+# providerMode 不是預期值的 MRA_CONFIG，這裡回報的還是實際生效的那個
+# provider，不是我們以為一定會是的那個。
+effective_provider="$(jq -r '.review.providerMode // empty' "$MRA_CONFIG" 2>/dev/null)"
+if [[ "$effective_provider" == "claude" ]]; then
+  effective_model="$(jq -r '.review.models.claude // empty' "$MRA_CONFIG" 2>/dev/null)"
+  # claude 沒有 reasoning effort 這個概念：不管共用設定裡
+  # codexReasoningEffort 填了什麼，都跟這次實際跑的東西無關。故意留空，
+  # 下面組 JSON 時轉成明確的 null，不是空字串也不是省略這個鍵。
+  effective_reasoning_effort=""
+else
+  effective_model="$(jq -r '.review.models.codex // empty' "$MRA_CONFIG" 2>/dev/null)"
+  effective_reasoning_effort="$(jq -r '.review.codexReasoningEffort // empty' "$MRA_CONFIG" 2>/dev/null)"
+fi
 
 if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
   if ! jq -n \
-    --arg codex_model "$effective_codex_model" \
+    --arg model "$effective_model" \
+    --arg provider "$effective_provider" \
     --arg reasoning_effort "$effective_reasoning_effort" \
     --arg review_mode "$review_mode" \
     --argjson agent_max_turns "$agent_max_turns" \
     --arg mra_config_path "$MRA_CONFIG" \
-    '{codex_model: $codex_model, reasoning_effort: $reasoning_effort,
+    '{model: $model, provider: $provider,
+      reasoning_effort: (if $reasoning_effort == "" then null else $reasoning_effort end),
       review_mode: $review_mode, agent_max_turns: $agent_max_turns,
       worktree_isolated: true, mra_config_path: $mra_config_path}' \
     > "$MRA_BACKTEST_COND_FILE" 2>/dev/null; then
