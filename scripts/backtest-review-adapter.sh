@@ -88,18 +88,42 @@ case "$review_mode" in
     exit 1 ;;
 esac
 
-# config.json 的 review.models.codex 目前是 gpt-5.6-luna，而 codex-cli 0.146.0
-# 對長 prompt 會送 prompt_cache_retention，那個 model 不接受，回應
-# invalid_parameter 之後整次 review 作廢。實測 acme/rails-app-1#4830 燒掉 185,814 個
-# token 才失敗，而且失敗的偏偏是大的 PR(短 prompt 不觸發 prompt caching)，
-# 等於樣本裡最可能有缺陷的那些會系統性缺席。
+# --- 回測專用的 mra 設定 ----------------------------------------------------
+# config.json 釘住的 review.models.codex = gpt-5.6-luna 跑不完大 PR：
+# codex-cli 0.146.0 對長 prompt 會送 prompt_cache_retention，那個 model 回
+# invalid_parameter，整次 review 作廢。實測 acme/rails-app-1#4830 燒掉 185,814 個
+# token 才失敗。失敗的偏偏是大的 PR(短 prompt 不觸發 prompt caching)，也就是
+# 樣本裡最可能有缺陷的那些會系統性缺席，量到的漏抓率因此偏樂觀。
 #
-# config.json 在版控內、是共用設定，不為了回測改它；改用 mra review 本來就有
-# 的 --model 旗標，作用範圍只在這一次呼叫(review_provider_effective_model 在
-# CLI 有給 model 時優先採用)。兩種模式都要帶：providerMode 預設是 codex，
-# personas 模式一樣會走到同一個 provider。
+# 換成 gpt-5.5 之後又卡 review.codexReasoningEffort = "max"：那個值只有
+# gpt-5.6-luna 收，gpt-5.5 的上限是 xhigh，回 unsupported_value。兩個值都在
+# 同一個檔裡，而那個檔在版控內、是所有人共用的，不為了回測改它。
+#
+# 改法：從共用設定衍生一份只改這兩個值的副本，用 MRA_CONFIG 指過去
+# (lib/config.sh:3 的 MRA_CONFIG="${MRA_CONFIG:-$MRA_DIR/config.json}" 讓
+# 外部 env 優先)。好處是「這組基準線跑在什麼設定下」變成一個可以直接
+# diff 的檔案，階段四要重跑時條件完全可複製。
+#
+# 呼叫端已經指定 MRA_CONFIG 就用呼叫端的，不覆蓋。
 codex_model="${MRA_BACKTEST_CODEX_MODEL:-gpt-5.5}"
-mode_args+=(--model "$codex_model")
+codex_effort="${MRA_BACKTEST_CODEX_EFFORT:-xhigh}"
+if [[ -z "${MRA_CONFIG:-}" ]]; then
+  derived_config="${MRA_BACKTEST_CONFIG_DIR:-${TMPDIR:-/tmp}}/mra-backtest-config.json"
+  derived_tmp="${derived_config}.tmp"
+  if ! jq --arg m "$codex_model" --arg e "$codex_effort" \
+       '.review.models.codex = $m | .review.codexReasoningEffort = $e' \
+       "$MRA_DIR/config.json" > "$derived_tmp"; then
+    echo "CONFIG_DERIVE_FAILED：無法從 ${MRA_DIR}/config.json 產生回測設定" >&2
+    rm -f "$derived_tmp"
+    exit 1
+  fi
+  if ! mv "$derived_tmp" "$derived_config"; then
+    echo "CONFIG_PROMOTE_FAILED：無法寫入 ${derived_config}" >&2
+    rm -f "$derived_tmp"
+    exit 1
+  fi
+  export MRA_CONFIG="$derived_config"
+fi
 
 # owner/repo 取 / 後半當 workspace 內的專案名；沒有 / 就直接當專案名用。
 project="${repo##*/}"

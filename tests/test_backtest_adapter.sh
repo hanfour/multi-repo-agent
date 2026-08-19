@@ -30,6 +30,19 @@ mkdir -p "$FAKE/scripts" "$FAKE/bin"
 ln -s "$REAL_ADAPTER" "$FAKE/scripts/backtest-review-adapter.sh"
 ADAPTER="$FAKE/scripts/backtest-review-adapter.sh"
 
+# adapter 會從 $MRA_DIR/config.json 衍生一份只改 codex model 與 reasoning
+# effort 的回測設定。真實的 MRA_DIR 一定有這個檔(在版控內)，假的專案樹要自己
+# 補一份，形狀跟真的一致即可。
+cat > "$FAKE/config.json" <<'FAKECFG'
+{
+  "review": {
+    "providerMode": "codex",
+    "models": { "claude": "sonnet", "codex": "gpt-5.6-luna" },
+    "codexReasoningEffort": "max"
+  }
+}
+FAKECFG
+
 # gh 是裸命令查找，用 PATH 前置一個 stub 目錄就能接住。
 STUBBIN="$TMP/stubbin"
 mkdir -p "$STUBBIN"
@@ -80,6 +93,7 @@ write_mra_stub() {
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "$ARGV_LOG"
 printf 'MRA_REVIEW_AGENT_MAX_TURNS=%s\n' "\${MRA_REVIEW_AGENT_MAX_TURNS:-<unset>}" > "$ENV_LOG"
+printf 'MRA_CONFIG=%s\n' "\${MRA_CONFIG:-<unset>}" >> "$ENV_LOG"
 printf '%s' '$out'
 exit $rc
 EOF
@@ -106,8 +120,8 @@ has   "真正的 --personas 有被轉傳" "$argv" "--personas"
 has "轉成三點 --range base...head(不是兩點)" "$argv" "--range ${BASE_SHA}...${HEAD_SHA}"
 
 # --- MRA_REVIEW_AGENT_MAX_TURNS：預設補 40(對齊 ~/.pmk 的 gateway 設定) ---
-eq "呼叫端沒設時，adapter 幫忙補 MRA_REVIEW_AGENT_MAX_TURNS=40" \
-  "MRA_REVIEW_AGENT_MAX_TURNS=40" "$(cat "$ENV_LOG")"
+has "呼叫端沒設時，adapter 幫忙補 MRA_REVIEW_AGENT_MAX_TURNS=40" \
+  "$(cat "$ENV_LOG")" "MRA_REVIEW_AGENT_MAX_TURNS=40"
 
 # --- 呼叫端已經設過的話，adapter 不覆蓋(操作者設的值要贏) ------------------
 rm -f "$ENV_LOG"
@@ -116,8 +130,8 @@ rc_turns_override=$?
 eq "呼叫端已設 MRA_REVIEW_AGENT_MAX_TURNS 時退出碼仍是 0" "0" "$rc_turns_override"
 eq "呼叫端已設 MRA_REVIEW_AGENT_MAX_TURNS 時仍印出 stub JSON 原樣" \
   "$STUB_REVIEW_JSON" "$out_turns_override"
-eq "呼叫端已設 MRA_REVIEW_AGENT_MAX_TURNS=99 時 adapter 不覆蓋，mra 收到 99" \
-  "MRA_REVIEW_AGENT_MAX_TURNS=99" "$(cat "$ENV_LOG")"
+has "呼叫端已設 MRA_REVIEW_AGENT_MAX_TURNS=99 時 adapter 不覆蓋，mra 收到 99" \
+  "$(cat "$ENV_LOG")" "MRA_REVIEW_AGENT_MAX_TURNS=99"
 
 # --- 專案目錄不存在 → PROJECT_NOT_FOUND，退出碼非 0 ------------------------
 out_missing="$("$ADAPTER" review acme/does-not-exist --pr 101 --strategy personas --json 2>&1 >/dev/null)"
@@ -262,17 +276,37 @@ lacks "standard 模式不傳 --personas 給 mra" "$argv_standard" "--personas"
 # config.json 的 review.models.codex 是共用設定（在版控內），回測不改它，改用
 # mra review 的 --model 旗標。兩種模式都要帶：providerMode 預設 codex，
 # personas 模式一樣走到同一個 provider。
-has "personas 模式帶 --model" "$argv_personas" "--model"
-has "standard 模式帶 --model" "$argv_standard" "--model"
-has "預設 model 是 gpt-5.5" "$argv_standard" "--model gpt-5.5"
+cfg_dir="$TMP/derived"; mkdir -p "$cfg_dir"
+out_cfg="$(MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CONFIG_DIR="$cfg_dir" \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cfg.err")"
+rc_cfg=$?
+eq "產生衍生設定時退出碼 0" "0" "$rc_cfg"
+derived="$cfg_dir/mra-backtest-config.json"
+if [[ -s "$derived" ]]; then ok "衍生設定檔有寫出來"; else fail "衍生設定檔沒寫出來：$derived"; fi
+eq "衍生設定的 codex model 是 gpt-5.5" "gpt-5.5" "$(jq -r '.review.models.codex' "$derived" 2>/dev/null)"
+eq "衍生設定的 reasoning effort 是 xhigh" "xhigh" "$(jq -r '.review.codexReasoningEffort' "$derived" 2>/dev/null)"
+eq "來源 config.json 沒有被改動" "gpt-5.6-luna" \
+  "$(jq -r '.review.models.codex' "$FAKE/config.json" 2>/dev/null)"
+# 只檢查衍生檔的內容不夠：export 掉了的話 mra 仍讀共用設定，機制整個失效而
+# 測試照樣綠。這一條斷言 mra 真的收到指向衍生檔的 MRA_CONFIG。
+has "mra 收到指向衍生設定的 MRA_CONFIG" "$(cat "$ENV_LOG")" "MRA_CONFIG=$derived"
 
-out_model_override="$(MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CODEX_MODEL=gpt-4.9 \
-  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/model-override.err")"
-rc_model_override=$?
-eq "MRA_BACKTEST_CODEX_MODEL 覆蓋時退出碼 0" "0" "$rc_model_override"
-argv_model_override="$(cat "$ARGV_LOG")"
-has   "MRA_BACKTEST_CODEX_MODEL 會覆蓋預設值" "$argv_model_override" "--model gpt-4.9"
-lacks "覆蓋後不再帶預設的 gpt-5.5" "$argv_model_override" "gpt-5.5"
+# 呼叫端自己指定 MRA_CONFIG 時，adapter 不覆蓋。
+rm -f "$ENV_LOG"
+caller_cfg="$TMP/caller-config.json"
+cp "$FAKE/config.json" "$caller_cfg"
+out_cfg_caller="$(MRA_BACKTEST_REVIEW_MODE=standard MRA_CONFIG="$caller_cfg" \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cfg-caller.err")"
+eq "呼叫端指定 MRA_CONFIG 時退出碼 0" "0" "$?"
+has "呼叫端指定的 MRA_CONFIG 不被覆蓋" "$(cat "$ENV_LOG")" "MRA_CONFIG=$caller_cfg"
+
+out_cfg2="$(MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CONFIG_DIR="$cfg_dir" \
+  MRA_BACKTEST_CODEX_MODEL=gpt-4.9 MRA_BACKTEST_CODEX_EFFORT=high \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cfg2.err")"
+eq "MRA_BACKTEST_CODEX_MODEL 會覆蓋預設值" "gpt-4.9" \
+  "$(jq -r '.review.models.codex' "$derived" 2>/dev/null)"
+eq "MRA_BACKTEST_CODEX_EFFORT 會覆蓋預設值" "high" \
+  "$(jq -r '.review.codexReasoningEffort' "$derived" 2>/dev/null)"
 
 # --- 不認得的 MRA_BACKTEST_REVIEW_MODE 值要報錯退出，不能默默 fallback -----
 rm -f "$ARGV_LOG"
