@@ -258,6 +258,22 @@ has   "standard 模式傳 --strategy standard 給 mra" "$argv_standard" "--strat
 has   "standard 模式傳 --provider codex 給 mra" "$argv_standard" "--provider codex"
 lacks "standard 模式不傳 --personas 給 mra" "$argv_standard" "--personas"
 
+# --- codex model 覆蓋 -------------------------------------------------------
+# config.json 的 review.models.codex 是共用設定（在版控內），回測不改它，改用
+# mra review 的 --model 旗標。兩種模式都要帶：providerMode 預設 codex，
+# personas 模式一樣走到同一個 provider。
+has "personas 模式帶 --model" "$argv_personas" "--model"
+has "standard 模式帶 --model" "$argv_standard" "--model"
+has "預設 model 是 gpt-5.5" "$argv_standard" "--model gpt-5.5"
+
+out_model_override="$(MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CODEX_MODEL=gpt-4.9 \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/model-override.err")"
+rc_model_override=$?
+eq "MRA_BACKTEST_CODEX_MODEL 覆蓋時退出碼 0" "0" "$rc_model_override"
+argv_model_override="$(cat "$ARGV_LOG")"
+has   "MRA_BACKTEST_CODEX_MODEL 會覆蓋預設值" "$argv_model_override" "--model gpt-4.9"
+lacks "覆蓋後不再帶預設的 gpt-5.5" "$argv_model_override" "gpt-5.5"
+
 # --- 不認得的 MRA_BACKTEST_REVIEW_MODE 值要報錯退出，不能默默 fallback -----
 rm -f "$ARGV_LOG"
 out_mode_invalid="$(MRA_BACKTEST_REVIEW_MODE=presonas "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>&1 >/dev/null)"

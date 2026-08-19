@@ -88,6 +88,19 @@ case "$review_mode" in
     exit 1 ;;
 esac
 
+# config.json 的 review.models.codex 目前是 gpt-5.6-luna，而 codex-cli 0.146.0
+# 對長 prompt 會送 prompt_cache_retention，那個 model 不接受，回應
+# invalid_parameter 之後整次 review 作廢。實測 acme/rails-app-1#4830 燒掉 185,814 個
+# token 才失敗，而且失敗的偏偏是大的 PR(短 prompt 不觸發 prompt caching)，
+# 等於樣本裡最可能有缺陷的那些會系統性缺席。
+#
+# config.json 在版控內、是共用設定，不為了回測改它；改用 mra review 本來就有
+# 的 --model 旗標，作用範圍只在這一次呼叫(review_provider_effective_model 在
+# CLI 有給 model 時優先採用)。兩種模式都要帶：providerMode 預設是 codex，
+# personas 模式一樣會走到同一個 provider。
+codex_model="${MRA_BACKTEST_CODEX_MODEL:-gpt-5.5}"
+mode_args+=(--model "$codex_model")
+
 # owner/repo 取 / 後半當 workspace 內的專案名；沒有 / 就直接當專案名用。
 project="${repo##*/}"
 
