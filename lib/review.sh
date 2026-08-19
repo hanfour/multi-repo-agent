@@ -225,7 +225,13 @@ review_project() {
 
   # --- Determine output mode ---
   local output_mode="terminal"
-  [[ -n "$pr_number" || "${MRA_REVIEW_OUTPUT_MODE:-}" == "inline" ]] && output_mode="inline"
+  # MRA_REVIEW_EMIT_JSON=1 一定要走 inline 分支才有 review_json 這個結構化
+  # 產物可以吐：single-pass 的 terminal 分支只把模型輸出即時串流出去，從來
+  # 不組出一份完整的 JSON，也不會在 prompt 裡要求模型輸出 STRICT JSON(見
+  # lib/review-prompt.sh 的 output_instructions，只在 output_mode=inline 時
+  # 加入)。回測用 --range(不用 --pr)，若不把這個旗標也算進判斷式，
+  # single-pass／standard 策略下 output_mode 永遠是 terminal，旗標形同虛設。
+  [[ -n "$pr_number" || "${MRA_REVIEW_OUTPUT_MODE:-}" == "inline" || "${MRA_REVIEW_EMIT_JSON:-}" == "1" ]] && output_mode="inline"
 
   # --- Auto-select strategy based on diff size ---
   local diff_for_strategy changed_files_for_strategy
@@ -494,14 +500,14 @@ ${prompt}"
   local strategy_turns
   strategy_turns=$(_review_strategy_turns "$strategy")
   if [[ "$strategy" == "light" ]]; then
-    log_info "light strategy: max-turns=$strategy_turns, focused context" "review"
+    _review_maybe_stderr_log log_info "light strategy: max-turns=$strategy_turns, focused context" "review"
   else
-    log_info "standard strategy: max-turns=$strategy_turns" "review"
+    _review_maybe_stderr_log log_info "standard strategy: max-turns=$strategy_turns" "review"
   fi
 
   # --- Run provider ---
   local system_prompt_file="$mra_dir/agents/code-reviewer.md"
-  log_progress "running $(review_provider_label "$review_provider" "$model")..." "review"
+  _review_maybe_stderr_log log_progress "running $(review_provider_label "$review_provider" "$model")..." "review"
 
   if [[ "$output_mode" == "terminal" ]]; then
     # Terminal mode: Claude streams live; Codex prints its final response.
@@ -534,8 +540,17 @@ ${prompt}"
     # The inline schema only permits APPROVED/CHANGES_REQUESTED, so a COMMENT
     # status can ONLY be the neutral REVIEW_INCOMPLETE verdict — log it.
     if [[ "$(printf '%s' "$review_json" | jq -r .status)" == "COMMENT" ]]; then
-      log_warn "single-pass review incomplete (no completion sentinel / empty / unparseable) — posting REVIEW_INCOMPLETE" "review"
+      _review_maybe_stderr_log log_warn "single-pass review incomplete (no completion sentinel / empty / unparseable) — posting REVIEW_INCOMPLETE" "review"
     fi
+
+    # 回測旗標：跟 personas／debate 兩條路徑同一個道理，只吐 JSON、跳過
+    # 發文／通知／PKB 更新。PKB 更新的呼叫在這個 if/else 區塊外面(見函式
+    # 最底下)，這裡直接 return 0 離開函式，一併跳過。
+    if [[ "${MRA_REVIEW_EMIT_JSON:-}" == "1" ]]; then
+      printf '%s\n' "$review_json"
+      return 0
+    fi
+
     if [[ "${MRA_REVIEW_POST_MODE:-github}" != "none" ]]; then
       post_inline_review "$project_dir" "$pr_number" "$review_json" || return 1
     fi
