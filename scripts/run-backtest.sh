@@ -222,13 +222,52 @@ aggregate_review="$(jq -n --argjson c "$all_comments" '{status: "COMMENT", summa
 summary_metrics="$(backtest_metrics "$all_matches" "$aggregate_review")" ||
   { echo "METRICS_FAILED：計算彙總指標失敗" >&2; exit 1; }
 
+# --- 執行條件：三個指標全部由 $TOL 決定，$TOL 沒被記錄的話，兩份 summary
+# 看起來可比、實際上可能是不同容差算出來的，檔案裡沒有任何線索。同理，
+# review 模式、model、reasoning effort、turn 上限、有沒有 worktree 隔離、
+# 基準集本身的內容，都會改變算出來的數字，也都要記，不能只記數字本身。
+# 這些欄位跟三個指標一樣走同一條 tmp→mv，不另外寫檔。
+review_mode="${MRA_BACKTEST_REVIEW_MODE:-personas}"
+agent_max_turns="${MRA_REVIEW_AGENT_MAX_TURNS:-40}"
+
+# codex model／reasoning effort：run-backtest.sh 是呼叫 adapter 的父行程，
+# 看不到 adapter 內部衍生出來、只存在於它自己那個子行程裡的 MRA_CONFIG
+# (見 scripts/backtest-review-adapter.sh「回測專用的 mra 設定」那段：沒有
+# export 回父行程，子行程結束就消失)。這裡記的是這個行程自己看得到的東西：
+# $MRA_CONFIG 有設(呼叫端自己指定過)就讀那份，沒設就讀共用的
+# $MRA_DIR/config.json。讀取失敗(檔案不存在或不是合法 JSON)不當成整個
+# 回測失敗，這兩個欄位只是補充的執行條件記錄，不是核心指標，讀不到就留空。
+cfg_path="${MRA_CONFIG:-$MRA_DIR/config.json}"
+codex_model="$(jq -r '.review.models.codex // empty' "$cfg_path" 2>/dev/null)"
+reasoning_effort="$(jq -r '.review.codexReasoningEffort // empty' "$cfg_path" 2>/dev/null)"
+
+# worktree_isolated：$MRA_CMD 有沒有指到 backtest-review-adapter.sh。沒指過去
+# 的話就是直接呼叫 bin/mra.sh，在共用工作目錄上跑，完全沒有 worktree 隔離
+# 這回事(見「每個 PR 用 git worktree 隔離到該 PR head」那次改動)。
+worktree_isolated=false
+[[ "$MRA_CMD" == *backtest-review-adapter.sh ]] && worktree_isolated=true
+
+# candidates_sha：候選集內容的指紋，不是路徑或檔名。階段四若重建過候選集
+# (重跑 build-benchmark.sh 補新 PR、或人工確認的內容改了)，分母就不同，
+# 但沒有這個欄位的話完全看不出來。candidates_confirmed 是它的可讀版本，
+# 兩個都留：一個給人看差異方向，一個給程式精確比對是不是同一份。
+candidates_sha="$(shasum -a 256 "$C" | cut -c1-16)"
+
 _write_summary "$OUT/summary.json" \
   --argjson m "$summary_metrics" --argjson prs "$prs" --arg label "$LABEL" \
   --argjson incomplete_count "$n_incomplete" --argjson incomplete_prs "$incomplete_list" \
   --argjson failed_count "$n_failed" --argjson failed_prs "$failed_list" \
+  --argjson tolerance "$TOL" --arg review_mode "$review_mode" \
+  --arg codex_model "$codex_model" --arg reasoning_effort "$reasoning_effort" \
+  --argjson agent_max_turns "$agent_max_turns" --argjson worktree_isolated "$worktree_isolated" \
+  --arg candidates_sha "$candidates_sha" --argjson candidates_confirmed "$n_conf" \
   '$m + {prs: $prs, label: $label,
          incomplete_count: $incomplete_count, incomplete_prs: $incomplete_prs,
-         failed_count: $failed_count, failed_prs: $failed_prs}' || exit 1
+         failed_count: $failed_count, failed_prs: $failed_prs,
+         tolerance: $tolerance, review_mode: $review_mode,
+         codex_model: $codex_model, reasoning_effort: $reasoning_effort,
+         agent_max_turns: $agent_max_turns, worktree_isolated: $worktree_isolated,
+         candidates_sha: $candidates_sha, candidates_confirmed: $candidates_confirmed}' || exit 1
 
 echo "label=$LABEL prs=$prs incomplete=$n_incomplete failed=$n_failed"
 jq -r '"漏抓率 \(.miss_rate)  未對應率 \(.unmatched_rate)  嚴重度吻合率 \(.severity_rate)"' "$OUT/summary.json"
