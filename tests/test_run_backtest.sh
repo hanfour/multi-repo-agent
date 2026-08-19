@@ -175,6 +175,23 @@ has ".err 檔內容包含真正的失敗原因(codex transient failure)" \
   "$(cat "$ERR_8104")" "codex transient failure"
 has "REVIEW_FAILED 訊息指出 .err 檔路徑" "$err_baseline_text" "$ERR_8104"
 
+# --- summary.json 要記執行條件，不是只記三個指標：兩份 summary 看起來可
+# 比，實際上可能是不同 tolerance／設定算出來的，沒有這些欄位完全看不出來 --
+eq "tolerance 記的是這次真的用的值(沒給 --tolerance，預設 5)" "5" \
+  "$(jq -r '.tolerance' "$S1")"
+eq "review_mode 記的是沒設 MRA_BACKTEST_REVIEW_MODE 時的預設值 personas" \
+  "personas" "$(jq -r '.review_mode' "$S1")"
+eq "agent_max_turns 記的是沒設 MRA_REVIEW_AGENT_MAX_TURNS 時的預設值 40" \
+  "40" "$(jq -r '.agent_max_turns' "$S1")"
+eq "worktree_isolated 是 false(這支測試的 MRA_BACKTEST_CMD 是裸的 mra shim，不是 adapter)" \
+  "false" "$(jq -r '.worktree_isolated' "$S1")"
+eq "candidates_confirmed 是 5(8101-8105 五筆 confirmed=true，不是只算成功納入彙總的 prs)" \
+  "5" "$(jq -r '.candidates_confirmed' "$S1")"
+eq "candidates_sha 是 candidates.json 內容的 sha256 前 16 碼" \
+  "$(shasum -a 256 "$C" | cut -c1-16)" "$(jq -r '.candidates_sha' "$S1")"
+eq "candidates_sha 長度是 16 碼(不是完整 64 碼的 sha256)" "16" \
+  "$(jq -r '.candidates_sha | length' "$S1")"
+
 # --- mra shim：after label(輸出跟 baseline 完全不同，--compare 才有東西可比)
 cat > "$TMP/bin/mra" <<'SHIM'
 #!/usr/bin/env bash
@@ -343,6 +360,29 @@ notol_body="$(jq -S 'del(.label)' "$TOL_DIR/runs/notol/summary.json")"
 tol5_body="$(jq -S 'del(.label)' "$TOL_DIR/runs/tol5/summary.json")"
 eq "省略 --tolerance 跟明講 --tolerance 5 結果相同(預設值真的是 5)" \
   "$notol_body" "$tol5_body"
+eq "tol5 這次跑出來的 tolerance 欄位記的是 5" "5" \
+  "$(jq -r '.tolerance' "$TOL_DIR/runs/tol5/summary.json")"
+
+# --- 這次改動的核心目的：同一份「已經跑完」的輸出，換 --tolerance 重跑
+# 同一個 label，summary 的 tolerance 欄位要跟著變。只驗欄位存在不夠，這裡
+# 拿掉 mra 這個指令本身(不是清快取)，如果 rerun 因為某個地方又呼叫了一次
+# review，會直接因為找不到 mra 指令而整個失敗；能成功印證的是這次改動
+# 完全靠 -s 判定重用既有輸出檔，沒有真的再叫一次 review(coordinator 說的
+# 「成本接近零」)。同一個 label(tol5)重跑，只改 --tolerance，其餘設定完全
+# 不變，藉此單獨隔離出「只有 tolerance 欄位該變、其他執行條件欄位不該變」
+# 這件事。 --------------------------------------------------------------
+rm -f "$TMP/bin-tol/mra"
+PATH="$TMP/bin-tol:$PATH" MRA_BENCHMARK_DIR="$TOL_DIR" \
+  bash "$S" --label tol5 --tolerance 2 >"$TMP/tol5-rerun.out" 2>"$TMP/tol5-rerun.err"
+rc_tol5_rerun=$?
+eq "同一個 label 換 tolerance 重跑退出碼仍是 0(靠快取，沒有真的再叫 mra)" \
+  "0" "$rc_tol5_rerun"
+eq "重跑後 tolerance 欄位變成 2(不是還停在第一次跑的 5)" "2" \
+  "$(jq -r '.tolerance' "$TOL_DIR/runs/tol5/summary.json")"
+eq "重跑後 missed 也跟著 tolerance=2 重算(變成 1，不是還停在 tolerance=5 算出的 0)" \
+  "1" "$(jq -r '.missed' "$TOL_DIR/runs/tol5/summary.json")"
+eq "重跑後 review_mode 這種跟 tolerance 無關的執行條件欄位維持不變" \
+  "personas" "$(jq -r '.review_mode' "$TOL_DIR/runs/tol5/summary.json")"
 
 # --- status=="COMMENT" 只可能是 REVIEW_INCOMPLETE，不能被當成「零發現」計
 # 入彙總：inline schema 只允許 APPROVED/CHANGES_REQUESTED(見 lib/review.sh)，
@@ -459,6 +499,102 @@ eq "續跑(同一個 label)後 9201 真的重跑成功，prs 變成 3" "3" \
   "$(jq -r '.prs' "$S_INC")"
 eq "續跑後 incomplete_count 歸零(9201 這次跑完了)" "0" \
   "$(jq -r '.incomplete_count' "$S_INC")"
+
+# --- codex_model／reasoning_effort：呼叫端指定 MRA_CONFIG 時，記的是那份
+# 設定檔的值，不是共用的 $MRA_DIR/config.json -------------------------------
+CFG_DIR="$TMP/bench-cfg"
+mkdir -p "$CFG_DIR" "$TMP/bin-cfg"
+cat > "$CFG_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":8601,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,"expected_findings":[]}
+]
+J
+cat > "$TMP/bin-cfg/mra" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
+SHIM
+chmod +x "$TMP/bin-cfg/mra"
+FAKE_CFG="$TMP/fake-config.json"
+echo '{"review":{"models":{"codex":"gpt-9.9-test"},"codexReasoningEffort":"medium"}}' \
+  > "$FAKE_CFG"
+PATH="$TMP/bin-cfg:$PATH" MRA_BENCHMARK_DIR="$CFG_DIR" MRA_CONFIG="$FAKE_CFG" \
+  bash "$S" --label cfgtest >/dev/null 2>&1
+eq "呼叫端指定 MRA_CONFIG 時，codex_model 記的是那份設定檔的值" "gpt-9.9-test" \
+  "$(jq -r '.codex_model' "$CFG_DIR/runs/cfgtest/summary.json")"
+eq "呼叫端指定 MRA_CONFIG 時，reasoning_effort 記的是那份設定檔的值" "medium" \
+  "$(jq -r '.reasoning_effort' "$CFG_DIR/runs/cfgtest/summary.json")"
+
+# 沒指定 MRA_CONFIG 時讀共用的 $MRA_DIR/config.json；用同一個 jq 表達式在
+# 測試裡獨立算一次「應該是什麼」，不是硬寫一個字面值。這樣共用 config.json
+# 之後改了，這條斷言不會變成一條測不出東西的殘留斷言。
+MRA_DIR_FOR_TEST="$(cd "$(dirname "$S")/.." && pwd)"
+expected_codex_model="$(jq -r '.review.models.codex // empty' "$MRA_DIR_FOR_TEST/config.json")"
+PATH="$TMP/bin-cfg:$PATH" MRA_BENCHMARK_DIR="$CFG_DIR" \
+  bash "$S" --label cfgdefault >/dev/null 2>&1
+eq "沒指定 MRA_CONFIG 時，codex_model 讀共用的 \$MRA_DIR/config.json" \
+  "$expected_codex_model" "$(jq -r '.codex_model' "$CFG_DIR/runs/cfgdefault/summary.json")"
+
+# --- worktree_isolated：MRA_BACKTEST_CMD 指到 backtest-review-adapter.sh
+# 時要記 true。判斷依據就是名字本身(見 run-backtest.sh 對這個欄位的註解)，
+# 這裡的 stub 不需要真的做隔離，只是要以那個檔名結尾，用來測偵測邏輯本身 --
+WTFLAG_DIR="$TMP/bench-wtflag"
+mkdir -p "$WTFLAG_DIR" "$TMP/bin-wtflag"
+cat > "$WTFLAG_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":8701,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,"expected_findings":[]}
+]
+J
+FAKE_ADAPTER="$TMP/bin-wtflag/fake-backtest-review-adapter.sh"
+cat > "$FAKE_ADAPTER" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
+SHIM
+chmod +x "$FAKE_ADAPTER"
+MRA_BENCHMARK_DIR="$WTFLAG_DIR" MRA_BACKTEST_CMD="$FAKE_ADAPTER" \
+  bash "$S" --label wtflag >/dev/null 2>&1
+eq "MRA_BACKTEST_CMD 指到 *backtest-review-adapter.sh 時 worktree_isolated 是 true" \
+  "true" "$(jq -r '.worktree_isolated' "$WTFLAG_DIR/runs/wtflag/summary.json")"
+
+# --- candidates_sha：候選集內容變了，這個值要跟著變，不是釘死的值或只看
+# 檔名／路徑。這是這次最重要的欄位：階段四若重建過候選集，分母就不同，這
+# 個欄位是唯一能看出來的線索 -------------------------------------------------
+SHA_DIR="$TMP/bench-sha"
+mkdir -p "$SHA_DIR" "$TMP/bin-sha"
+cat > "$SHA_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":8801,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,"expected_findings":[]}
+]
+J
+cat > "$TMP/bin-sha/mra" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
+SHIM
+chmod +x "$TMP/bin-sha/mra"
+PATH="$TMP/bin-sha:$PATH" MRA_BENCHMARK_DIR="$SHA_DIR" \
+  bash "$S" --label shatest1 >/dev/null 2>&1
+sha_before="$(jq -r '.candidates_sha' "$SHA_DIR/runs/shatest1/summary.json")"
+
+# 改候選集內容(加一筆)，換個 label 重跑：這裡要驗的是「候選集內容不同」
+# 這件事本身，故意不用同一個 label，避免跟上面 tolerance 那條「同 label
+# 重跑用快取」的情境混在一起。
+jq '. + [{"repo":"acme/rails-app-1","pr":8802,"merged_at":"2026-08-02T00:00:00Z",
+          "fix_commits":[],"confirmed":true,"expected_findings":[]}]' \
+  "$SHA_DIR/candidates.json" > "$SHA_DIR/candidates.json.new"
+mv "$SHA_DIR/candidates.json.new" "$SHA_DIR/candidates.json"
+PATH="$TMP/bin-sha:$PATH" MRA_BENCHMARK_DIR="$SHA_DIR" \
+  bash "$S" --label shatest2 >/dev/null 2>&1
+sha_after="$(jq -r '.candidates_sha' "$SHA_DIR/runs/shatest2/summary.json")"
+
+if [[ "$sha_before" != "$sha_after" ]]; then
+  ok "候選集內容改變後，candidates_sha 跟著變(不是釘死的值)"
+else
+  fail "候選集內容改變了，candidates_sha 卻沒變：$sha_before"
+fi
+eq "candidates_confirmed 也跟著候選集內容變化(1 筆變 2 筆)" "2" \
+  "$(jq -r '.candidates_confirmed' "$SHA_DIR/runs/shatest2/summary.json")"
 
 # --- 沒有任何 confirmed=true 時要明講，不要輸出空的 summary 假裝跑過 -----
 jq 'map(.confirmed = false)' "$C" > "$TMP/c.json"
