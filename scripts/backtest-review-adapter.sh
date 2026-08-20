@@ -195,17 +195,42 @@ else
   effective_reasoning_effort="$(jq -r '.review.codexReasoningEffort // empty' "$MRA_CONFIG" 2>/dev/null)"
 fi
 
+# max_turns／synth_max_turns 記的是這個模式「實際生效」的 turn 上限，不是
+# $agent_max_turns(MRA_REVIEW_AGENT_MAX_TURNS，預設 40)。那個值只影響
+# debate 路徑的 round-1 agent；standard(single-pass)與 personas 這兩條
+# 回測會用到的路徑都沒有走 debate，實測 A 組實際跑在
+# MRA_REVIEW_STANDARD_MAX_TURNS(預設 6)、C 組實際跑在
+# MRA_REVIEW_PERSONA_MAX_TURNS(預設 8，若手動設過就是設的值)，但上一版
+# cond 檔兩邊都回報 40。跟先前 codex_model 那次同一類：記錄了一個看起來
+# 有意義、實際上不適用的值。下面呼叫 mra 時繼續傳
+# MRA_REVIEW_AGENT_MAX_TURNS(對齊 debate 路徑仍然是對的)，只是不能再拿它
+# 當這裡要回報的答案。
+#
+# synth_max_turns 只有 personas 模式才有意義：synthesize 這一步只在
+# personas 與 debate 兩條路徑跑，回測只會走到 personas 那條，讀
+# MRA_REVIEW_SYNTH_MAX_TURNS(預設 8，見 lib/review-debate-agents.sh)。
+# standard 模式沒有 synthesize 這一步，填 JSON null，不是 0 或省略這個鍵。
+if [[ "$review_mode" == "standard" ]]; then
+  effective_max_turns="${MRA_REVIEW_STANDARD_MAX_TURNS:-6}"
+  effective_synth_max_turns=""
+else
+  effective_max_turns="${MRA_REVIEW_PERSONA_MAX_TURNS:-8}"
+  effective_synth_max_turns="${MRA_REVIEW_SYNTH_MAX_TURNS:-8}"
+fi
+
 if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
   if ! jq -n \
     --arg model "$effective_model" \
     --arg provider "$effective_provider" \
     --arg reasoning_effort "$effective_reasoning_effort" \
     --arg review_mode "$review_mode" \
-    --argjson agent_max_turns "$agent_max_turns" \
+    --argjson max_turns "$effective_max_turns" \
+    --argjson synth_max_turns "${effective_synth_max_turns:-null}" \
     --arg mra_config_path "$MRA_CONFIG" \
     '{model: $model, provider: $provider,
       reasoning_effort: (if $reasoning_effort == "" then null else $reasoning_effort end),
-      review_mode: $review_mode, agent_max_turns: $agent_max_turns,
+      review_mode: $review_mode, max_turns: $max_turns,
+      synth_max_turns: $synth_max_turns,
       worktree_isolated: true, mra_config_path: $mra_config_path}' \
     > "$MRA_BACKTEST_COND_FILE" 2>/dev/null; then
     echo "COND_FILE_WRITE_FAILED：無法寫入執行條件記錄 ${MRA_BACKTEST_COND_FILE}(不影響這次 review 本身的結果)" >&2

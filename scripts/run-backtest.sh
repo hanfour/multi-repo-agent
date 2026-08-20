@@ -135,8 +135,9 @@ if ! mkdir -p "$OUT"; then
   exit 1
 fi
 
-# codex_model／reasoning_effort／review_mode／agent_max_turns／
-# worktree_isolated 這五個不是 run-backtest.sh 自己知道的東西：$MRA_CMD
+# model／provider／reasoning_effort／review_mode／max_turns／
+# synth_max_turns／worktree_isolated／mra_config_path 這八個不是
+# run-backtest.sh 自己知道的東西：$MRA_CMD
 # (可能是 adapter、可能是別的東西、也可能就是裸的 bin/mra.sh)才是唯一
 # 知道「這次實際用了什麼」的地方。上一版讓這支腳本自己用 MRA_CONFIG 沒設
 # 就讀共用 $MRA_DIR/config.json 去猜，猜錯了：adapter 內部衍生的設定只存
@@ -274,30 +275,40 @@ summary_metrics="$(backtest_metrics "$all_matches" "$aggregate_review")" ||
 # 基準集本身的內容，都會改變算出來的數字，也都要記，不能只記數字本身。
 # 這些欄位跟三個指標一樣走同一條 tmp→mv，不另外寫檔。
 #
-# model／provider／reasoning_effort／review_mode／agent_max_turns／
-# worktree_isolated／mra_config_path 這七個一律從 $COND_FILE 讀，絕對不
-# fallback 去讀共用的 $MRA_DIR/config.json 或用其他方式猜。猜過一次，
-# 猜錯了(見這次改動的由來)。$COND_FILE 讀不到(檔案不存在、是空的、或不是
-# 合法 JSON，例如 $MRA_CMD 根本不認得 MRA_BACKTEST_COND_FILE 這個 env)是
-# 正常情況，不是錯誤：這七個欄位全部填 null，conditions_source 記成
-# "unavailable"，讓看報告的人知道「這裡沒有東西」，不是「這裡有一個猜測
-# 出來、可能是錯的值」。
+# model／provider／reasoning_effort／review_mode／max_turns／
+# synth_max_turns／worktree_isolated／mra_config_path 這八個一律從
+# $COND_FILE 讀，絕對不 fallback 去讀共用的 $MRA_DIR/config.json 或用其他
+# 方式猜。猜過一次，猜錯了(見這次改動的由來)。$COND_FILE 讀不到(檔案不
+# 存在、是空的、或不是合法 JSON，例如 $MRA_CMD 根本不認得
+# MRA_BACKTEST_COND_FILE 這個 env)是正常情況，不是錯誤：這八個欄位全部填
+# null，conditions_source 記成 "unavailable"，讓看報告的人知道「這裡沒有
+# 東西」，不是「這裡有一個猜測出來、可能是錯的值」。
 #
 # 欄位原本叫 codex_model：personas 模式跑的是 claude，填進一個叫
 # codex_model 的鍵本身就是錯的值，跟上一輪剛修掉的問題同一類，改名成
 # model，另外加一個 provider 欄位標明這個 model 是哪個 provider 的。
+#
+# agent_max_turns 欄位同一個問題再犯一次：那個值只影響 debate 路徑的
+# round-1 agent，standard／personas 這兩條回測會走到的路徑都不受它控制，
+# 記它等於記了一個看起來有意義、實際上不適用的值。改名 max_turns，adapter
+# 那邊已經改成回報這個模式(standard 讀 MRA_REVIEW_STANDARD_MAX_TURNS、
+# personas 讀 MRA_REVIEW_PERSONA_MAX_TURNS)實際生效的上限。新增
+# synth_max_turns：personas 模式 synthesize 這一步的 turn 上限
+# (MRA_REVIEW_SYNTH_MAX_TURNS，上一輪才讓它可調，階段四要看得出跑在什麼
+# 值)，standard 模式沒有 synthesize，是 null。
 if [[ -s "$COND_FILE" ]] && jq -e . "$COND_FILE" >/dev/null 2>&1; then
   conditions_source="adapter"
   conditions_json="$(jq -c '{model: (.model // null),
                               provider: (.provider // null),
                               reasoning_effort: (.reasoning_effort // null),
                               review_mode: (.review_mode // null),
-                              agent_max_turns: (.agent_max_turns // null),
+                              max_turns: (.max_turns // null),
+                              synth_max_turns: (.synth_max_turns // null),
                               worktree_isolated: (.worktree_isolated // null),
                               mra_config_path: (.mra_config_path // null)}' "$COND_FILE")"
 else
   conditions_source="unavailable"
-  conditions_json='{"model":null,"provider":null,"reasoning_effort":null,"review_mode":null,"agent_max_turns":null,"worktree_isolated":null,"mra_config_path":null}'
+  conditions_json='{"model":null,"provider":null,"reasoning_effort":null,"review_mode":null,"max_turns":null,"synth_max_turns":null,"worktree_isolated":null,"mra_config_path":null}'
 fi
 
 # candidates_sha：候選集內容的指紋，不是路徑或檔名。階段四若重建過候選集

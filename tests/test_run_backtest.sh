@@ -186,20 +186,21 @@ eq "candidates_sha 是 candidates.json 內容的 sha256 前 16 碼" \
 eq "candidates_sha 長度是 16 碼(不是完整 64 碼的 sha256)" "16" \
   "$(jq -r '.candidates_sha | length' "$S1")"
 
-# --- model／provider／reasoning_effort／review_mode／agent_max_turns／
-# worktree_isolated／mra_config_path：這支測試的 mra shim 是裸的假指令，
-# 不認得 MRA_BACKTEST_COND_FILE，run-backtest.sh 讀不到執行條件回報檔。
-# 這七個欄位這時候要一律是 null，conditions_source 要是 "unavailable"，
-# 絕對不能悄悄退回讀共用 $MRA_DIR/config.json 的值(那正是上一輪要修掉的
-# 東西：記錯的值比沒有欄位更糟)。用 -e 讀確定是 JSON null，不是字串
-# "null" 或空字串，jq -r 在這兩種狀況下印出來的文字剛好一樣，光看字面比
-# 不出差異。
+# --- model／provider／reasoning_effort／review_mode／max_turns／
+# synth_max_turns／worktree_isolated／mra_config_path：這支測試的 mra
+# shim 是裸的假指令，不認得 MRA_BACKTEST_COND_FILE，run-backtest.sh 讀不到
+# 執行條件回報檔。這八個欄位這時候要一律是 null，conditions_source 要是
+# "unavailable"，絕對不能悄悄退回讀共用 $MRA_DIR/config.json 的值(那正是
+# 更早一輪要修掉的東西：記錯的值比沒有欄位更糟)。用 -e 讀確定是 JSON
+# null，不是字串 "null" 或空字串，jq -r 在這兩種狀況下印出來的文字剛好
+# 一樣，光看字面比不出差異。
 eq "沒有 cond 檔可讀時 model 是 JSON null(不是字串)" "null" \
   "$(jq -e '.model' "$S1")"
 eq "沒有 cond 檔可讀時 provider 是 null" "null" "$(jq -e '.provider' "$S1")"
 eq "沒有 cond 檔可讀時 reasoning_effort 是 null" "null" "$(jq -e '.reasoning_effort' "$S1")"
 eq "沒有 cond 檔可讀時 review_mode 是 null" "null" "$(jq -e '.review_mode' "$S1")"
-eq "沒有 cond 檔可讀時 agent_max_turns 是 null" "null" "$(jq -e '.agent_max_turns' "$S1")"
+eq "沒有 cond 檔可讀時 max_turns 是 null" "null" "$(jq -e '.max_turns' "$S1")"
+eq "沒有 cond 檔可讀時 synth_max_turns 是 null" "null" "$(jq -e '.synth_max_turns' "$S1")"
 eq "沒有 cond 檔可讀時 worktree_isolated 是 null" "null" "$(jq -e '.worktree_isolated' "$S1")"
 eq "沒有 cond 檔可讀時 mra_config_path 是 null" "null" "$(jq -e '.mra_config_path' "$S1")"
 eq "conditions_source 記成 unavailable" "unavailable" "$(jq -r '.conditions_source' "$S1")"
@@ -518,15 +519,18 @@ eq "續跑(同一個 label)後 9201 真的重跑成功，prs 變成 3" "3" \
 eq "續跑後 incomplete_count 歸零(9201 這次跑完了)" "0" \
   "$(jq -r '.incomplete_count' "$S_INC")"
 
-# --- model／provider／reasoning_effort／review_mode／agent_max_turns／
-# worktree_isolated／mra_config_path：這七個不是 run-backtest.sh 自己知道
-# 的東西，run-backtest.sh 只負責讀 $MRA_CMD 透過 MRA_BACKTEST_COND_FILE
-# 回報回來的內容，不自己猜、不 fallback 去讀共用 config.json(見這次改動
-# 的由來：上一版猜過，猜錯了，記錯的值比沒有欄位更糟)。這裡用一個會回報
-# cond 檔的 stub 模擬真正的 adapter，真正 adapter 自己寫 cond 檔那段邏輯
-# 由 tests/test_backtest_adapter.sh 驗。欄位原本叫 codex_model，personas
-# 模式跑的是 claude，填進一個叫 codex_model 的鍵本身就是錯的值，這一輪
-# 改名成 model，另外加一個 provider 欄位。 -----------------------------------
+# --- model／provider／reasoning_effort／review_mode／max_turns／
+# synth_max_turns／worktree_isolated／mra_config_path：這八個不是
+# run-backtest.sh 自己知道的東西，run-backtest.sh 只負責讀 $MRA_CMD 透過
+# MRA_BACKTEST_COND_FILE 回報回來的內容，不自己猜、不 fallback 去讀共用
+# config.json(見這次改動的由來：更早一版猜過，猜錯了，記錯的值比沒有
+# 欄位更糟)。這裡用一個會回報 cond 檔的 stub 模擬真正的 adapter，真正
+# adapter 自己寫 cond 檔那段邏輯由 tests/test_backtest_adapter.sh 驗。
+# 欄位原本叫 codex_model，改名成 model、加一個 provider 欄位；
+# agent_max_turns 欄位後來也發現同一個問題(只影響 debate 路徑的 round-1
+# agent，standard／personas 兩條回測會走到的路徑都不受它控制)，改名成
+# max_turns，另外加一個 synth_max_turns(personas 模式 synthesize 這一步
+# 的上限，standard 是 null)。 -----------------------------------------------
 COND_DIR="$TMP/bench-cond"
 mkdir -p "$COND_DIR" "$TMP/bin-cond"
 cat > "$COND_DIR/candidates.json" <<'J'
@@ -539,7 +543,7 @@ cat > "$TMP/bin-cond/mra" <<'SHIM'
 #!/usr/bin/env bash
 if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
   jq -n '{model:"gpt-9.9-test",provider:"codex",reasoning_effort:"medium",
-          review_mode:"standard",agent_max_turns:99,
+          review_mode:"standard",max_turns:99,synth_max_turns:null,
           worktree_isolated:true,mra_config_path:"/fake/derived-config.json"}' \
     > "$MRA_BACKTEST_COND_FILE"
 fi
@@ -557,8 +561,10 @@ eq "cond 檔讀得到時，reasoning_effort 是 adapter 實際回報的值" "med
   "$(jq -r '.reasoning_effort' "$S_COND")"
 eq "cond 檔讀得到時，review_mode 是 adapter 實際回報的值" "standard" \
   "$(jq -r '.review_mode' "$S_COND")"
-eq "cond 檔讀得到時，agent_max_turns 是 adapter 實際回報的值" "99" \
-  "$(jq -r '.agent_max_turns' "$S_COND")"
+eq "cond 檔讀得到時，max_turns 是 adapter 實際回報的值(欄位已從 agent_max_turns 改名)" "99" \
+  "$(jq -r '.max_turns' "$S_COND")"
+eq "standard 模式沒有 synthesize 這一步，synth_max_turns 正確傳遞成 JSON null" "null" \
+  "$(jq -e '.synth_max_turns' "$S_COND")"
 eq "cond 檔讀得到時，worktree_isolated 是 adapter 自己回報的 true" "true" \
   "$(jq -r '.worktree_isolated' "$S_COND")"
 eq "cond 檔讀得到時，mra_config_path 是 adapter 實際回報的路徑" \
@@ -573,7 +579,7 @@ cat > "$TMP/bin-cond/mra" <<'SHIM'
 #!/usr/bin/env bash
 if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
   jq -n '{model:"gpt-different-model",provider:"codex",reasoning_effort:"low",
-          review_mode:"personas",agent_max_turns:7,
+          review_mode:"personas",max_turns:7,synth_max_turns:3,
           worktree_isolated:true,mra_config_path:"/fake/other-config.json"}' \
     > "$MRA_BACKTEST_COND_FILE"
 fi
@@ -584,6 +590,10 @@ PATH="$TMP/bin-cond:$PATH" MRA_BENCHMARK_DIR="$COND_DIR" \
   bash "$S" --label condtest2 >/dev/null 2>&1
 eq "stub 回報的內容換了，model 也跟著變(不是釘死的值)" "gpt-different-model" \
   "$(jq -r '.model' "$COND_DIR/runs/condtest2/summary.json")"
+eq "stub 回報的內容換了，max_turns 也跟著變" "7" \
+  "$(jq -r '.max_turns' "$COND_DIR/runs/condtest2/summary.json")"
+eq "stub 回報的內容換了，synth_max_turns 也跟著變" "3" \
+  "$(jq -r '.synth_max_turns' "$COND_DIR/runs/condtest2/summary.json")"
 
 # --- personas 模式的 cond 檔：provider／model 是 claude／sonnet，
 # reasoning_effort 是 JSON null。這裡驗的是 run-backtest.sh 自己讀 cond
@@ -594,7 +604,7 @@ cat > "$TMP/bin-cond/mra" <<'SHIM'
 #!/usr/bin/env bash
 if [[ -n "${MRA_BACKTEST_COND_FILE:-}" ]]; then
   jq -n '{model:"sonnet",provider:"claude",reasoning_effort:null,
-          review_mode:"personas",agent_max_turns:40,
+          review_mode:"personas",max_turns:8,synth_max_turns:8,
           worktree_isolated:true,mra_config_path:"/fake/personas-config.json"}' \
     > "$MRA_BACKTEST_COND_FILE"
 fi
@@ -608,6 +618,10 @@ eq "personas cond 檔讀得到時，provider 是 claude" "claude" "$(jq -r '.pro
 eq "personas cond 檔讀得到時，model 是 sonnet" "sonnet" "$(jq -r '.model' "$S_COND3")"
 eq "personas cond 檔讀得到時，reasoning_effort 正確傳遞成 JSON null" "null" \
   "$(jq -e '.reasoning_effort' "$S_COND3")"
+eq "personas cond 檔讀得到時，max_turns 是 adapter 實際回報的值(不是舊的 agent_max_turns=40)" \
+  "8" "$(jq -r '.max_turns' "$S_COND3")"
+eq "personas cond 檔讀得到時，synth_max_turns 是數字(personas 模式一定有 synthesize 這一步)" \
+  "8" "$(jq -r '.synth_max_turns' "$S_COND3")"
 
 # --- 沒有 cond 檔可讀時，絕對不能悄悄退回共用 $MRA_DIR/config.json 的值 ---
 # 這是上一輪修正的核心，這一輪欄位改名後要繼續守住：用一支「不知道
