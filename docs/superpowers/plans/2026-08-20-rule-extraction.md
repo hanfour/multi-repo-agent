@@ -1294,7 +1294,7 @@ mkdir -p "$OUT" "$OUT/_rejected" || exit 1
 AGENT="${MRA_RULE_AGENT_CMD:-}"
 [ -n "$AGENT" ] || { echo "MRA_RULE_AGENT_CMD 未設定" >&2; exit 1; }
 
-produced=0; dropped=0; rejected=0
+produced=0; dropped=0; rejected=0; agent_failed=0
 while IFS=$'\t' read -r class_id class_name _; do
   [ -n "$class_id" ] || continue
   hits="$(taxonomy_search "$class_id" "$CORPUS" 40)"
@@ -1310,10 +1310,23 @@ while IFS=$'\t' read -r class_id class_name _; do
     --argjson m "$(printf '%s' "$hits" | jq -s '.')" \
     '{class_id: $c, class_name: $name, layer: $l, members: $m}')"
 
-  raw="$(printf '%s' "$payload" | MRA_RULE_PROMPT_PREFIX="$(taxonomy_prompt_prefix "$class_id" "$class_name" "$LAYER")" "$AGENT")" || {
-    printf 'AGENT_FAILED\tclass=%s\n' "$class_id" >&2
-    rejected=$((rejected + 1)); continue
-  }
+  # agent 指令本身失敗要落地成檔案，不能只印 stderr。Task 4 的 review 指出
+  # 同一個模式在那邊造成「哪些群失敗、為什麼失敗事後完全不可考」，ARG_MAX
+  # 那次真的發生過而當時查不到記錄。這裡照 Task 4 修正後的作法：寫
+  # <out>/_agent_failed.tsv，欄位是 layer、class_id、class_name、命中數、退出碼。
+  #
+  # 計數也要與「驗證退回」分開：agent 失敗的那幾筆根本沒機會被驗證，
+  # 併進「退回 K（驗證不過）」那句話是錯的。
+  raw="$(printf '%s' "$payload" | MRA_RULE_PROMPT_PREFIX="$(taxonomy_prompt_prefix "$class_id" "$class_name" "$LAYER")" "$AGENT")"
+  agent_rc=$?
+  if [ "$agent_rc" -ne 0 ]; then
+    printf '%s\t%s\t%s\t%s\t%s\n' "$LAYER" "$class_id" "$class_name" "$n" "$agent_rc" \
+      >> "$OUT/_agent_failed.tsv"
+    agent_failed_rc=$?
+    [ "$agent_failed_rc" -eq 0 ] || { echo "AGENT_FAILED_LOG_WRITE_FAILED：${OUT}/_agent_failed.tsv" >&2; exit 1; }
+    printf 'AGENT_FAILED\tclass=%s\t退出碼 %s\n' "$class_id" "$agent_rc" >&2
+    agent_failed=$((agent_failed + 1)); continue
+  fi
 
   tmp="$(mktemp "${TMPDIR:-/tmp}/rule.XXXXXX")" || exit 1
   printf '%s\n' "$raw" > "$tmp"
@@ -1334,11 +1347,16 @@ while IFS=$'\t' read -r class_id class_name _; do
   produced=$((produced + 1))
 done < <(taxonomy_classes)
 
-printf '%s 層：產出 %s、丟棄 %s（實例不足）、退回 %s（驗證不過）\n' \
+printf '%s 層：產出 %s、丟棄 %s（實例不足）、退回 %s（驗證不過）、agent 失敗 %s\n' \
   "$LAYER" "$produced" "$dropped" "$rejected"
 ```
 
-在 `lib/taxonomy-classes.sh` 追加 prompt 前綴函式：
+**注意：下面這個 `taxonomy_prompt_prefix` 要在 Step 1 就一起寫進
+`lib/taxonomy-classes.sh`**，不是等到這一步才追加 —— Step 4 的
+`extract-rules-taxonomy.sh` 會呼叫它，照 Step 順序做的話那時它還不存在。
+（這一段保留在這裡是為了讓函式的內容與它的用途放在一起看。）
+
+`lib/taxonomy-classes.sh` 的 prompt 前綴函式：
 
 ```bash
 # B 路線的 prompt 前綴。骨架已定，agent 的工作是填內容而不是決定主題 ——
