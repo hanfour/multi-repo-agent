@@ -28,7 +28,17 @@ def tokenize(text):
     return [t.lower() for t in TOKEN.findall(text or "") if t.lower() not in STOP]
 
 
-def load(path):
+def cleanup_output(path):
+    """Best-effort 刪除輸出檔案。若檔案不存在或刪除失敗，用 stderr 報告但不改變結束碼。"""
+    import os
+    if os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError as exc:
+            print(f"WARNING\t清除舊輸出檔失敗（{path}）：{exc}", file=sys.stderr)
+
+
+def load(path, output_path=None):
     rows = []
     with open(path, encoding="utf-8") as fh:
         for lineno, line in enumerate(fh, start=1):
@@ -40,6 +50,8 @@ def load(path):
             except json.JSONDecodeError as exc:
                 print(f"LINE_PARSE_FAILED\t{path}\t第 {lineno} 行不是合法 JSON：{exc}",
                       file=sys.stderr)
+                if output_path:
+                    cleanup_output(output_path)
                 sys.exit(1)
     return rows
 
@@ -187,15 +199,24 @@ def main():
                           "跑不完，超過上限就等距抽樣。0 表示不抽樣。")
     args = ap.parse_args()
 
+    if args.min_clusters < 1:
+        print(f"INVALID_CLUSTER_BOUNDS\t{args.input}\t"
+              f"min-clusters({args.min_clusters}) < 1",
+              file=sys.stderr)
+        cleanup_output(args.output)
+        sys.exit(1)
+
     if args.min_clusters > args.max_clusters:
         print(f"INVALID_CLUSTER_BOUNDS\t{args.input}\t"
               f"min-clusters({args.min_clusters}) > max-clusters({args.max_clusters})",
               file=sys.stderr)
+        cleanup_output(args.output)
         sys.exit(1)
 
-    rows = load(args.input)
+    rows = load(args.input, args.output)
     if not rows:
         print(f"EMPTY_INPUT\t{args.input}\t沒有任何可分群的意見", file=sys.stderr)
+        cleanup_output(args.output)
         sys.exit(1)
 
     if args.sample_cap > 0:
@@ -213,6 +234,7 @@ def main():
     if len(rows) < args.min_clusters * 3:
         print(f"TOO_FEW_SAMPLES\t{args.input}\t{len(rows)} 則撐不起 "
               f"{args.min_clusters} 群（每群至少 3 則）", file=sys.stderr)
+        cleanup_output(args.output)
         sys.exit(1)
 
     vecs, vocab = tfidf(rows)
