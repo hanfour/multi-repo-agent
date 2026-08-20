@@ -470,12 +470,25 @@ eq "standard 模式 cond 檔的 reasoning_effort 是這次實際用的值" "supe
   "$(jq -r '.reasoning_effort' "$COND_FILE_TEST")"
 eq "cond 檔的 review_mode 是這次實際用的值(standard)" "standard" \
   "$(jq -r '.review_mode' "$COND_FILE_TEST")"
-eq "cond 檔的 agent_max_turns 是預設值 40(這次沒有另外覆蓋)" "40" \
-  "$(jq -r '.agent_max_turns' "$COND_FILE_TEST")"
+# max_turns 記的是 standard 模式實際生效的上限(MRA_REVIEW_STANDARD_MAX_TURNS，
+# 預設 6)，不是只影響 debate 路徑的 MRA_REVIEW_AGENT_MAX_TURNS(預設 40)：
+# 跟先前 codex_model 那次同一類，記錯的值比沒有欄位更糟。
+eq "standard 模式 cond 檔的 max_turns 是 MRA_REVIEW_STANDARD_MAX_TURNS 的預設值 6(不是 40)" \
+  "6" "$(jq -r '.max_turns' "$COND_FILE_TEST")"
+eq "standard 模式沒有 synthesize 這一步，synth_max_turns 是 JSON null" \
+  "null" "$(jq -e '.synth_max_turns' "$COND_FILE_TEST")"
 eq "cond 檔的 worktree_isolated 是 adapter 自己回報的 true(隔離就是它做的)" \
   "true" "$(jq -r '.worktree_isolated' "$COND_FILE_TEST")"
 eq "cond 檔的 mra_config_path 指到這次真正衍生出來的設定檔" "$derived" \
   "$(jq -r '.mra_config_path' "$COND_FILE_TEST")"
+
+# --- MRA_REVIEW_STANDARD_MAX_TURNS 可覆蓋，cond 檔跟著換 -------------------
+rm -f "$COND_FILE_TEST"
+MRA_BACKTEST_REVIEW_MODE=standard MRA_BACKTEST_CONFIG_DIR="$cfg_dir" \
+  MRA_REVIEW_STANDARD_MAX_TURNS=12 MRA_BACKTEST_COND_FILE="$COND_FILE_TEST" \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json >/dev/null 2>&1
+eq "設了 MRA_REVIEW_STANDARD_MAX_TURNS=12 時，cond 檔的 max_turns 跟著變" \
+  "12" "$(jq -r '.max_turns' "$COND_FILE_TEST")"
 
 # 換個 model 重跑，驗證 cond 檔內容真的跟著換，不是釘死或殘留的舊值。
 rm -f "$COND_FILE_TEST"
@@ -498,6 +511,26 @@ eq "personas 模式 cond 檔的 model 是 sonnet" "sonnet" \
   "$(jq -r '.model' "$PCOND_FILE_TEST")"
 eq "personas 模式 cond 檔的 reasoning_effort 是 JSON null(不是字串、不是省略)" \
   "null" "$(jq -e '.reasoning_effort' "$PCOND_FILE_TEST")"
+# max_turns 記的是 personas 模式實際生效的上限(MRA_REVIEW_PERSONA_MAX_TURNS，
+# 預設 8)。synth_max_turns 是 personas 模式 synthesize 這一步的上限
+# (MRA_REVIEW_SYNTH_MAX_TURNS，預設 8，上一輪才讓它可調)，是數字，不是 null
+# (只有 standard 模式才是 null，personas 模式一定有 synthesize 這一步)。
+eq "personas 模式 cond 檔的 max_turns 是 MRA_REVIEW_PERSONA_MAX_TURNS 的預設值 8" \
+  "8" "$(jq -r '.max_turns' "$PCOND_FILE_TEST")"
+eq "personas 模式 cond 檔的 synth_max_turns 是 MRA_REVIEW_SYNTH_MAX_TURNS 的預設值 8(是數字，不是 null)" \
+  "8" "$(jq -r '.synth_max_turns' "$PCOND_FILE_TEST")"
+
+# --- MRA_REVIEW_PERSONA_MAX_TURNS／MRA_REVIEW_SYNTH_MAX_TURNS 可各自覆蓋，
+#     cond 檔跟著換，不是釘死或殘留的舊值 --------------------------------
+PCOND_FILE_TEST2="$TMP/run-conditions-personas-test2.json"
+rm -f "$PCOND_FILE_TEST2"
+MRA_BACKTEST_CONFIG_DIR="$PCFG_DIR" MRA_BACKTEST_COND_FILE="$PCOND_FILE_TEST2" \
+  MRA_REVIEW_PERSONA_MAX_TURNS=15 MRA_REVIEW_SYNTH_MAX_TURNS=20 \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json >/dev/null 2>&1
+eq "設了 MRA_REVIEW_PERSONA_MAX_TURNS=15 時，cond 檔的 max_turns 跟著變" \
+  "15" "$(jq -r '.max_turns' "$PCOND_FILE_TEST2")"
+eq "設了 MRA_REVIEW_SYNTH_MAX_TURNS=20 時，cond 檔的 synth_max_turns 跟著變" \
+  "20" "$(jq -r '.synth_max_turns' "$PCOND_FILE_TEST2")"
 
 # --- MRA_BACKTEST_COND_FILE 沒設時，adapter 不寫檔也不報錯 -----------------
 out_nocond="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/nocond.err")"

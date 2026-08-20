@@ -9,14 +9,19 @@ MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$MRA_DIR/lib/backtest-hunks.sh"
 source "$MRA_DIR/lib/backtest-groundtruth.sh"
 
-REPO=""; LIMIT=100; DAYS=14
+REPO=""; LIMIT=100; DAYS=14; UNTIL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo)  REPO="$2"; shift 2 ;;
     --limit) LIMIT="$2"; shift 2 ;;
     --days)  DAYS="$2"; shift 2 ;;
+    # 可選，見 lib/backtest-groundtruth.sh 的 backtest_merged_prs 對這個
+    # 參數的說明（Ruling 27）：凍住「當時看到的世界線」，讓同一個
+    # --limit／--until 組合在任何時間點重跑都抓到同一批 PR。沒給的話
+    # （預設）行為與現在完全一致。
+    --until) UNTIL="$2"; shift 2 ;;
     -h|--help)
-      echo "用法: build-benchmark.sh --repo <owner/name> [--limit N] [--days N]"
+      echo "用法: build-benchmark.sh --repo <owner/name> [--limit N] [--days N] [--until <ISO8601>]"
       exit 0 ;;
     *) echo "未知參數：$1" >&2; exit 1 ;;
   esac
@@ -45,7 +50,7 @@ fi
 # 跟著失敗、$prs 會是空字串（不是合法的 "[]"）；用 -z 這個額外檢查兜底，
 # 避免萬一 jq 成功但輸出詭異地是空字串，也一併當失敗處理，不要冒然當成
 # 合法的空 repo。
-if ! prs="$(backtest_merged_prs "$REPO" "$LIMIT")" || [[ -z "$prs" ]]; then
+if ! prs="$(backtest_merged_prs "$REPO" "$LIMIT" "$UNTIL")" || [[ -z "$prs" ]]; then
   # 這裡沒有 n_failed_pr／n_failed_commit 可以印——迴圈根本還沒開始，兩個
   # 計數器都是初始值，印出來只會誤導成「查了 0 筆都沒失敗」。故意用
   # "listing" 這個字取代數字欄位，讓這行的形狀跟下面 PR／commit 層級的

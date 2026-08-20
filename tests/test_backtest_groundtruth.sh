@@ -6,8 +6,14 @@ source "$MRA_DIR/lib/backtest-hunks.sh"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin"
+# GH_CALLS 記錄每次呼叫實際組出來的完整參數(含 query string)，讓測試能
+# 檢查 backtest_merged_prs 真的送出 sort=created，不是繼續送 sort=updated
+# (Ruling 27)。export 出去，stub 自己的行程才讀得到這個路徑。
+export GH_CALLS="$TMP/gh-calls.log"
+: > "$GH_CALLS"
 cat > "$TMP/bin/gh" <<'SHIM'
 #!/usr/bin/env bash
+echo "$*" >> "$GH_CALLS"
 case "$*" in
   *"pulls/4919/files"*)
     printf '%s' '[{"filename":"app/a.rb","patch":"@@ -92,7 +92,7 @@ def update\n x"},
@@ -37,8 +43,9 @@ case "$*" in
                   {"sha":"mmm333","commit":{"message":"季度盤點作業\n本次一併修正相關欄位對應"}},
                   {"sha":"nnn444","commit":{"message":"[ODM] 上刊通報 修正轉檔"}}]' ;;
   *"pulls?state=closed"*)
-    printf '%s' '[{"number":4919,"merged_at":"2026-08-10T09:09:52Z","merge_commit_sha":"own999"},
-                  {"number":4918,"merged_at":null,"merge_commit_sha":null}]' ;;
+    printf '%s' '[{"number":4920,"created_at":"2026-08-15T00:00:00Z","merged_at":"2026-08-16T00:00:00Z","merge_commit_sha":"www999"},
+                  {"number":4919,"created_at":"2026-08-05T00:00:00Z","merged_at":"2026-08-10T09:09:52Z","merge_commit_sha":"own999"},
+                  {"number":4918,"created_at":"2026-08-01T00:00:00Z","merged_at":null,"merge_commit_sha":null}]' ;;
 esac
 exit 0
 SHIM
@@ -51,7 +58,38 @@ ok()   { echo "PASS: $1"; pass=$((pass+1)); }
 fail() { echo "FAIL: $1"; errors=$((errors+1)); }
 eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] got [$3]"; fi; }
 
-eq "只取 merged" "[4919]" "$(backtest_merged_prs acme/rails-app-1 10 | jq -c '[.[].n]')"
+eq "只取 merged(4918 沒有 merged_at 被排除)" "[4920,4919]" \
+  "$(backtest_merged_prs acme/rails-app-1 10 | jq -c '[.[].n]')"
+
+# --- Ruling 27：sort=created，不是 sort=updated -----------------------------
+: > "$GH_CALLS"
+backtest_merged_prs acme/rails-app-1 10 >/dev/null
+gh_call="$(grep 'pulls?state=closed' "$GH_CALLS")"
+has_sort_created() { case "$1" in *"sort=created"*) return 0 ;; *) return 1 ;; esac; }
+if has_sort_created "$gh_call"; then
+  ok "backtest_merged_prs 組出來的 URL 帶 sort=created"
+else
+  fail "backtest_merged_prs 組出來的 URL 沒有 sort=created：$gh_call"
+fi
+case "$gh_call" in
+  *"sort=updated"*) fail "backtest_merged_prs 不該再送 sort=updated：$gh_call" ;;
+  *) ok "backtest_merged_prs 沒有送 sort=updated" ;;
+esac
+
+# --- 可選的日期範圍參數(until)：只收 created_at 早於這個時間點的 PR，
+#     嚴格小於。4920 建立於 08-15，用 08-10 當 until 應該被排除，只剩
+#     4919(建立於 08-05)------------------------------------------------
+eq "給 until=2026-08-10 時，4920(建立於 08-15)被排除" "[4919]" \
+  "$(backtest_merged_prs acme/rails-app-1 10 2026-08-10T00:00:00Z | jq -c '[.[].n]')"
+
+# 邊界：until 剛好等於某筆 PR 自己的 created_at，嚴格小於，該筆自己也要被
+# 排除(不是 <=)。4919 的 created_at 剛好是 2026-08-05T00:00:00Z。
+eq "until 剛好等於 4919 的 created_at 時，4919 自己也被排除(嚴格小於)" "[]" \
+  "$(backtest_merged_prs acme/rails-app-1 10 2026-08-05T00:00:00Z | jq -c '[.[].n]')"
+
+# 沒給 until 時(省略第三個參數)，行為與現在完全一致：不做這層過濾。
+eq "沒給 until 時行為與現在一致(等同不過濾)" "[4920,4919]" \
+  "$(backtest_merged_prs acme/rails-app-1 10 | jq -c '[.[].n]')"
 eq "14 天視窗" "2026-08-24T09:09:52Z" "$(backtest_window_end 2026-08-10T09:09:52Z 14)"
 eq "7 天視窗"  "2026-08-17T09:09:52Z" "$(backtest_window_end 2026-08-10T09:09:52Z 7)"
 

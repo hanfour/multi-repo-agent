@@ -39,11 +39,26 @@
 # 不用 gh api 的 --jq：測試用的 PATH shim 回傳的是未經處理的原始 GitHub API
 # JSON（貼近真實回應形狀），並不會執行 --jq 帶的過濾器。過濾/改名一律自己 pipe
 # 給 jq 做，這樣同一段邏輯在 shim 與正式環境下行為一致，也才測得到。
+#
+# sort=created，不是 sort=updated（Ruling 27）：同一個指令在不同時間跑，
+# updated 排序抓到的 PR 集合會不一樣。任何人在一個舊 PR 底下留言、改
+# label、重新推送，都會把它推上「最近更新」的排序前段，擠掉原本該在窗口
+# 內的另一個 PR。created_at 是 PR 建立當下就定死的時間戳，不會因為後續
+# 活動而變動，同一個 --limit 在任何時間點重跑，抓到的都是同一批 PR。
+#
+# $until（可選，ISO 8601，例如 2026-08-01T00:00:00Z）：只收 created_at
+# 早於這個時間點的 PR，嚴格小於（不含當下這一刻）。給階段四之後用：把
+# 這一次抓候選集當下的時間點記下來，之後不管什麼時候重跑，只要 --limit
+# 與 --until 都不變，抓到的 PR 集合就跟這一次完全一樣，不必知道確切的
+# PR 編號範圍，只要凍住「當時看到的世界線」。沒給的話（預設）行為與現在
+# 完全一致：不做這層過濾，抓到「現在最新建立的 N 筆」。
 backtest_merged_prs() {
-  local repo="$1" limit="${2:-100}"
-  gh api "repos/$repo/pulls?state=closed&per_page=$limit&sort=updated&direction=desc" 2>/dev/null \
-    | jq '[ .[] | select(.merged_at != null)
-            | {n: .number, merged_at: .merged_at, merge_commit_sha: .merge_commit_sha} ]'
+  local repo="$1" limit="${2:-100}" until="${3:-}"
+  gh api "repos/$repo/pulls?state=closed&per_page=$limit&sort=created&direction=desc" 2>/dev/null \
+    | jq --arg until "$until" \
+      '[ .[] | select(.merged_at != null)
+              | select($until == "" or .created_at < $until)
+              | {n: .number, merged_at: .merged_at, merge_commit_sha: .merge_commit_sha} ]'
 }
 
 backtest_window_end() {
