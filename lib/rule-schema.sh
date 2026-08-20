@@ -18,11 +18,17 @@ RULE_REQUIRED_SECTIONS="觸發訊號 判準 嚴重度 反例 出處"
 RULE_MIN_SOURCES=3
 
 # rule_frontmatter <file> — 印出 frontmatter 的 YAML 部分（不含 --- 界線）。
+# 退出碼非 0：開頭不是 ---，或是有開頭卻找不到收尾的 ---（後者原本完全不偵測——
+# 缺收尾界線時會把整個檔案剩餘內容含所有章節本文都當成 frontmatter 印出、
+# exit 0、不報錯，矇混過關純粹是因為章節內容剛好沒出現 key: value 形狀的
+# 行；一旦踩到就是拿到錯的欄位值而不是報錯）。用 found 旗標讓 END 區塊
+# 判斷有沒有真的看到收尾界線。
 rule_frontmatter() {
   local f="$1"
   awk 'NR==1 && $0 != "---" { exit 1 }
-       NR>1 && $0 == "---" { exit 0 }
-       NR>1 { print }' "$f"
+       NR>1 && $0 == "---" { found=1; exit 0 }
+       NR>1 { print }
+       END { exit !found }' "$f"
 }
 
 # rule_field <file> <key> — 印出單一 frontmatter 欄位的值；缺欄位回空字串、
@@ -43,20 +49,52 @@ rule_field() {
 # 用「開頭符合」而不是「整行完全相等」比對標題：規則檔的章節標題常帶括號
 # 註解（fixture 裡是「## 反例（不該報）」），呼叫端只會傳短名字
 # 「反例」。整行相等會讓合格 fixture 本身被判定「反例」章節不存在。
+#
+# 但光是開頭符合不夠，還要錨定邊界：「## 判準」這個開頭符合也會匹配到
+# 「## 判準補充」這種同前綴但其實是別的章節的標題，抓到的內容會是錯的
+# 章節，而且因為抓到的內容非空，rule_validate 完全不會發現。標題後面接的
+# 必須是空白、半形／全形括號，或行尾，才算數。用 index()／substr() 逐一比對
+# 候選邊界字元而不是塞進 awk 的 [...] 字元集合或動態組 regex：中日文全形
+# 括號是多位元組 UTF-8 字元，塞進字元集合在非 UTF-8-aware 的 awk 上可能被
+# 拆成單一位元組比對，出現無法預期的誤判；純字串比對不管 awk 認不認得
+# UTF-8 都是逐位元組一致的比較，沒有這個風險。
 rule_section() {
   local f="$1" title="$2"
   RULE_TITLE="## $title" awk '
-    !inside && index($0, ENVIRON["RULE_TITLE"]) == 1 { inside=1; next }
+    function boundary_ok(rest) {
+      if (rest == "") return 1
+      if (index(rest, " ") == 1) return 1
+      if (index(rest, "\t") == 1) return 1
+      if (index(rest, "(") == 1) return 1
+      if (index(rest, ")") == 1) return 1
+      if (index(rest, "（") == 1) return 1
+      if (index(rest, "）") == 1) return 1
+      return 0
+    }
+    !inside && index($0, ENVIRON["RULE_TITLE"]) == 1 {
+      if (boundary_ok(substr($0, length(ENVIRON["RULE_TITLE"]) + 1))) { inside=1; next }
+    }
     inside && /^## / { exit }
     inside { print }' "$f"
 }
 
 # rule_source_count <file> — 印出「出處」章節裡的 URL 數量。
-# `|| true`：grep -c 在 0 筆匹配時退出碼是 1，呼叫端（rule_validate、以及
-# 任何在 set -e 環境下 source 這支 lib 的腳本）不該因為「數字剛好是 0」
-# 這個合法結果就被打斷。
+#
+# 用 grep -oE 印出每個相符的子字串（一個 URL 一行）再 wc -l，不是
+# grep -cE（算相符的「行數」）：出處章節常見寫法是同一行塞兩個 URL
+# （同一個 PR 的多則 review comment），grep -c 會把它算成 1 則，等於
+# 誤殺樣本數其實足夠的規則——這道關卡的目的是擋樣本太少寫出來的幻覺規則，
+# 不是照著行數算。
+#
+# `{ grep ... || true; }`：grep 在 0 筆匹配時退出碼是 1；pipefail 底下
+# 「pipeline 的退出碼＝最右邊那個曾經非 0 的指令」，就算後面接的 wc -l
+# 本身成功也蓋不掉 grep 那個 1。呼叫端（rule_validate、以及任何在
+# set -e 環境下 source 這支 lib 的腳本）不該因為「數字剛好是 0」這個
+# 合法結果就被打斷，所以只把 grep 這一段包起來吸收它的退出碼，不動
+# rule_section 那一段——真正的錯誤（例如 rule_section 本身失敗）不應該
+# 被這裡的 || true 一起吞掉。
 rule_source_count() {
-  rule_section "$1" 出處 | grep -cE 'https?://' || true
+  rule_section "$1" 出處 | { grep -oE 'https?://[^[:space:]]+' || true; } | wc -l | tr -d ' '
 }
 
 # rule_validate <file> — 合格回 0；不合格印出每個問題到 stderr 並回 1。
@@ -68,9 +106,24 @@ rule_validate() {
 
   local base; base="$(basename "$f" .md)"
 
+  # frontmatter 沒有收尾 --- 要用自己的 token 報，不能只讓後面欄位查詢
+  # 悄悄拿到從章節本文裡撈出來的錯誤值。下面的檢查照樣繼續跑（一次報所有
+  # 問題），但至少「frontmatter 本身沒收尾」這件事會被看見。
+  if ! rule_frontmatter "$f" >/dev/null; then
+    printf 'RULE_FRONTMATTER_UNTERMINATED\t%s\t找不到收尾的 ---\n' "$f" >&2
+    problems=$((problems + 1))
+  fi
+
+  # 欄位「有 key 但值是空字串」（例如 `id:`）要當成缺欄位，不能因為
+  # rule_field 判定「找到了」（rc=0）就放過——空值不只該在這裡被攔下來，
+  # 還要連帶跳過下面 id／layer／severity_default 各自的合法性檢查（那些
+  # 檢查都用 [ -n "$x" ] 守門，空值本來就不會進去），避免對同一個根因重複
+  # 報出語意錯亂的第二個問題。
   local key
   for key in $RULE_REQUIRED_FIELDS; do
-    if ! rule_field "$f" "$key" >/dev/null; then
+    local field_val; field_val="$(rule_field "$f" "$key")"
+    local field_rc=$?
+    if [ "$field_rc" -ne 0 ] || [ -z "$field_val" ]; then
       printf 'RULE_FIELD_MISSING\t%s\t%s\n' "$f" "$key" >&2
       problems=$((problems + 1))
     fi
@@ -85,7 +138,7 @@ rule_validate() {
   local layer; layer="$(rule_field "$f" layer)"
   if [ -n "$layer" ] && ! corpus_layers | grep -qx "$layer"; then
     printf 'RULE_LAYER_INVALID\t%s\t%s 不在合法清單：%s\n' \
-      "$f" "$layer" "$(corpus_layers | tr '\n' ' ')" >&2
+      "$f" "$layer" "$(corpus_layers | paste -sd ' ' -)" >&2
     problems=$((problems + 1))
   fi
 
