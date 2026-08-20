@@ -26,7 +26,7 @@ MRA_LIBS=(
   review-pr-discussion review-pr-threads review-adjudication review-premise review-refute review-post review review-protocol review-debate
   review-debate-agents personas review-personas plan-council model-provider
   corpus-targets corpus-fetch corpus-filter corpus-internal corpus-materialize
-  rule-schema
+  rule-schema taxonomy-classes
   test-audit pkb pkb-cache pkb-query pkb-prompts
   eval eval-probe eval-ablation dev-agent dev
   prd prd-issues prd-scaffold
