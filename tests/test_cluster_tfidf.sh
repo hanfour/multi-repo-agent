@@ -269,6 +269,7 @@ test_identical_tokens_do_not_divide_by_zero() {
   lacks "沒有除以零的例外（ZeroDivisionError）" "$out1" "ZeroDivisionError"
   lacks "沒有 Python traceback" "$out1" "Traceback"
   eq "第二次跑也是退出碼 0" "0" "$rc2"
+  lacks "第二次跑也沒有除以零的例外" "$out2" "ZeroDivisionError"
   if diff -q "$OUT/identical1.jsonl" "$OUT/identical2.jsonl" >/dev/null; then
     ok "全同 token、最極端的 tie 之下仍然決定性"
   else
@@ -387,6 +388,44 @@ test_sample_cap_takes_equidistant_records() {
     "$(printf 's1.ts\ns4.ts\ns7.ts')" "$paths"
 }
 
+# =============================================================================
+# 案例 17-18：code review 要求新增的測試
+# =============================================================================
+
+# min-clusters < 1 時應該報結構化錯誤，而不是拋裸 traceback。
+test_min_clusters_below_one_fails_loudly() {
+  local out rc
+  out="$(python3 "$MRA_DIR/scripts/cluster-tfidf.py" --input "$IN/nestjs.jsonl" \
+    --output "$OUT/negative.jsonl" --min-clusters 0 --max-clusters 1 2>&1)"; rc=$?
+  [ "$rc" -ne 0 ] && ok "min-clusters < 1 退出碼非 0" || fail "應退出非 0"
+  has "印出 INVALID_CLUSTER_BOUNDS" "$out" "INVALID_CLUSTER_BOUNDS"
+  lacks "沒有 Python traceback" "$out" "Traceback"
+  [ -f "$OUT/negative.jsonl" ] && fail "失敗時不該留下輸出檔" \
+    || ok "失敗時沒有留下輸出檔"
+}
+
+# 先成功寫一次、再用壞輸入對同一路徑跑第二次，應該清掉舊檔案。
+test_stale_output_deleted_on_failure() {
+  # 第一次成功運行：18 則語料，min=3 max=5 應該通過
+  python3 "$MRA_DIR/scripts/cluster-tfidf.py" --input "$IN/nestjs.jsonl" \
+    --output "$OUT/stale.jsonl" --min-clusters 3 --max-clusters 5 >/dev/null 2>&1
+  local first_size
+  first_size="$(wc -l < "$OUT/stale.jsonl" | tr -d ' ')"
+  [ "$first_size" -gt 0 ] && ok "第一次成功產出 ${first_size} 行" \
+    || fail "第一次運行失敗"
+
+  # 第二次失敗運行：同路徑，但用壞輸入（太少樣本）
+  local out rc
+  out="$(python3 "$MRA_DIR/scripts/cluster-tfidf.py" --input "$IN/nestjs.jsonl" \
+    --output "$OUT/stale.jsonl" --min-clusters 15 --max-clusters 40 2>&1)"; rc=$?
+  [ "$rc" -ne 0 ] && ok "第二次運行失敗（退出碼非 0）" \
+    || fail "應該失敗但沒有"
+
+  # 檢查舊檔案是否被清掉
+  [ -f "$OUT/stale.jsonl" ] && fail "失敗後舊輸出檔仍存在（BUG）" \
+    || ok "失敗時清掉了舊輸出檔"
+}
+
 test_separates_distinct_topics
 test_members_stay_within_topic
 test_deterministic
@@ -403,6 +442,8 @@ test_contradictory_bounds_fail_loudly
 test_malformed_jsonl_line_fails_loudly
 test_all_stopword_vocab_produces_empty_top_terms_without_crash
 test_sample_cap_takes_equidistant_records
+test_min_clusters_below_one_fails_loudly
+test_stale_output_deleted_on_failure
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
