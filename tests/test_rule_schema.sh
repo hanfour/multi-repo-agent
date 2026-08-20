@@ -110,6 +110,144 @@ test_rule_field_missing_key_returns_empty_and_nonzero() {
   [ "$rc" -eq 1 ] && ok "缺欄位退出碼是 1" || fail "應該回傳退出碼 1，得到 $rc"
 }
 
+# --- Re-review 找到的 4 個 Critical：都是手動構造的畸形／邊界輸入，不是
+# 推測。每一個都在拿掉對應修法後單獨跑過、確認會轉紅——過程與訊息記在
+# task-2-report.md，這裡只留最終版斷言。
+
+# Critical 1：欄位有 key 但值是空字串（例如 `id:`），rule_field 判定為
+# 「找到了」（rc=0），舊版因此完全逃過「缺欄位」迴圈，也因為 [ -n "$id" ]
+# 這個 guard 為假而跳過後續合法性檢查——實測整份檔案 rule_validate 回傳 0
+# (PASS)。修法：必填欄位迴圈同時檢查退出碼與值是否為空字串。
+test_empty_value_field_counts_as_missing() {
+  sed 's/^id: valid-example/id:/' "$FIX/valid-example.md" > "$TMP/empty-id.md"
+  local out; out="$(rule_validate "$TMP/empty-id.md" 2>&1)"
+  local rc=$?
+  [ "$rc" -ne 0 ] && ok "id 有 key 但值是空字串時不通過" || fail "應該不通過"
+  has "訊息把空值 id 當成缺欄位" "$out" "RULE_FIELD_MISSING"
+  printf '%s\n' "$out" | grep -qE $'\tid$' \
+    && ok "訊息指名的欄位剛好是 id（不是欄位名裡含 id 的其他東西）" \
+    || fail "訊息裡沒有以 tab+id 結尾的行：$out"
+  lacks "空值 id 不該再額外觸發 id/檔名不符（同一個根因不要報兩次語意錯亂的問題）" \
+    "$out" "RULE_ID_MISMATCH"
+}
+
+# 四個必填欄位都受這個 bug 影響，一次全部驗證覆蓋到、且各自獨立算一個問題
+# （驗證「一次報所有問題」跟這個修法一起運作正常）。
+test_all_empty_required_fields_are_each_flagged() {
+  sed -e 's/^id: valid-example/id:/' \
+      -e 's/^layer: nestjs/layer:/' \
+      -e 's#^frameworks:.*#frameworks:#' \
+      -e 's/^severity_default: HIGH/severity_default:/' \
+      "$FIX/valid-example.md" > "$TMP/all-empty.md"
+  local out; out="$(rule_validate "$TMP/all-empty.md" 2>&1)"
+  local rc=$?
+  [ "$rc" -ne 0 ] && ok "四個欄位全部只有 key 沒有值時不通過" || fail "應該不通過"
+  local n; n="$(printf '%s\n' "$out" | grep -c 'RULE_FIELD_MISSING')"
+  eq "四個空值欄位各自報一次 RULE_FIELD_MISSING" "4" "$n"
+}
+
+# Critical 2：frontmatter 缺收尾 --- 時，rule_frontmatter 舊版會把整個檔案
+# 剩餘內容（含所有章節本文）當成 frontmatter 印出、exit 0、不報錯。實測
+# rule_validate 回傳 0 (PASS)，現在能矇混過關純粹是因為章節內容剛好沒有
+# 出現 key: value 形狀的行。修法：rule_frontmatter 用 found 旗標偵測有沒有
+# 真的看到收尾 ---，rule_validate 用自己的 token RULE_FRONTMATTER_UNTERMINATED
+# 報出來。
+test_unterminated_frontmatter_is_rejected() {
+  # 只拿掉第二個 ---（收尾界線），保留開頭那個。
+  awk '!( $0 == "---" && ++c == 2 )' "$FIX/valid-example.md" > "$TMP/unterminated.md"
+  local closer_count; closer_count="$(grep -c -- '^---$' "$TMP/unterminated.md")"
+  eq "fixture 準備正確：只剩一個 ---（開頭那個）" "1" "$closer_count"
+
+  local out; out="$(rule_validate "$TMP/unterminated.md" 2>&1)"
+  local rc=$?
+  [ "$rc" -ne 0 ] && ok "缺收尾 --- 的檔案不通過" || fail "應該不通過"
+  has "訊息用專屬 token 指出缺收尾 ---" "$out" "RULE_FRONTMATTER_UNTERMINATED"
+}
+
+# Critical 3：rule_source_count 舊版用 grep -cE 算「相符的行數」，同一行塞
+# 兩個 URL（同一個 PR 的多則 review comment 很自然會這樣寫）只算 1 則。
+# 實測三則出處擠成兩行會被誤判「只有 2 則」而擋下——這道關卡的目的是防止
+# 樣本太少的幻覺規則，結果反而誤殺樣本足夠的規則。修法：grep -oE 印出每個
+# 相符子字串（一個 URL 一行）再 wc -l，數 URL 出現次數不是行數。
+test_multiple_urls_on_one_line_are_all_counted() {
+  sed 's/^id: valid-example/id: two-urls-one-line/' "$FIX/valid-example.md" | awk '
+    /discussion_r100001/ { line1 = $0; getline line2; print line1 " " line2; next }
+    { print }
+  ' > "$TMP/two-urls-one-line.md"
+
+  local url_lines; url_lines="$(rule_section "$TMP/two-urls-one-line.md" 出處 | grep -c 'https\?://')"
+  eq "fixture 準備正確：三則出處只佔兩行" "2" "$url_lines"
+
+  eq "rule_source_count 數出 3 個 URL，即使只佔兩行" "3" "$(rule_source_count "$TMP/two-urls-one-line.md")"
+
+  rule_validate "$TMP/two-urls-one-line.md" 2>"$TMP/two-urls-err" \
+    && ok "三則出處擠成兩行仍然通過，不會被誤判成出處不足" \
+    || fail "不該因為出處擠成兩行就不通過：$(cat "$TMP/two-urls-err")"
+}
+
+# Critical 4：rule_section 的前綴比對沒錨定邊界，「## 判準」這個前綴符合
+# 也會命中「## 判準補充」這種同前綴但其實是別的章節的標題。實測構造一個
+# 「## 判準補充」出現在真正的「## 判準」之前，rule_section <file> 判準
+# 回傳的是判準補充的內容，而且因為抓到的內容非空，rule_validate 完全不會
+# 發現、仍然回傳 0 (PASS)——這個最麻煩，因為 Task 6 的 rule_render_block
+# 直接呼叫這個函式產出要注入 persona 的最終內容，會把錯的文字渲染進去，
+# 且沒有任何錯誤訊號。修法：比對加錨定邊界，前綴後面必須接空白、半形／
+# 全形括號，或行尾才算數。
+test_section_prefix_match_is_boundary_anchored() {
+  cat > "$TMP/decoy-section.md" <<'EOF'
+---
+id: decoy-section
+layer: nestjs
+frameworks: ["@nestjs/core@>=9"]
+severity_default: HIGH
+---
+## 觸發訊號
+diff 裡出現 `@Injectable({ scope: Scope.REQUEST })`，或 request-scoped provider
+被注入進 singleton service。
+
+## 判準補充
+這是偽裝章節，標題跟「判準」同前綴，內容是誘餌，不該被 rule_section 抓到。
+
+## 判準
+這才是真正的判準內容，request-scoped provider 被 singleton 注入時會把整條
+依賴鏈提升成 request scope。
+
+## 嚴重度
+CRITICAL：被提升的鏈上有連線池或外部資源 handle
+HIGH：被提升的鏈上有具狀態的 service
+MEDIUM：只影響無狀態的 helper
+
+## 反例（不該報）
+provider 本來就宣告成 request scope 且鏈上全部都是 request scope，
+那是刻意的設計，不要報。
+
+## 出處
+- https://github.com/nestjs/nest/pull/1001#discussion_r100001
+- https://github.com/nestjs/nest/pull/1002#discussion_r100002
+- https://github.com/nestjs/nest/pull/1003#discussion_r100003
+EOF
+
+  local body; body="$(rule_section "$TMP/decoy-section.md" 判準)"
+  has "抓到的是真正判準章節的內容" "$body" "這才是真正的判準內容"
+  lacks "不該被同前綴的偽裝章節劫持" "$body" "偽裝章節"
+
+  rule_validate "$TMP/decoy-section.md" 2>"$TMP/decoy-err" \
+    && ok "有同前綴偽裝章節時，合格檔案仍然通過" \
+    || fail "不該被偽裝章節誤導成不通過：$(cat "$TMP/decoy-err")"
+}
+
+# Minor：RULE_LAYER_INVALID 訊息尾端不該有多餘空白（corpus_layers | tr '\n' ' '
+# 會把最後一個換行也轉成空格）。順手一起修。
+test_layer_invalid_message_has_no_trailing_space() {
+  sed 's/^layer: nestjs/layer: golang/' "$FIX/valid-example.md" > "$TMP/bad-layer-trim.md"
+  local out; out="$(rule_validate "$TMP/bad-layer-trim.md" 2>&1)"
+  local line; line="$(printf '%s\n' "$out" | grep RULE_LAYER_INVALID)"
+  case "$line" in
+    *" ") fail "RULE_LAYER_INVALID 訊息結尾多了一個空白：[$line]" ;;
+    *)    ok "RULE_LAYER_INVALID 訊息結尾沒有多餘空白" ;;
+  esac
+}
+
 test_valid_fixture_passes
 test_missing_frontmatter_field
 test_missing_section
@@ -121,6 +259,12 @@ test_section_extraction
 test_reports_all_problems_at_once
 test_rule_field_extracts_scalar
 test_rule_field_missing_key_returns_empty_and_nonzero
+test_empty_value_field_counts_as_missing
+test_all_empty_required_fields_are_each_flagged
+test_unterminated_frontmatter_is_rejected
+test_multiple_urls_on_one_line_are_all_counted
+test_section_prefix_match_is_boundary_anchored
+test_layer_invalid_message_has_no_trailing_space
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
