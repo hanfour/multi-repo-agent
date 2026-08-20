@@ -152,9 +152,24 @@ test_all_empty_required_fields_are_each_flagged() {
 # 出現 key: value 形狀的行。修法：rule_frontmatter 用 found 旗標偵測有沒有
 # 真的看到收尾 ---，rule_validate 用自己的 token RULE_FRONTMATTER_UNTERMINATED
 # 報出來。
+#
+# id 刻意改成跟檔名一致（不是沿用 valid-example 這個舊 id）：這批畸形輸入
+# fixture 如果檔名跟內部 id 不一致，會額外巧合觸發 RULE_ID_MISMATCH，讓
+# 「這個檔案只有一個問題」這種斷言變得無法乾淨地驗證（前幾輪已經在報告裡
+# 記錄過同一個坑）。這裡刻意讓 id 對得上檔名，這樣輸出裡除了
+# RULE_FRONTMATTER_UNTERMINATED 之外不該再有任何別的問題——包括 re-review
+# 找到的 pipefail bug：rule_field 內部用管線接 rule_frontmatter 的輸出時，
+# `set -o pipefail` 底下 rule_frontmatter 自己的 exit 1（未終結）會蓋掉
+# 內層 awk「找到欄位」的 exit 0，害 rule_field 印出正確的值、卻回傳退出碼
+# 1（宣稱找不到）。連帶後果是必填欄位迴圈把 id/layer/frameworks/
+# severity_default 全部誤報成 RULE_FIELD_MISSING——即使這四個欄位在檔案裡
+# 都寫得好好的。這會把萃取路線的 agent 導向錯的修復方向（去補根本沒缺的
+# 欄位，而不是補收尾的 ---），所以除了「有報 RULE_FRONTMATTER_UNTERMINATED」
+# 之外，還要斷言「沒有報 RULE_FIELD_MISSING」，且訊息應該只有那一行。
 test_unterminated_frontmatter_is_rejected() {
-  # 只拿掉第二個 ---（收尾界線），保留開頭那個。
-  awk '!( $0 == "---" && ++c == 2 )' "$FIX/valid-example.md" > "$TMP/unterminated.md"
+  # 只拿掉第二個 ---（收尾界線），保留開頭那個；id 改成跟檔名一致。
+  sed 's/^id: valid-example/id: unterminated/' "$FIX/valid-example.md" \
+    | awk '!( $0 == "---" && ++c == 2 )' > "$TMP/unterminated.md"
   local closer_count; closer_count="$(grep -c -- '^---$' "$TMP/unterminated.md")"
   eq "fixture 準備正確：只剩一個 ---（開頭那個）" "1" "$closer_count"
 
@@ -162,6 +177,25 @@ test_unterminated_frontmatter_is_rejected() {
   local rc=$?
   [ "$rc" -ne 0 ] && ok "缺收尾 --- 的檔案不通過" || fail "應該不通過"
   has "訊息用專屬 token 指出缺收尾 ---" "$out" "RULE_FRONTMATTER_UNTERMINATED"
+  lacks "不該把明明寫得好好的欄位誤報成缺欄位" "$out" "RULE_FIELD_MISSING"
+  local n; n="$(printf '%s\n' "$out" | grep -c .)"
+  eq "只報一個問題（缺收尾 ---），不該有其他連帶誤報" "1" "$n"
+}
+
+# 直接在 rule_field 這一層鎖住 re-review 實測到的確切症狀：對缺收尾 --- 的
+# 檔案呼叫 rule_field id，值確實抓到了，退出碼卻宣稱找不到。這支測試不透過
+# rule_validate，直接驗證 rule_field 本身的回傳值與退出碼要一致——避免以後
+# 又有人在 rule_field 內部重新接回一段管線，把 rule_frontmatter 的退出碼
+# 透過 pipefail 滲回來。
+test_rule_field_not_corrupted_by_unterminated_frontmatter() {
+  sed 's/^id: valid-example/id: unterminated-field/' "$FIX/valid-example.md" \
+    | awk '!( $0 == "---" && ++c == 2 )' > "$TMP/unterminated-field.md"
+
+  local val; val="$(rule_field "$TMP/unterminated-field.md" id)"
+  local rc=$?
+  eq "值確實抓到了（frontmatter 未終結不影響掃描到的欄位內容）" "unterminated-field" "$val"
+  [ "$rc" -eq 0 ] && ok "退出碼跟值一致：找到了就是 0，不該被 rule_frontmatter 自己的 1 透過 pipefail 蓋過去" \
+    || fail "退出碼應該是 0，得到 ${rc}（值有抓到但退出碼卻說找不到，就是 pipefail 污染的症狀）"
 }
 
 # Critical 3：rule_source_count 舊版用 grep -cE 算「相符的行數」，同一行塞
@@ -236,6 +270,21 @@ EOF
     || fail "不該被偽裝章節誤導成不通過：$(cat "$TMP/decoy-err")"
 }
 
+# Minor（re-review 第二輪順手做）：boundary_ok 沒把 \r 列為合法邊界字元，
+# CRLF 結尾的合法章節標題（例如「## 判準\r\n」）會被判邊界不合格，導致
+# rule_section 抓不到內容。直接測 rule_section，不透過 rule_validate：
+# 一份整份 CRLF 的規則檔會先在 frontmatter 的 --- 相等比對被擋下來（那兩行
+# 會變成 "---\r"，跟純 "---" 不相等），沒辦法乾淨地隔離出 boundary_ok 本身
+# 認不認得 \r 這件事；rule_section 直接掃檔案找 ## 標題，不需要合法
+# frontmatter，可以單獨測。
+test_boundary_ok_accepts_crlf_heading() {
+  printf '## 觸發訊號\r\n前一段內容。\r\n## 判準\r\n這是 CRLF 結尾的判準內容。\r\n## 嚴重度\r\n' \
+    > "$TMP/crlf-section.md"
+  local body; body="$(rule_section "$TMP/crlf-section.md" 判準)"
+  has "CRLF 結尾的章節標題仍然被正確辨識為邊界，抓得到內容" "$body" "這是 CRLF 結尾的判準內容"
+  lacks "不該把下一節（嚴重度）的內容也吃進來" "$body" "嚴重度"
+}
+
 # Minor：RULE_LAYER_INVALID 訊息尾端不該有多餘空白（corpus_layers | tr '\n' ' '
 # 會把最後一個換行也轉成空格）。順手一起修。
 test_layer_invalid_message_has_no_trailing_space() {
@@ -262,8 +311,10 @@ test_rule_field_missing_key_returns_empty_and_nonzero
 test_empty_value_field_counts_as_missing
 test_all_empty_required_fields_are_each_flagged
 test_unterminated_frontmatter_is_rejected
+test_rule_field_not_corrupted_by_unterminated_frontmatter
 test_multiple_urls_on_one_line_are_all_counted
 test_section_prefix_match_is_boundary_anchored
+test_boundary_ok_accepts_crlf_heading
 test_layer_invalid_message_has_no_trailing_space
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"

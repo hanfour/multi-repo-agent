@@ -34,10 +34,30 @@ rule_frontmatter() {
 # rule_field <file> <key> — 印出單一 frontmatter 欄位的值；缺欄位回空字串、
 # 退出碼 1。用 sub() 砍掉 $0 裡「key: 」的前綴，而不是取 $2，這樣值本身
 # 含冒號（例如未來可能出現的 URL 值）不會被截斷。
+#
+# 先把 rule_frontmatter 的輸出收進變數，再單獨用 <<< 餵給 awk，不要用
+# `rule_frontmatter "$f" | awk ...` 這種管線寫法：這支 lib 實際執行的三個
+# 環境（test.sh、tests/test_rule_schema.sh、scripts/rule-validate.sh）都開了
+# set -o pipefail，管線的退出碼＝「最右邊那個曾經非 0 的指令」。frontmatter
+# 缺收尾 --- 時 rule_frontmatter 會回傳 1（這是刻意的，見上面的說明），但它
+# 仍然把（誤判範圍內的）內容印出來，右邊的 awk 拿這些內容照樣能找到欄位、
+# 自己回傳 0——可是 pipefail 底下，awk 的 0 蓋不掉 rule_frontmatter 那個 1，
+# 整條管線最後回報 1。實測過的症狀：對缺收尾 --- 的檔案呼叫
+# `rule_field id`，印出的值是對的（值確實抓到了），退出碼卻是 1（宣稱找不
+# 到）。連帶後果是 rule_validate 的必填欄位迴圈會把明明寫得好好的欄位，
+# 全部誤報成 RULE_FIELD_MISSING，把萃取路線的 agent 導向錯的修復方向（去
+# 補根本沒缺的欄位，而不是補收尾的 ---）。改成先賦值給變數（一個獨立的
+# command substitution，rule_frontmatter 自己的退出碼在這裡就地被丟棄、
+# 不會流進下一步)，再用 <<< 餵給 awk（純輸入重導向，不是管線，沒有
+# pipefail 可以攪局的空間），awk 自己的退出碼就是 rule_field 最終回傳的
+# 退出碼，不會被 rule_frontmatter 汙染。
 rule_field() {
-  local f="$1" key="$2" val
-  val="$(rule_frontmatter "$f" | RULE_KEY="$key" awk -F': *' \
-    '$1 == ENVIRON["RULE_KEY"] { sub(/^[^:]*: */, ""); print; found=1 } END { exit !found }')"
+  local f="$1" key="$2"
+  local frontmatter; frontmatter="$(rule_frontmatter "$f")"
+  local val
+  val="$(RULE_KEY="$key" awk -F': *' \
+    '$1 == ENVIRON["RULE_KEY"] { sub(/^[^:]*: */, ""); print; found=1 } END { exit !found }' \
+    <<< "$frontmatter")"
   local rc=$?
   printf '%s' "$val"
   return $rc
@@ -53,8 +73,9 @@ rule_field() {
 # 但光是開頭符合不夠，還要錨定邊界：「## 判準」這個開頭符合也會匹配到
 # 「## 判準補充」這種同前綴但其實是別的章節的標題，抓到的內容會是錯的
 # 章節，而且因為抓到的內容非空，rule_validate 完全不會發現。標題後面接的
-# 必須是空白、半形／全形括號，或行尾，才算數。用 index()／substr() 逐一比對
-# 候選邊界字元而不是塞進 awk 的 [...] 字元集合或動態組 regex：中日文全形
+# 必須是空白、半形／全形括號、\r（CRLF 結尾的合法標題行），或行尾，才算數。
+# 用 index()／substr() 逐一比對候選邊界字元而不是塞進 awk 的 [...] 字元
+# 集合或動態組 regex：中日文全形
 # 括號是多位元組 UTF-8 字元，塞進字元集合在非 UTF-8-aware 的 awk 上可能被
 # 拆成單一位元組比對，出現無法預期的誤判；純字串比對不管 awk 認不認得
 # UTF-8 都是逐位元組一致的比較，沒有這個風險。
@@ -65,6 +86,7 @@ rule_section() {
       if (rest == "") return 1
       if (index(rest, " ") == 1) return 1
       if (index(rest, "\t") == 1) return 1
+      if (index(rest, "\r") == 1) return 1
       if (index(rest, "(") == 1) return 1
       if (index(rest, ")") == 1) return 1
       if (index(rest, "（") == 1) return 1
