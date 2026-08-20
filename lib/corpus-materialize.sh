@@ -7,28 +7,15 @@
 #
 # 續跑用 .done 標記檔，不是看輸出檔存不存在：輸出檔是「某一層」的累積結果，
 # 多個 repo 會寫進同一個檔，用它判斷會讓第二個 repo 被跳過。
-
-# layer.jsonl 是「讀舊內容、疊上這次新增的、整份 mv 回去」寫的（見下方），
-# 讀改寫中間如果有另一個行程也在寫同一層，兩邊各自讀到的舊內容都不包含對方
-# 還沒 mv 回去的那份，最後 mv 的那個會讓先 mv 的那份憑空消失——不是重複，是
-# 直接遺失，且沒有任何錯誤訊息。scripts/build-corpus.sh 的 retention.tsv 已經
-# 為同一類「共用檔案讀改寫」問題上過鎖（mkdir 是 POSIX 原子操作），這裡延用
-# 同一個做法；鎖的範圍只包一個 layer 自己的輸出檔，不同 layer 不互相卡。
-_corpus_materialize_lock() {
-  local lock="$1" waited=0
-  while ! mkdir "$lock" 2>/dev/null; do
-    sleep 1
-    waited=$((waited + 1))
-    if [ "$waited" -ge 120 ]; then
-      printf 'LAYER_LOCK_TIMEOUT\t%s\n' "$lock" >&2
-      return 1
-    fi
-  done
-  return 0
-}
-_corpus_materialize_unlock() {
-  rmdir "$1" 2>/dev/null || true
-}
+#
+# 這支函式不是併發安全的：同一個 repo 被兩個行程同時呼叫，兩邊都會在 marker
+# 還不存在時通過檢查、各自跑完篩選、各自把資料 append 一次，結果是重複。
+# scripts/corpus-materialize.sh 目前對所有 target repo 是嚴格循序處理，不會
+# 觸發這個情境；如果之後真的需要平行呼叫，要在「檢查 marker」與「寫入
+# marker」之間補上 double-checked locking（拿鎖 → 鎖內重查一次 marker →
+# 沒有才繼續）並補上鎖本身的測試（擋住第二個嘗試者、逾時分支、鎖內複查生
+# 效），不要只加鎖不加測試——那樣的鎖比沒有更危險：往後的人會信任一個它其實
+# 守不住的情境。
 
 corpus_materialize_repo() {
   local repo="$1" out_dir="$2"
@@ -67,7 +54,7 @@ corpus_materialize_repo() {
   done
 
   # tmp 存這個 repo 這次新產出的 JSONL 行。沒有頁面時是空檔案、total 是 0，
-  # 但仍然要走到下面同一套「先寫 marker、再原子寫回 layer.jsonl」流程，不要
+  # 但仍然要走到下面同一套「先寫 marker、再 append layer.jsonl」流程，不要
   # 另開一條捷徑分支——分支一多，其中一條沒跟著改就是下一次事故。
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/corpus-mat.XXXXXX")" || return 1
@@ -113,11 +100,12 @@ corpus_materialize_repo() {
     }
     # corpus_filter_all 自己的診斷不能丟掉：它用各自的 token 報
     # FILTER_STAGE_FAILED（還指出是 bots／senior／quality／prose 哪一階段）
-    # 與 FILTER_INPUT_INVALID。原本這裡是 2>/dev/null，失敗時只看得到外層
-    # FILTER_FAILED、查不出是哪一階段炸的，跟 lib/corpus-filter.sh 刻意設計
-    # 「各階段各自報 token」的用意直接相違背。階段二 run-backtest.sh 對每次
-    # review 呼叫 2>/dev/null，導致整輪跑完只拿到一個 0 bytes 的 log、完全
-    # 查不出失敗原因（後來證實有四種不同形狀）——同一個坑，這裡不重踩。
+    # 與 FILTER_INPUT_INVALID。這裡不能對它的 stderr 做 2>/dev/null——失敗時
+    # 只看得到外層自己包的 FILTER_FAILED，查不出是哪一階段炸的，跟
+    # lib/corpus-filter.sh 刻意設計「各階段各自報 token」的用意直接相違背。
+    # 階段二 run-backtest.sh 對每次 review 呼叫做過同一件事，導致整輪跑完
+    # 只拿到一個 0 bytes 的 log、完全查不出失敗原因（後來證實有四種不同
+    # 形狀）——這個代價已經付過一次，這裡跟任何子行程呼叫都不能重踩。
     local diag
     diag="$(mktemp "${TMPDIR:-/tmp}/corpus-mat-diag.XXXXXX")" || {
       rm -f "$merged" "$tmp" "$filtered_file"; return 1;
@@ -161,66 +149,43 @@ corpus_materialize_repo() {
   #      靠跟 retention.tsv 或各 repo 應有筆數比對抓出來；重複不行——兩條
   #      萃取路線會讀到被污染的語料還渾然不覺，而且續跑本身回報成功、不會有
   #      任何錯誤訊息。
-  # 反過來做（先 append 再寫 marker，原本的寫法）才是問題所在：append 已經
-  # 完成、marker 還沒寫的中斷點，續跑會重新整個跑一次再 append 一次，同一個
-  # repo 的資料在 layer.jsonl 裡出現兩次。
+  # 反過來做（先 append 再寫 marker）才是問題所在：append 已經完成、marker
+  # 還沒寫的中斷點，續跑會重新整個跑一次再 append 一次，同一個 repo 的資料
+  # 在 layer.jsonl 裡出現兩次。
   #
-  # marker 本身也不是裸的 `printf > done_marker`（那不是原子操作，中斷可能
+  # marker 本身不是裸的 `printf > done_marker`（那不是原子操作，中斷可能
   # 留下寫一半的 marker），是 mktemp 到同一個目錄下再 mv 過去——mv 在同一個
-  # 檔案系統上是原子的。連帶的好處：tee 的退出碼從此不用管，因為已經不用
-  # tee 了，mv 的退出碼有明確檢查。
-  local layer_lock="${out_dir}/.lock-${layer}"
-  _corpus_materialize_lock "$layer_lock" || { rm -f "$tmp"; return 1; }
-
+  # 檔案系統上是原子的。
   local marker_tmp
-  marker_tmp="$(mktemp "${out_dir}/.done-${safe_repo}.XXXXXX")" || {
-    _corpus_materialize_unlock "$layer_lock"; rm -f "$tmp"; return 1;
-  }
+  marker_tmp="$(mktemp "${out_dir}/.done-${safe_repo}.XXXXXX")" || { rm -f "$tmp"; return 1; }
   if ! printf '%s\n' "$total" > "$marker_tmp"; then
     printf 'MARKER_WRITE_FAILED\t%s\t%s\n' "$repo" "$done_marker" >&2
     rm -f "$marker_tmp" "$tmp"
-    _corpus_materialize_unlock "$layer_lock"
     return 1
   fi
   if ! mv "$marker_tmp" "$done_marker"; then
     printf 'MARKER_WRITE_FAILED\t%s\t%s\n' "$repo" "$done_marker" >&2
     rm -f "$marker_tmp" "$tmp"
-    _corpus_materialize_unlock "$layer_lock"
     return 1
   fi
 
-  # layer.jsonl 本身的更新也不用裸的 `cat >>`：那不是原子操作，中斷可能留下
-  # 寫到一半的最後一行（半個 JSON 物件）。做法是把「舊內容 + 這次新增的內容」
-  # 整份組進一個跟 out_dir 同一個檔案系統上的暫存檔，再 mv 蓋過去——
-  # layer.jsonl 任何時刻要嘛是舊的完整內容、要嘛是新的完整內容，不會是兩者
-  # 中間的殘破狀態。暫存檔故意開在 out_dir 底下而不是 $TMPDIR：$TMPDIR 跟
-  # out_dir 常常不是同一個檔案系統，mv 跨檔案系統會退化成 copy+unlink，
-  # 不再是原子操作。
+  # layer.jsonl 用裸 append，不是「讀舊內容＋mv 蓋過去」：後者曾經是這裡的
+  # 寫法，理由是想讓 layer.jsonl 任何時刻都是完整內容、不會是寫到一半的殘破
+  # 狀態；但「讀舊內容」這個動作本身在多個行程同時處理同一層的不同 repo 時
+  # 不安全——兩邊各自讀到的舊內容都不包含對方還沒 mv 回去的那份，最後 mv 的
+  # 那個會讓先 mv 的那份憑空消失（不是重複，是直接遺失，比裸 append 的行為
+  # 還要差）。裸 append 沒有這個「讀」的動作，多個行程各自的 write() 呼叫
+  # 之間頂多是交錯（interleave），不會讓對方已經寫入的內容整段消失。中斷
+  # 造成資料重複的風險已經靠上面「marker 先寫」解決：一旦這裡開始執行，
+  # marker 已經確定落地，之後就算被中斷在寫到一半，續跑也只會短路跳過，
+  # 不會回頭重新 append 一次。
   local layer_file="${out_dir}/${layer}.jsonl"
-  local combined
-  combined="$(mktemp "${out_dir}/.materialize-${layer}.XXXXXX")" || {
-    _corpus_materialize_unlock "$layer_lock"; rm -f "$tmp"; return 1;
-  }
-  if [ -f "$layer_file" ] && ! cat "$layer_file" > "$combined"; then
+  if ! cat "$tmp" >> "$layer_file"; then
     printf 'LAYER_WRITE_FAILED\t%s\t%s\n' "$repo" "$layer_file" >&2
-    rm -f "$combined" "$tmp"
-    _corpus_materialize_unlock "$layer_lock"
-    return 1
-  fi
-  if ! cat "$tmp" >> "$combined"; then
-    printf 'LAYER_WRITE_FAILED\t%s\t%s\n' "$repo" "$layer_file" >&2
-    rm -f "$combined" "$tmp"
-    _corpus_materialize_unlock "$layer_lock"
+    rm -f "$tmp"
     return 1
   fi
   rm -f "$tmp"
-  if ! mv "$combined" "$layer_file"; then
-    printf 'LAYER_WRITE_FAILED\t%s\t%s\n' "$repo" "$layer_file" >&2
-    rm -f "$combined"
-    _corpus_materialize_unlock "$layer_lock"
-    return 1
-  fi
-  _corpus_materialize_unlock "$layer_lock"
 
   printf '%s\n' "$total"
 }

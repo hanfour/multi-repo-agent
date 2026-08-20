@@ -187,47 +187,32 @@ has "指出是 quality 階段" "$out8_diag" "quality"
 
 # --- 案例 9：marker 已經原子寫入、layer.jsonl 還沒寫完就中斷——續跑要嘛短少
 # 要嘛跳過，絕對不能重複 --------------------------------------------------
-# 用一個「目標是 .jsonl 結尾就失敗、其餘照常放行」的假 mv 蓋過 PATH，模擬
-# 「被中斷在 marker 已經 mv 成功、layer.jsonl 還沒 mv 完」這個時間點——這正是
-# 修正後的設計刻意選的失敗方向：marker 先於 layer.jsonl 落地，中斷只會造成
-# 短少（可以跟 retention.tsv 對照抓出來），不會造成重複（兩條萃取路線會讀到
-# 被污染的語料卻毫無錯誤訊息）。
+# 把 layer.jsonl 的路徑預先建成一個目錄（不是檔案），讓 `cat "$tmp" >>
+# "$layer_file"` 必然失敗，藉此模擬「被中斷在 marker 已經 mv 成功、
+# layer.jsonl 那次寫入還沒完成」這個時間點——這正是修正後的設計刻意選的失敗
+# 方向：marker 先於 layer.jsonl 落地，中斷只會造成短少（可以跟
+# retention.tsv 對照抓出來），不會造成重複（兩條萃取路線會讀到被污染的語料
+# 卻毫無錯誤訊息）。
 OUT9="$TMP/out9"
-mkdir -p "$OUT9"
-STUBBIN="$TMP/stubbin"
-mkdir -p "$STUBBIN"
-cat > "$STUBBIN/mv" <<'STUB'
-#!/usr/bin/env bash
-# 只讓「目標是 .jsonl 結尾」的 mv 失敗（模擬 layer.jsonl 那次 mv 被中斷），
-# marker（.done-*）與鎖目錄用到的 mv 照常放行。
-last="${@: -1}"
-case "$last" in
-  *.jsonl) exit 1 ;;
-  *) exec /bin/mv "$@" ;;
-esac
-STUB
-chmod +x "$STUBBIN/mv"
+mkdir -p "$OUT9/nestjs.jsonl"
 
-out9_crash="$(PATH="$STUBBIN:$PATH" corpus_materialize_repo nestjs/nest "$OUT9" 2>&1 >/dev/null)"
+out9_crash="$(corpus_materialize_repo nestjs/nest "$OUT9" 2>&1 >/dev/null)"
 rc9_crash=$?
 [ "$rc9_crash" -ne 0 ] && ok "layer.jsonl 寫入被中斷時退出碼非 0" || fail "應退出非 0，得到 $rc9_crash"
 has "印出 LAYER_WRITE_FAILED" "$out9_crash" "LAYER_WRITE_FAILED"
 if [ -f "$OUT9/.done-nestjs__nest" ]; then
-  ok "marker 確實先於 layer.jsonl 原子寫入成功（設計的重點）"
+  ok "marker 確實先於 layer.jsonl 寫入成功（設計的重點）"
 else
   fail "marker 應該已經寫成功——marker 要先於 layer.jsonl 落地才對"
 fi
-if [ -f "$OUT9/nestjs.jsonl" ]; then
-  fail "layer.jsonl 不該在這個中斷點被建立（mv 已被攔截失敗）"
-else
-  ok "layer.jsonl 確實還沒寫入（符合模擬的中斷點）"
-fi
 
-# 中斷後續跑（换回真正的 mv）：marker 已存在，應該直接短路跳過，不會重新
-# 處理、也不會把 layer.jsonl 補上——這正是「短少而非重複」的設計取捨，續跑
-# 本身仍然成功、不會有任何錯誤訊息，但筆數不能翻倍。
+# 中斷後續跑：先把擋路的目錄清掉（正常情況下 layer.jsonl 這個路徑不會被
+# 一個目錄佔用，這裡只是測試手段），marker 已存在應該直接短路跳過，不會
+# 重新處理、也不會把 layer.jsonl 補上——這正是「短少而非重複」的設計取捨，
+# 續跑本身仍然成功、不會有任何錯誤訊息，但筆數不能翻倍，也不會自動補回來。
+rmdir "$OUT9/nestjs.jsonl"
 out9_retry="$(corpus_materialize_repo nestjs/nest "$OUT9")"; rc9_retry=$?
-eq "續跑（真正的 mv）退出碼是 0（短路跳過）" "0" "$rc9_retry"
+eq "續跑退出碼是 0（短路跳過）" "0" "$rc9_retry"
 eq "續跑印出跟 marker 一致的筆數" "1" "$out9_retry"
 if [ -f "$OUT9/nestjs.jsonl" ]; then
   n9="$(wc -l < "$OUT9/nestjs.jsonl" | tr -d ' ')"
