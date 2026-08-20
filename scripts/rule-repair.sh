@@ -63,7 +63,15 @@ rule_repair_plan() {
     }' "$f"
 }
 
-rescued=0; unfixed=0; conflicts=0
+# 「仍不通過」的原因分開計數，不要全部併進同一個數字：呼叫端要能分辨
+# UNFIXABLE（資料本身的問題，正常——模型輸出被截斷、格式整個壞掉）跟撞名
+# （設定錯誤，要修——同一層重跑前沒清空舊產出）是完全不同性質的訊號，混在
+# 一起就沒辦法自動化地判斷「這批要不要人看」。原本是四種
+# （UNFIXABLE／缺id／驗證未過／撞名），unsafe_id 是修 Critical 1（id 路徑
+# 穿越）之後新增的第五種：id 本身含不安全字元，理論上不該發生（prompt
+# 已經要求格式），但如果發生了，代表模型輸出偏離 prompt 的程度比一般
+# UNFIXABLE 更值得注意，所以獨立算一類，不要悄悄併進 missing_id。
+rescued=0; unfixable=0; missing_id=0; unsafe_id=0; still_invalid=0; conflicts=0
 
 for f in "$REJECTED"/*.md; do
   [ -e "$f" ] || continue
@@ -75,7 +83,7 @@ for f in "$REJECTED"/*.md; do
   if [ "$plan_rc" -ne 0 ]; then
     reason="$(printf '%s' "$plan_out" | cut -f2)"
     printf 'RULE_REPAIR_UNFIXABLE\t%s\t%s\n' "$f" "$reason" >&2
-    unfixed=$((unfixed + 1))
+    unfixable=$((unfixable + 1))
     continue
   fi
 
@@ -88,7 +96,11 @@ for f in "$REJECTED"/*.md; do
 
   if [ "$action" = "INSERT" ]; then
     ins_line="$(printf '%s' "$plan_out" | cut -f2)"
-    awk -v ins="$ins_line" 'NR==ins { print "---" } { print }' "$f" > "$content"
+    # 用 ENVIRON 傳行號，不用 awk -v：-v 會先處理反斜線跳脫，跟
+    # lib/corpus-targets.sh corpus_layer_of() 的既有慣例一致（見該檔註解）。
+    # 這裡的值是純數字，不會被反斜線跳脫影響到結果，但保持同一套習慣，避免
+    # 以後有人在別處抄這行去傳真正可能含反斜線的值。
+    INS_LINE="$ins_line" awk 'NR==ENVIRON["INS_LINE"] { print "---" } { print }' "$f" > "$content"
   else
     # ALREADY_CLOSED：不插入任何東西，原內容原封不動送去驗證。如果它仍然
     # 不合格（多半是別的原因，例如出處不足），下面的驗證會照實回報，這裡
@@ -105,7 +117,20 @@ for f in "$REJECTED"/*.md; do
 
   if [ "$id_rc" -ne 0 ] || [ -z "$id" ]; then
     printf 'RULE_REPAIR_STILL_INVALID\t%s\t修復後仍缺 id 欄位\n' "$f" >&2
-    unfixed=$((unfixed + 1))
+    missing_id=$((missing_id + 1))
+    rm -rf "$scratch"
+    continue
+  fi
+
+  # id 會直接拼進檔案路徑（$scratch/<id>.md、之後的 $OUT/<id>.md）。這個 id
+  # 來自修復後重讀的 frontmatter，跟 extract-rules-tfidf.sh 讀到的 id 一樣
+  # 是未經清洗的模型輸出，同一個信任邊界、同一個威脅（帶 `/` 或 `..` 的 id
+  # 會讓後面的 mv 寫到 $OUT 以外的路徑），所以用同一份 id_is_safe()
+  # （lib/rule-schema.sh）判斷，不要在這裡另外寫一份會漂移的複本。
+  if ! id_is_safe "$id"; then
+    printf 'RULE_REPAIR_UNSAFE_ID\t%s\tid=%s 含有不安全字元（只接受英數字/連字號/底線），拒絕寫入\n' \
+      "$f" "$id" >&2
+    unsafe_id=$((unsafe_id + 1))
     rm -rf "$scratch"
     continue
   fi
@@ -124,7 +149,7 @@ for f in "$REJECTED"/*.md; do
   if ! rule_validate "$named" 2>"$scratch/validate.err"; then
     printf 'RULE_REPAIR_STILL_INVALID\t%s\t修復後仍未通過驗證：%s\n' \
       "$f" "$(tr '\n' ' ' < "$scratch/validate.err")" >&2
-    unfixed=$((unfixed + 1))
+    still_invalid=$((still_invalid + 1))
     rm -rf "$scratch"
     continue
   fi
@@ -133,7 +158,6 @@ for f in "$REJECTED"/*.md; do
   if [ -e "$dest" ]; then
     printf 'RULE_REPAIR_CONFLICT\t%s\tid=%s 的目的地 %s 已存在，不覆蓋\n' \
       "$f" "$id" "$dest" >&2
-    unfixed=$((unfixed + 1))
     conflicts=$((conflicts + 1))
     rm -rf "$scratch"
     continue
@@ -155,5 +179,10 @@ for f in "$REJECTED"/*.md; do
   rescued=$((rescued + 1))
 done
 
-printf '救回 %s、仍不通過 %s\n' "$rescued" "$unfixed"
+# 「仍不通過」的總數維持原本的相容格式（呼叫端既有的字串比對還能用），
+# 括號裡的拆解是 Task 8 呼叫端要用來分辨五種失敗原因的地方：撞名是設定
+# 錯誤（要修），UNFIXABLE 是資料本身的問題（正常），兩者不該共用同一個數字。
+unfixed=$((unfixable + missing_id + unsafe_id + still_invalid + conflicts))
+printf '救回 %s、仍不通過 %s（UNFIXABLE %s、缺 id %s、id 不安全 %s、驗證未過 %s、撞名 %s）\n' \
+  "$rescued" "$unfixed" "$unfixable" "$missing_id" "$unsafe_id" "$still_invalid" "$conflicts"
 [ "$conflicts" -eq 0 ]

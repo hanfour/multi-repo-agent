@@ -297,6 +297,52 @@ test_layer_invalid_message_has_no_trailing_space() {
   esac
 }
 
+# --- id_is_safe()：兩條萃取管線（scripts/extract-rules-tfidf.sh、
+# scripts/rule-repair.sh）共用的路徑穿越防線（re-review Critical 1）。id
+# 會直接拼進檔案路徑（<out>/<id>.md），來源是未經清洗的模型輸出，只放行
+# 英數字、連字號、底線。直接測函式本身的定義域，不透過任一條呼叫端腳本——
+# 四個畸形輸入（../、單一 /、空字串、含換行）都要被拒絕，合法格式要放行。
+
+test_id_is_safe_rejects_path_traversal() {
+  if id_is_safe "../../../etc/passwd"; then
+    fail "含 ../ 的 id 應該被拒絕，卻被判定為安全"
+  else
+    ok "含 ../ 的 id 被拒絕"
+  fi
+}
+
+test_id_is_safe_rejects_single_slash() {
+  if id_is_safe "nestjs/evil"; then
+    fail "含 / 的 id 應該被拒絕，卻被判定為安全"
+  else
+    ok "含 / 的 id 被拒絕"
+  fi
+}
+
+test_id_is_safe_rejects_empty_string() {
+  if id_is_safe ""; then
+    fail "空 id 應該被拒絕，卻被判定為安全"
+  else
+    ok "空 id 被拒絕"
+  fi
+}
+
+test_id_is_safe_rejects_embedded_newline() {
+  if id_is_safe "$(printf 'nestjs-valid\nrule')"; then
+    fail "含換行的 id 應該被拒絕，卻被判定為安全"
+  else
+    ok "含換行的 id 被拒絕"
+  fi
+}
+
+test_id_is_safe_accepts_well_formed_id() {
+  if id_is_safe "nestjs-request-scoped-provider-in-singleton"; then
+    ok "合法格式（英數字/連字號）的 id 被放行"
+  else
+    fail "合法格式的 id 不該被拒絕"
+  fi
+}
+
 test_valid_fixture_passes
 test_missing_frontmatter_field
 test_missing_section
@@ -316,6 +362,11 @@ test_multiple_urls_on_one_line_are_all_counted
 test_section_prefix_match_is_boundary_anchored
 test_boundary_ok_accepts_crlf_heading
 test_layer_invalid_message_has_no_trailing_space
+test_id_is_safe_rejects_path_traversal
+test_id_is_safe_rejects_single_slash
+test_id_is_safe_rejects_empty_string
+test_id_is_safe_rejects_embedded_newline
+test_id_is_safe_accepts_well_formed_id
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

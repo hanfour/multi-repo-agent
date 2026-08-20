@@ -293,6 +293,120 @@ test_boundary7_existing_dest_file_is_not_overwritten() {
 }
 
 # =============================================================================
+# Critical 1（re-review）：修復後重讀的 id 含路徑穿越字元（企圖跳脫 <out>
+# 目錄，也企圖跳脫 scratch 暫存目錄——named="$scratch/${id}.md" 這一步在
+# id_is_safe 檢查之前就會踩到同一個威脅）。這個 id 跟 extract-rules-tfidf.sh
+# 讀到的 id 是同一種不可信輸入（未經清洗的模型輸出），要在寫檔之前就攔下
+# 來，不能靠 rule_validate 最後才發現的 RULE_ID_MISMATCH 收尾——mv 已經
+# 先執行了，那時候傷害已經造成。
+# =============================================================================
+test_critical1_unsafe_id_path_traversal_is_rejected() {
+  local rejected="$TMP/traversal-in" out="$TMP/traversal-out"
+  mkdir -p "$rejected" "$out"
+  rm -f /tmp/mra-rule-repair-traversal-probe.md
+  {
+    printf '%s\n' '---' 'id: ../../../tmp/mra-rule-repair-traversal-probe' 'layer: common' \
+      'frameworks: ["*"]' 'severity_default: HIGH' '---'
+    write_valid_body
+  } > "$rejected/common-clusters-88.md"
+
+  local out_msg; out_msg="$(run_repair "$rejected" "$out" 2>"$TMP/traversal.err")"
+  has "印出仍不通過 1" "$out_msg" "仍不通過 1"
+  has "id 不安全的計數是 1" "$out_msg" "id 不安全 1"
+  has "訊息用專屬 token 報 id 不安全" "$(cat "$TMP/traversal.err")" "RULE_REPAIR_UNSAFE_ID"
+  eq "沒有寫到 <out> 目錄之外" "0" \
+    "$([ -f /tmp/mra-rule-repair-traversal-probe.md ] && echo 1 || echo 0)"
+  eq "<out> 目錄裡沒有產出規則檔" "0" "$(count_md "$out")"
+  eq "原始檔案還留在 _rejected（拒絕寫入，留在原地供人查）" "1" \
+    "$([ -f "$rejected/common-clusters-88.md" ] && echo 1 || echo 0)"
+  rm -f /tmp/mra-rule-repair-traversal-probe.md
+}
+
+# =============================================================================
+# Important 2（re-review）：仍不通過的五種原因（UNFIXABLE、缺 id、id 不安全、
+# 驗證未過、撞名）要能各自算，不能全部併成同一個「仍不通過」數字——撞名是
+# 設定錯誤（要修），UNFIXABLE 是資料本身的問題（正常），Task 8 的呼叫端要
+# 分辨得出來。這裡故意讓五種原因各出現一次，驗證同一次 summary 裡五個數字
+# 都各自是 1，不是被併成同一個桶或彼此污染。
+# =============================================================================
+test_important2_summary_breaks_down_five_failure_reasons_separately() {
+  local rejected="$TMP/breakdown-in" out="$TMP/breakdown-out"
+  mkdir -p "$rejected" "$out"
+
+  # UNFIXABLE：沒有 ## 插入點。
+  cat > "$rejected/common-clusters-201.md" <<'EOF'
+---
+id: common-breakdown-no-heading
+layer: common
+frameworks: ["*"]
+severity_default: LOW
+模型輸出在這裡斷掉了，沒有任何 ## 章節標題。
+EOF
+
+  # 缺 id：frontmatter 完全沒有 id 這個 key（不是空值，是整個 key 都不在），
+  # 缺收尾 ---，走 INSERT 路徑修復後仍然缺。
+  {
+    printf '%s\n' '---' 'layer: common' 'frameworks: ["*"]' 'severity_default: LOW' ''
+    write_valid_body
+  } > "$rejected/common-clusters-202.md"
+
+  # id 不安全：路徑穿越。
+  {
+    printf '%s\n' '---' 'id: ../../../tmp/mra-rule-repair-breakdown-probe' 'layer: common' \
+      'frameworks: ["*"]' 'severity_default: LOW' '---'
+    write_valid_body
+  } > "$rejected/common-clusters-203.md"
+
+  # 驗證未過：已經封好 ---，但出處只有兩則，撐不起下限 3。
+  cat > "$rejected/common-clusters-204.md" <<'EOF'
+---
+id: common-breakdown-few-sources
+layer: common
+frameworks: ["*"]
+severity_default: LOW
+---
+## 觸發訊號
+x
+
+## 判準
+x
+
+## 嚴重度
+CRITICAL：x
+HIGH：x
+MEDIUM：x
+
+## 反例（不該報）
+x
+
+## 出處
+- https://github.com/example/repo/pull/1#discussion_r1
+- https://github.com/example/repo/pull/2#discussion_r2
+EOF
+
+  # 撞名：<out> 已經有同名檔。
+  printf 'SENTINEL：既有規則檔\n' > "$out/common-breakdown-conflict.md"
+  {
+    printf '%s\n' '---' 'id: common-breakdown-conflict' 'layer: common' \
+      'frameworks: ["*"]' 'severity_default: LOW' '---'
+    write_valid_body
+  } > "$rejected/common-clusters-205.md"
+
+  local out_msg; out_msg="$(run_repair "$rejected" "$out" 2>"$TMP/breakdown.err")"
+  has "救回 0（這批全部設計成不可救）" "$out_msg" "救回 0"
+  has "仍不通過總數是五種加總＝5" "$out_msg" "仍不通過 5"
+  has "UNFIXABLE 計數是 1" "$out_msg" "UNFIXABLE 1"
+  has "缺 id 計數是 1" "$out_msg" "缺 id 1"
+  has "id 不安全計數是 1" "$out_msg" "id 不安全 1"
+  has "驗證未過計數是 1" "$out_msg" "驗證未過 1"
+  has "撞名計數是 1" "$out_msg" "撞名 1"
+  eq "既有的規則檔內容沒被撞名的來源覆蓋" "SENTINEL：既有規則檔" \
+    "$(cat "$out/common-breakdown-conflict.md")"
+
+  rm -f /tmp/mra-rule-repair-breakdown-probe.md
+}
+
+# =============================================================================
 # 混合批次：驗證彙總數字同時算對「救回」與「仍不通過」，不是只在單一檔案的
 # 情境下才準——呼應 brief 的「一次報所有問題」精神，這裡是「一次處理整批」。
 # =============================================================================
@@ -352,6 +466,8 @@ test_boundary3_no_heading_at_all_is_unfixable
 test_boundary4_first_line_not_dash_is_unfixable
 test_boundary5_truncated_url_only_output_is_unfixable
 test_boundary7_existing_dest_file_is_not_overwritten
+test_critical1_unsafe_id_path_traversal_is_rejected
+test_important2_summary_breaks_down_five_failure_reasons_separately
 test_mixed_batch_summary_counts_are_correct
 test_missing_rejected_dir_fails_loudly
 test_script_never_discards_stderr_with_dev_null
