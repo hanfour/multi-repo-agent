@@ -168,5 +168,73 @@ eq "留下的是字母序前 15 名（outsider01..15），不是任意 15 人" \
   "$(printf 'outsider01\noutsider02\noutsider03\noutsider04\noutsider05\noutsider06\noutsider07\noutsider08\noutsider09\noutsider10\noutsider11\noutsider12\noutsider13\noutsider14\noutsider15')" \
   "$logins7"
 
+# --- 案例 8：corpus_filter_all 的診斷不能被吞掉 -----------------------------
+# lib/corpus-filter.sh 自己用各自的 token 報 FILTER_STAGE_FAILED（還指出是
+# bots／senior／quality／prose 哪一階段）。原本這裡對 corpus_filter_all 的
+# stderr 是 2>/dev/null，失敗時只看得到外層包出來的 FILTER_FAILED，查不出是
+# 四步裡的哪一步炸的——階段二 run-backtest.sh 對每次 review 呼叫做過同一件事
+# （2>/dev/null），結果整輪跑完拿到一個 0 bytes 的 log，完全無法診斷，而失敗
+# 原因後來證實有四種不同的形狀。
+OUT8="$TMP/out8"
+orig_quality_fn="$(declare -f corpus_filter_quality)"
+corpus_filter_quality() { return 5; }
+out8_diag="$(corpus_materialize_repo nestjs/nest "$OUT8" 2>&1 >/dev/null)"; rc8_diag=$?
+eval "$orig_quality_fn"
+[ "$rc8_diag" -ne 0 ] && ok "篩選階段失敗時退出碼非 0" || fail "應退出非 0，得到 $rc8_diag"
+has "印出外層的 FILTER_FAILED" "$out8_diag" "FILTER_FAILED"
+has "印出 corpus_filter_all 自己的 FILTER_STAGE_FAILED" "$out8_diag" "FILTER_STAGE_FAILED"
+has "指出是 quality 階段" "$out8_diag" "quality"
+
+# --- 案例 9：marker 已經原子寫入、layer.jsonl 還沒寫完就中斷——續跑要嘛短少
+# 要嘛跳過，絕對不能重複 --------------------------------------------------
+# 用一個「目標是 .jsonl 結尾就失敗、其餘照常放行」的假 mv 蓋過 PATH，模擬
+# 「被中斷在 marker 已經 mv 成功、layer.jsonl 還沒 mv 完」這個時間點——這正是
+# 修正後的設計刻意選的失敗方向：marker 先於 layer.jsonl 落地，中斷只會造成
+# 短少（可以跟 retention.tsv 對照抓出來），不會造成重複（兩條萃取路線會讀到
+# 被污染的語料卻毫無錯誤訊息）。
+OUT9="$TMP/out9"
+mkdir -p "$OUT9"
+STUBBIN="$TMP/stubbin"
+mkdir -p "$STUBBIN"
+cat > "$STUBBIN/mv" <<'STUB'
+#!/usr/bin/env bash
+# 只讓「目標是 .jsonl 結尾」的 mv 失敗（模擬 layer.jsonl 那次 mv 被中斷），
+# marker（.done-*）與鎖目錄用到的 mv 照常放行。
+last="${@: -1}"
+case "$last" in
+  *.jsonl) exit 1 ;;
+  *) exec /bin/mv "$@" ;;
+esac
+STUB
+chmod +x "$STUBBIN/mv"
+
+out9_crash="$(PATH="$STUBBIN:$PATH" corpus_materialize_repo nestjs/nest "$OUT9" 2>&1 >/dev/null)"
+rc9_crash=$?
+[ "$rc9_crash" -ne 0 ] && ok "layer.jsonl 寫入被中斷時退出碼非 0" || fail "應退出非 0，得到 $rc9_crash"
+has "印出 LAYER_WRITE_FAILED" "$out9_crash" "LAYER_WRITE_FAILED"
+if [ -f "$OUT9/.done-nestjs__nest" ]; then
+  ok "marker 確實先於 layer.jsonl 原子寫入成功（設計的重點）"
+else
+  fail "marker 應該已經寫成功——marker 要先於 layer.jsonl 落地才對"
+fi
+if [ -f "$OUT9/nestjs.jsonl" ]; then
+  fail "layer.jsonl 不該在這個中斷點被建立（mv 已被攔截失敗）"
+else
+  ok "layer.jsonl 確實還沒寫入（符合模擬的中斷點）"
+fi
+
+# 中斷後續跑（换回真正的 mv）：marker 已存在，應該直接短路跳過，不會重新
+# 處理、也不會把 layer.jsonl 補上——這正是「短少而非重複」的設計取捨，續跑
+# 本身仍然成功、不會有任何錯誤訊息，但筆數不能翻倍。
+out9_retry="$(corpus_materialize_repo nestjs/nest "$OUT9")"; rc9_retry=$?
+eq "續跑（真正的 mv）退出碼是 0（短路跳過）" "0" "$rc9_retry"
+eq "續跑印出跟 marker 一致的筆數" "1" "$out9_retry"
+if [ -f "$OUT9/nestjs.jsonl" ]; then
+  n9="$(wc -l < "$OUT9/nestjs.jsonl" | tr -d ' ')"
+  eq "layer.jsonl 筆數是 1（短少過的狀態），不是 2（沒有重複）" "1" "$n9"
+else
+  ok "layer.jsonl 仍然缺席（短少而非重複——短路後不會補寫）"
+fi
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
