@@ -119,6 +119,26 @@ rule_source_count() {
   rule_section "$1" 出處 | { grep -oE 'https?://[^[:space:]]+' || true; } | wc -l | tr -d ' '
 }
 
+# id_is_safe <id> — 兩條萃取管線（scripts/extract-rules-tfidf.sh、
+# scripts/rule-repair.sh）都會把 agent 產出的 id（未經清洗的模型輸出）直接
+# 拼進檔案路徑（如 <out>/<id>.md）。一個帶 `/` 或 `..` 的 id 會讓後面的 mv
+# 寫到目的地目錄以外的路徑，且不會有任何錯誤訊號——這是路徑穿越。只放行
+# 英數字、連字號、底線；這也剛好是 scripts/rule-agent.sh 的 prompt 本身要求
+# agent 產出的格式（「<層>-<用連字號的簡短英文描述>」）。
+#
+# 兩支呼叫端共用同一份判斷，不要各寫一份會漂移的複本：這裡是規則檔相關
+# 函式唯一的家（lib/rule-schema.sh 的檔頭已經這樣定位自己）。
+#
+# `*[!A-Za-z0-9_-]*` 這個 case pattern 是逐位元組比對整個字串，不是檔名
+# glob——含換行字元的 id（例如某些模型輸出把值截斷到下一行）一樣會被
+# `*` 涵蓋到，落在被拒絕的一邊，不需要額外處理 \n。
+id_is_safe() {
+  case "$1" in
+    ''|*[!A-Za-z0-9_-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 # rule_validate <file> — 合格回 0；不合格印出每個問題到 stderr 並回 1。
 # 一次收集所有問題再回報，不遇到第一個就 return——萃取階段一次會產幾十個
 # 規則檔，一次看到全部問題比修一個跑一次快得多。

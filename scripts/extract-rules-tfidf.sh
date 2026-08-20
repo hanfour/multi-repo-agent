@@ -35,6 +35,12 @@ mkdir -p "$OUT" "$OUT/_rejected" || exit 1
 #     裡都是從 0 重新編號的，不是全域唯一）。用來源檔案的 basename 當前綴
 #     消掉碰撞。
 [ -f "$OUT/_dropped.tsv" ] || : > "$OUT/_dropped.tsv"
+# agent 指令本身失敗（非 0 退出碼：額度用盡、認證失效、崩潰等）跟「出處不足
+# 被丟棄」是不同的失敗模式，不能共用 _dropped.tsv——那個檔案的語意是「這個
+# 群的資料本身不夠格」，agent 失敗是「這個群本來夠格，但呼叫失敗了」，讀
+# 記錄的人需要分得出這兩種。同樣以 append 累積、不截斷，理由跟 _dropped.tsv
+# 一樣：Step 6 對五層各呼叫一次，全部寫進同一個 --out 目錄。
+[ -f "$OUT/_agent_failed.tsv" ] || : > "$OUT/_agent_failed.tsv"
 CLUSTERS_TAG="$(basename "$CLUSTERS" .jsonl)"
 
 AGENT="${MRA_RULE_AGENT_CMD:-}"
@@ -42,15 +48,10 @@ AGENT="${MRA_RULE_AGENT_CMD:-}"
 
 # 產出的 id 會直接拼進檔案路徑（$OUT/<id>.md）。這個 id 來自 agent（外部、
 # 不可信）的原始輸出，不能直接信任——一個帶 `/` 或 `..` 的 id 會讓後面的 mv
-# 寫到 $OUT 以外的路徑。只放行英數字、連字號、底線；這也剛好是
-# scripts/rule-agent.sh 的 prompt 本身要求 agent 產出的格式
-# （「<層>-<用連字號的簡短英文描述>」）。
-id_is_safe() {
-  case "$1" in
-    ''|*[!A-Za-z0-9_-]*) return 1 ;;
-    *) return 0 ;;
-  esac
-}
+# 寫到 $OUT 以外的路徑。id_is_safe() 定義在 lib/rule-schema.sh：
+# scripts/rule-repair.sh 對同一個 id 有一模一樣的信任邊界（修復後重讀
+# frontmatter 拿到的 id 一樣是模型輸出），兩邊共用同一份判斷，不要各寫一份
+# 會漂移的複本。
 
 # 把還留在暫存檔（尚未 mv 到 $OUT/<id>.md）的不合格產出留底到
 # _rejected/，再清掉暫存檔並計數。給「id 缺欄位」「id 含不安全字元」
@@ -65,7 +66,7 @@ reject_from_tmp() {
   rejected=$((rejected + 1))
 }
 
-produced=0; dropped=0; rejected=0
+produced=0; dropped=0; rejected=0; agent_failed=0
 lineno=0
 while IFS= read -r cluster; do
   lineno=$((lineno + 1))
@@ -95,9 +96,28 @@ while IFS= read -r cluster; do
     exit 1
   fi
 
+  # n（群大小）跟 top_terms 只用來讓 _dropped.tsv／_agent_failed.tsv 這兩份
+  # 診斷紀錄可讀，不影響任何控制流程，但一樣不能用 2>/dev/null 吞掉退出碼
+  # 就算了——跟上面 cid／nsrc 的處理保持一致，才不會在同一個函式裡一半嚴謹
+  # 一半隨便。往上挪到 nsrc 判斷之後、丟棄門檻之前算，因為 agent 失敗（下面）
+  # 也需要這兩個值，不只丟棄分支要用。
+  n="$(printf '%s' "$cluster" | jq -r '.n' 2>/dev/null)"
+  n_rc=$?
+  if [ "$n_rc" -ne 0 ]; then
+    printf 'CLUSTER_LINE_INVALID\t%s\t第 %s 行（cluster=%s）的 n 欄位無法解析（jq 退出碼 %s）\n' \
+      "$CLUSTERS" "$lineno" "$cid" "$n_rc" >&2
+    exit 1
+  fi
+
+  terms="$(printf '%s' "$cluster" | jq -r '.top_terms | join(",")' 2>/dev/null)"
+  terms_rc=$?
+  if [ "$terms_rc" -ne 0 ]; then
+    printf 'CLUSTER_LINE_INVALID\t%s\t第 %s 行（cluster=%s）的 top_terms 欄位無法解析（jq 退出碼 %s）\n' \
+      "$CLUSTERS" "$lineno" "$cid" "$terms_rc" >&2
+    exit 1
+  fi
+
   if [ "$nsrc" -lt 3 ]; then
-    n="$(printf '%s' "$cluster" | jq -r '.n' 2>/dev/null)"
-    terms="$(printf '%s' "$cluster" | jq -r '.top_terms | join(",")' 2>/dev/null)"
     printf '%s\t%s\t%s\t%s\t出處只有 %s 則\n' "$CLUSTERS_TAG" "$cid" "$n" "$terms" "$nsrc" \
       >> "$OUT/_dropped.tsv"
     dropped_rc=$?
@@ -106,9 +126,21 @@ while IFS= read -r cluster; do
     continue
   fi
 
+  # agent 指令本身失敗（非驗證失敗——它根本沒機會被驗證）要有自己的持久
+  # 記錄，不能只印到 stderr：ARG_MAX 那次事故發生時，事後完全查不到是哪個
+  # cluster、多大、什麼主題失敗的，只剩一句已經捲走的 stderr。跟 _dropped.tsv
+  # 一樣的欄位形狀（tag、cluster id、n、top_terms），最後一欄換成 agent 的
+  # 退出碼。這個分支也不進 rejected 計數——rejected 是「有 raw 產出、但沒通過
+  # 檢查」，agent 失敗連 raw 產出都沒有，混進同一個數字會讓 summary 那句
+  # 「退回 K（驗證不過）」對這部分產出假的意涵。
   raw="$(printf '%s' "$cluster" | "$AGENT")" || {
-    printf 'AGENT_FAILED\tcluster=%s(%s)\n' "$cid" "$CLUSTERS_TAG" >&2
-    rejected=$((rejected + 1)); continue
+    agent_rc=$?
+    printf '%s\t%s\t%s\t%s\tagent 退出碼 %s\n' "$CLUSTERS_TAG" "$cid" "$n" "$terms" "$agent_rc" \
+      >> "$OUT/_agent_failed.tsv"
+    af_rc=$?
+    [ "$af_rc" -eq 0 ] || { echo "AGENT_FAILED_LOG_WRITE_FAILED：${OUT}/_agent_failed.tsv" >&2; exit 1; }
+    printf 'AGENT_FAILED\tcluster=%s(%s)\texit=%s\n' "$cid" "$CLUSTERS_TAG" "$agent_rc" >&2
+    agent_failed=$((agent_failed + 1)); continue
   }
 
   # id 從產出的 frontmatter 讀，檔名跟著它 —— rule_validate 會驗兩者一致，
@@ -148,5 +180,5 @@ while IFS= read -r cluster; do
   produced=$((produced + 1))
 done < "$CLUSTERS"
 
-printf '產出 %s、丟棄 %s（出處不足）、退回 %s（驗證不過）\n' \
-  "$produced" "$dropped" "$rejected"
+printf '產出 %s、丟棄 %s（出處不足）、退回 %s（驗證不過）、agent 失敗 %s\n' \
+  "$produced" "$dropped" "$rejected" "$agent_failed"

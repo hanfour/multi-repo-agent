@@ -155,6 +155,40 @@ SH
   eq "不落地成規則檔" "0" "$(ls "$out_dir"/*.md 2>/dev/null | wc -l | tr -d ' ')"
 }
 
+# agent 指令本身以非 0 退出（模擬額度用盡、認證失效、崩潰等）：這跟前兩個
+# 案例不同——前兩個是「agent 有輸出，但輸出的內容不合格」，這個是「agent
+# 根本沒有輸出可言」。沒有 raw 產出，_rejected/ 不該多出任何檔案；這個失敗
+# 也不該混進「退回（驗證不過）」的數字，因為它根本沒機會被驗證——要有自己
+# 的持久記錄（_agent_failed.tsv）跟自己的 summary 計數。
+test_agent_command_failure_is_recorded_separately() {
+  cat > "$STUB/failing-agent" <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+echo "模擬 agent 額度用盡或崩潰" >&2
+exit 17
+SH
+  chmod +x "$STUB/failing-agent"
+  local out_dir="$TMP/out-agent-failed" out
+  mkdir -p "$out_dir"
+  out="$(run_extract "$IN/nestjs-clusters.jsonl" "$out_dir" "$STUB/failing-agent" 2>&1)"
+
+  eq "agent 失敗不落地成任何規則檔" "0" "$(ls "$out_dir"/*.md 2>/dev/null | wc -l | tr -d ' ')"
+  eq "agent 失敗不留底到 _rejected（沒有 raw 產出可以留底）" "0" \
+    "$(ls "$out_dir/_rejected"/*.md 2>/dev/null | wc -l | tr -d ' ')"
+
+  has "stderr 印出 AGENT_FAILED" "$out" "AGENT_FAILED"
+  has "stderr 印出 agent 的退出碼" "$out" "exit=17"
+
+  eq "_agent_failed.tsv 恰好一筆（另一群出處不足，走的是丟棄，不是 agent 失敗）" \
+    "1" "$(grep -c . "$out_dir/_agent_failed.tsv")"
+  has "_agent_failed.tsv 記到來源檔案的 tag" "$(cat "$out_dir/_agent_failed.tsv")" "nestjs-clusters"
+  has "_agent_failed.tsv 記到 top_terms" "$(cat "$out_dir/_agent_failed.tsv")" "scope"
+  has "_agent_failed.tsv 記到 agent 的退出碼" "$(cat "$out_dir/_agent_failed.tsv")" "17"
+
+  has "summary 分開報 agent 失敗" "$out" "agent 失敗 1"
+  has "summary 的「退回（驗證不過）」沒有把 agent 失敗混進去" "$out" "退回 0（驗證不過）"
+}
+
 # 兩個不同的群，agent 都吐出同一個 id：第一個成功落地，第二個不該悄悄覆蓋
 # 掉第一個檔案——那是把一條已經驗證過的規則靜默銷毀。第二個要被記為
 # RULE_REJECTED，且第一個檔案的內容要維持原樣。
@@ -343,6 +377,7 @@ test_invalid_agent_output_is_rejected
 test_summary_counts
 test_agent_returns_empty_string
 test_agent_returns_valid_json_but_not_a_rule_file
+test_agent_command_failure_is_recorded_separately
 test_duplicate_id_from_different_clusters_does_not_overwrite
 test_malformed_cluster_line_fails_loudly
 test_empty_members_array_is_dropped
