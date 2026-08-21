@@ -11,9 +11,26 @@
 # common 層的上限：實測 common 層 81 條規則的完整注入區塊約 80 KB／4 萬
 # token，而單一 persona 檔本體只有 729 bytes——不設上限等於在每個 persona
 # 前面塞進 110 倍於它本體的內容，乘以 5 persona x 38 PR 更是不成比例。
-# rule_render_block 依 rule_source_count 由大到小只取前 N 條（預設 20），
-# 出處數相同時用 id 字典序決定，不依賴 for 迴圈展開 *.md 拿到的檔案系統
-# 順序——那個順序不是決定性的，換一台機器就可能不同。
+#
+# 上限是 token 預算，不是條數上限：A 路線（TF-IDF）跟 B 路線（taxonomy）
+# 在同一個「取前 N 條」上限下，注入的內容量差了 2.9 倍（A 的 common 層
+# 81 條規則永遠吃滿上限，B 的 common 層只有 8 條、吃不滿），而 prompt
+# 長度本身會影響 review 表現——這會讓兩條路線的回測比較被「prompt 多長」
+# 這個變因污染，不是規則品質的公平比較。改成 token 預算後，兩條路線在
+# 同一個預算下收斂到接近的注入量，量的落差只反映規則本身的長短，不是
+# 條數的落差。
+#
+# rule_render_block 依 rule_source_count 由大到小逐條累加（出處數相同時用
+# id 字典序決定），加上這一條會超過預算就停——不是先取前 N 條再看大小，
+# 是先算大小再決定要不要收這一條。不管 N 是多少都固定「至少收一條」，
+# 即使第一條本身就超過預算：預算設太小時如果連一條都不收，產出的是空
+# 區塊，跟「這層真的沒有規則」外觀上無法分辨。
+#
+# token 用「字元數 / 2」粗估，不引入 tokenizer 相依：這是刻意的粗糙估法，
+# 目的是讓兩條路線用同一把尺比較，不是產出對任何一個真實 LLM tokenizer
+# 都準的數字。兩條路線的規則本文都是同一種語言（中文為主）、同一種格式
+# （觸發訊號／判準／反例三段式敘述），用同一個粗估公式時誤差方向一致，
+# 不會因為估法本身的系統性偏差讓其中一條路線顯得比較「省」。
 #
 # 依賴 lib/rule-schema.sh 的 rule_field()／rule_section()／rule_source_count()／
 # id_is_safe()。呼叫端要自己 source 它（這支 lib 不 self-source，跟
@@ -21,16 +38,44 @@
 
 RULE_BLOCK_BEGIN="# --- BEGIN RULESET (auto-generated, do not edit) ---"
 RULE_BLOCK_END="# --- END RULESET ---"
-RULE_INJECT_DEFAULT_LIMIT=20
+RULE_INJECT_DEFAULT_TOKEN_BUDGET=5000
 
-# rule_render_block <rules_dir> <layer> [limit] — 把某層（含 common，對每層
-# 都適用）的規則渲染成一段可插入 persona 的文字，依出處數由大到小只取前
-# <limit> 條（預設 20，出處數同分用 id 字典序決定）。規則集是空的、目錄不
+# _rule_entry_text <file> — 組出這條規則要塞進渲染區塊的那一段文字（不含
+# BEGIN/END 包裝、不含開頭那句「額外檢查項...」引言）。抽成獨立函式一方面
+# 讓 rule_render_block 的累加迴圈保持單純（量測跟組字用同一份文字，不會
+# 兩邊算出不一致的大小），另一方面讓測試可以直接量出「這一條規則會占用
+# 多少 token」，不用反推整個區塊的大小去猜邊界在哪。
+_rule_entry_text() {
+  local file="$1" id sev trigger criteria counter
+  id="$(rule_field "$file" id)"
+  sev="$(rule_field "$file" severity_default)"
+  trigger="$(rule_section "$file" 觸發訊號 | tr -d '\r' | sed '/^$/d')"
+  criteria="$(rule_section "$file" 判準 | tr -d '\r' | sed '/^$/d')"
+  counter="$(rule_section "$file" 反例 | tr -d '\r' | sed '/^$/d')"
+  printf '\n- [%s] 預設嚴重度 %s\n  觸發：%s\n  判準：%s\n  不要報：%s\n' \
+    "$id" "$sev" "$trigger" "$criteria" "$counter"
+}
+
+# _rule_char_count <text> — token 粗估用的字元數。用 wc -m（字元數）而不是
+# wc -c（位元組數）：規則內容以中文為主，UTF-8 下一個中文字元是 3 bytes，
+# 用位元組數/2 估 token 會把中文內容的 token 數高估將近 3 倍。強制
+# LC_ALL=en_US.UTF-8 是為了不依賴呼叫環境剛好把 locale 設成 UTF-8 aware——
+# wc -m 在 C locale 下會退化成等同 wc -c；en_US.UTF-8 在多數 macOS/Linux
+# 開發機與 CI image 上都有安裝。
+_rule_char_count() {
+  local n; n="$(LC_ALL=en_US.UTF-8 wc -m <<< "$1")"
+  printf '%s' "${n//[[:space:]]/}"
+}
+
+# rule_render_block <rules_dir> <layer> [token_budget] — 把某層（含
+# common，對每層都適用）的規則渲染成一段可插入 persona 的文字，依出處數
+# 由大到小逐條累加，直到加上下一條會超過 <token_budget>（預設 5000，粗估
+# 見上）就停；至少收一條，即使第一條就超過預算。規則集是空的、目錄不
 # 存在、或這層沒有任何規則時回傳空字串——不是回傳一個沒有內容的 BEGIN/END
 # 區塊，那樣會讓 rule_inject_persona 在 persona 裡插入一段看起來像壞掉的
 # 空注入。
 rule_render_block() {
-  local dir="$1" layer="$2" limit="${3:-$RULE_INJECT_DEFAULT_LIMIT}"
+  local dir="$1" layer="$2" budget="${3:-$RULE_INJECT_DEFAULT_TOKEN_BUDGET}"
   if [ ! -d "$dir" ]; then
     # 目錄不存在通常是呼叫端傳錯路徑，不是「這層規則真的是空的」——兩者
     # 對外觀察都是回傳空字串，但成因不同，所以還是印出診斷，只是仍然
@@ -39,17 +84,23 @@ rule_render_block() {
     return 0
   fi
 
-  case "$limit" in
-    ''|*[!0-9]*)
-      printf 'RULE_BLOCK_LIMIT_INVALID\t%s\t不是非負整數，改用預設值 %s\n' \
-        "$limit" "$RULE_INJECT_DEFAULT_LIMIT" >&2
-      limit="$RULE_INJECT_DEFAULT_LIMIT"
+  # 0 或負數的預算沒有合理意思：「至少收一條」這個不變式會讓它們仍然收
+  # 一條規則進來，不會靜默產出空區塊，但沒有訊號的話，呼叫端會以為自己
+  # 設定的極小預算真的生效了，其實是被悄悄忽略、退回預設值——所以連同
+  # 非數字、空字串一起，都印出診斷再退回預設。
+  case "$budget" in
+    ''|*[!0-9]*|0)
+      printf 'RULE_BLOCK_BUDGET_INVALID\t%s\t不是正整數，改用預設值 %s\n' \
+        "$budget" "$RULE_INJECT_DEFAULT_TOKEN_BUDGET" >&2
+      budget="$RULE_INJECT_DEFAULT_TOKEN_BUDGET"
       ;;
   esac
 
-  # 先湊成「出處數<TAB>id<TAB>檔案路徑」清單再排序取前 N 條：出處數由大到
-  # 小（-k1,1nr），同分用 id 字典序（-k2,2）。LC_ALL=C 讓排序結果不受執行
+  # 先湊成「出處數<TAB>id<TAB>檔案路徑」清單再排序：出處數由大到小
+  # （-k1,1nr），同分用 id 字典序（-k2,2）。LC_ALL=C 讓排序結果不受執行
   # 環境的 locale 影響，兩條萃取路線（TF-IDF／taxonomy）比較時才公平。
+  # 不在這裡截斷——token 預算要逐條累加著看才知道在哪裡停，不像純條數
+  # 上限可以先 head -n 再處理。
   local ranked f
   ranked="$(
     for f in "$dir"/*.md; do
@@ -77,20 +128,20 @@ rule_render_block() {
   )"
   [ -n "$ranked" ] || return 0
 
-  local out="" cnt id file sev trigger criteria counter
+  local out="" cnt id file entry entry_tokens tokens_used=0 taken=0
   while IFS=$'\t' read -r cnt id file; do
     [ -n "$file" ] || continue
-    sev="$(rule_field "$file" severity_default)"
-    trigger="$(rule_section "$file" 觸發訊號 | tr -d '\r' | sed '/^$/d')"
-    criteria="$(rule_section "$file" 判準 | tr -d '\r' | sed '/^$/d')"
-    counter="$(rule_section "$file" 反例 | tr -d '\r' | sed '/^$/d')"
-    out="${out}
-- [${id}] 預設嚴重度 ${sev}
-  觸發：${trigger}
-  判準：${criteria}
-  不要報：${counter}
-"
-  done < <(printf '%s\n' "$ranked" | head -n "$limit")
+    entry="$(_rule_entry_text "$file")"
+    entry_tokens=$(( $(_rule_char_count "$entry") / 2 ))
+    # 只有已經收過至少一條之後，才會因為「加上這條會超預算」而停；第一條
+    # 永遠收，不管它自己有多長——見上面「至少收一條」的說明。
+    if [ "$taken" -gt 0 ] && [ $((tokens_used + entry_tokens)) -gt "$budget" ]; then
+      break
+    fi
+    out="${out}${entry}"
+    tokens_used=$((tokens_used + entry_tokens))
+    taken=$((taken + 1))
+  done < <(printf '%s\n' "$ranked")
 
   [ -n "$(printf '%s' "$out" | tr -d '[:space:]')" ] || return 0
   printf '%s\n%s\n%s\n' "$RULE_BLOCK_BEGIN" \
