@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # 規則注入 persona 的 FOCUS 區塊 (lib/rule-inject.sh)。
 #
-# 這支測試除了驗基本渲染／注入之外，特別針對 task-6-brief.md 參考實作裡
-# 已知會踩到的三個地方各補一組測試：
-#   1. rule_render_block 的上限（common 層規則太多，注入區塊會炸到 80 KB／
-#      4 萬 token）——上限、排序（出處數大到小、同分用 id 字典序）、
-#      非數字上限的容錯都要測。
+# 這支測試除了驗基本渲染／注入之外，特別針對已知會踩到的四個地方各補一組
+# 測試：
+#   1. rule_render_block 的上限是 token 預算，不是條數上限（common 層規則
+#      太多，注入區塊會炸到 80 KB／4 萬 token）——A、B 兩條路線在同一個
+#      「取前 N 條」上限下，注入量差了 2.9 倍（A 路線 common 層 81 條永遠
+#      吃滿，B 路線 common 層只有 8 條吃不滿），改成 token 預算逐條累加，
+#      兩條路線才能公平比較。排序（出處數大到小、同分用 id 字典序）、
+#      邊界（預算剛好卡在兩條規則之間、第一條就超預算仍要收、0／負數預算
+#      的容錯）都要測。
 #   2. rule_inject_persona 的注入錨點不能寫死找 `^SCOPE NOTE:`——
 #      agents/personas/ 裡五個 persona 只有兩個真的有 SCOPE NOTE
 #      （performance-hawk.md、api-contract-guardian.md），其餘三個
@@ -16,6 +20,9 @@
 #      FOCUS 區塊（用「KENT BECK 11 PRINCIPLES:」取代）的 persona 不能中止
 #      整批，也不能吞掉不處理，要原樣複製並印警告，讓 review 流程仍然讀
 #      得到它。
+#   4. 重複注入的冪等性不能只看「BEGIN 標記出現次數」——插入邏輯在 END
+#      標記後多印一行空白間距，剝除邏輯如果沒有對稱吞掉它，內容會一輪一輪
+#      地變長，但「BEGIN 只出現一次」這個訊號完全看不出來。
 set -uo pipefail
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$MRA_DIR/lib/corpus-targets.sh"
@@ -145,64 +152,134 @@ test_unsafe_id_is_skipped_with_warning() {
   has "印出 RULE_RENDER_SKIP_UNSAFE_ID" "$warn" "RULE_RENDER_SKIP_UNSAFE_ID"
 }
 
-test_invalid_limit_falls_back_to_default_with_warning() {
+test_invalid_budget_falls_back_to_default_with_warning() {
   local block warn
-  block="$(rule_render_block "$FIX/rules" common abc 2>"$OUT/limit-invalid.warn")"
-  warn="$(cat "$OUT/limit-invalid.warn")"
-  has "非數字上限印出警告" "$warn" "RULE_BLOCK_LIMIT_INVALID"
+  block="$(rule_render_block "$FIX/rules" common abc 2>"$OUT/budget-invalid.warn")"
+  warn="$(cat "$OUT/budget-invalid.warn")"
+  has "非數字預算印出警告" "$warn" "RULE_BLOCK_BUDGET_INVALID"
   has "仍然照樣渲染（退回預設值）" "$block" "common-debug-artifact"
 }
 
 # ---------------------------------------------------------------------------
-# rule_render_block：上限與排序（已裁決的限制：common 層只取前 N 條，
-# 出處數由大到小，同分用 id 字典序）
+# rule_render_block：token 預算與排序（已裁決的限制：A、B 兩條路線在同一個
+# 「取前 N 條」上限下注入量差了 2.9 倍，因為 A 路線規則數遠多於 B——改成
+# token 預算逐條累加，依出處數由大到小、同分用 id 字典序，加上這條會超
+# 預算就停，兩條路線才能公平比較）
 # ---------------------------------------------------------------------------
 
-test_limit_takes_top_n_by_source_count_desc() {
+test_render_block_takes_highest_ranked_rule_first() {
   local dir="$OUT/rank-basic"
   write_rank_rule "$dir" a-many nestjs 10
   write_rank_rule "$dir" b-many nestjs 10
   write_rank_rule "$dir" m-mid nestjs 5
   write_rank_rule "$dir" z-few nestjs 3
-  local block; block="$(rule_render_block "$dir" nestjs 2)"
-  has "含出處數最高的 a-many" "$block" "[a-many]"
-  has "含出處數並列最高的 b-many" "$block" "[b-many]"
-  lacks "不含排第三的 m-mid" "$block" "[m-mid]"
-  lacks "不含出處數最少的 z-few" "$block" "[z-few]"
+  # 預算剛好等於出處數最高那條規則自己的大小：逼所有排序都要對，任何
+  # 第二名以後（不管是同分的 b-many 還是分數較低的 m-mid/z-few）都該被
+  # 擋下來，因為累加上去一定超預算。
+  local first_tokens
+  first_tokens=$(( $(_rule_char_count "$(_rule_entry_text "$dir/a-many.md")") / 2 ))
+  local block; block="$(rule_render_block "$dir" nestjs "$first_tokens")"
+  has "出處數最高的 a-many 入選" "$block" "[a-many]"
+  lacks "同分但排第二的 b-many 沒入選（加上去會超預算）" "$block" "[b-many]"
+  lacks "出處數較低的 m-mid 沒入選" "$block" "[m-mid]"
+  lacks "出處數最少的 z-few 沒入選" "$block" "[z-few]"
 }
 
-test_limit_tie_break_by_id_ascending() {
-  local dir="$OUT/rank-basic"  # 沿用上一個測試建立的 fixture
-  local block; block="$(rule_render_block "$dir" nestjs 1)"
-  has "同分時 id 字典序較小的 a-many 入選" "$block" "[a-many]"
-  lacks "同分但字典序較大的 b-many 沒入選" "$block" "[b-many]"
-}
-
-# 上一個測試用的 fixture 檔名剛好等於 id，字母序跟 glob 展開順序一致，
-# 就算排序退化成「沒有真的比較 id、只是保留 for 迴圈展開 *.md 的原始順
-# 序」也會巧合地通過。這裡故意讓檔名字母序跟 id 字典序相反：如果實作真的
-# 依 id 字典序決定同分名次，「id 字典序較小」那個 id 該贏，跟它的檔名或
-# glob 展開順序無關。
-test_limit_tie_break_is_by_id_not_glob_order() {
+# 上一個測試如果只驗證「入選了 a-many」，排序退化成保留 for 迴圈展開
+# *.md 的原始順序（沒有真的比較 id）也可能巧合通過（如果 fixture 檔名剛好
+# 等於 id，字母序跟 glob 順序一致）。這裡故意讓檔名字母序跟 id 字典序相反：
+# 如果實作真的依 id 字典序決定同分名次，「id 字典序較小」那個 id 該贏，
+# 跟它的檔名或 glob 展開順序無關。
+test_render_block_tie_break_is_by_id_not_glob_order() {
   local dir="$OUT/rank-tiebreak"
   write_rank_rule_named "$dir" aaa-glob-first zzz-id-last nestjs 10
   write_rank_rule_named "$dir" zzz-glob-last aaa-id-first nestjs 10
-  local block; block="$(rule_render_block "$dir" nestjs 1)"
+  local first_tokens
+  first_tokens=$(( $(_rule_char_count "$(_rule_entry_text "$dir/zzz-glob-last.md")") / 2 ))
+  local block; block="$(rule_render_block "$dir" nestjs "$first_tokens")"
   has "id 字典序較小的 aaa-id-first 入選（即使它的檔名／glob 順序在後）" \
     "$block" "[aaa-id-first]"
   lacks "id 字典序較大的 zzz-id-last 沒入選（即使它的檔名／glob 順序在前）" \
     "$block" "[zzz-id-last]"
 }
 
-test_default_limit_is_20() {
-  local dir="$OUT/rank-default" i
-  for ((i = 1; i <= 21; i++)); do
-    write_rank_rule "$dir" "$(printf 'r%02d' "$i")" nestjs "$((30 - i))"
-  done
-  local block; block="$(rule_render_block "$dir" nestjs)"  # 不傳第三個參數
-  has "第 1 名（出處數最高）入選" "$block" "[r01]"
-  has "第 20 名剛好卡在上限內" "$block" "[r20]"
-  lacks "第 21 名（出處數最低）被上限排除" "$block" "[r21]"
+# 預算剛好卡在兩條規則之間時，取第一條、不取第二條——同一組 fixture 再用
+# 兩條合計的預算跑一次，證明「卡住」真的是跟預算大小有關，不是恆定的排除
+# （否則第一個斷言可能只是巧合通過）。
+test_budget_boundary_takes_first_rule_not_second() {
+  local dir="$OUT/rank-boundary"
+  write_rank_rule "$dir" boundary-first nestjs 10
+  write_rank_rule "$dir" boundary-second nestjs 5
+  local first_tokens second_tokens both_tokens
+  first_tokens=$(( $(_rule_char_count "$(_rule_entry_text "$dir/boundary-first.md")") / 2 ))
+  second_tokens=$(( $(_rule_char_count "$(_rule_entry_text "$dir/boundary-second.md")") / 2 ))
+  both_tokens=$((first_tokens + second_tokens))
+
+  local block; block="$(rule_render_block "$dir" nestjs "$first_tokens")"
+  has "預算剛好卡在第一條大小時，第一條入選" "$block" "[boundary-first]"
+  lacks "第二條沒入選（加上去會超預算）" "$block" "[boundary-second]"
+
+  local block2; block2="$(rule_render_block "$dir" nestjs "$both_tokens")"
+  has "預算夠大時，第一條仍然入選" "$block2" "[boundary-first]"
+  has "預算夠大時，第二條也入選——證明前面卡住是預算大小造成的，不是恆定排除" \
+    "$block2" "[boundary-second]"
+}
+
+# 至少收一條：即使第一條（唯一一條候選）自己就超過預算，也要收，不然
+# 預算設太小時產出的是空區塊，跟「這層真的沒有規則」外觀上完全無法分辨。
+test_first_rule_included_even_if_it_alone_exceeds_budget() {
+  local dir="$OUT/rank-oversized"
+  write_rank_rule "$dir" oversized-only nestjs 10
+  local block; block="$(rule_render_block "$dir" nestjs 1)"  # 1 token，任何真實規則都裝不下
+  has "預算小到連一條都裝不下時，仍然收下唯一一條" "$block" "[oversized-only]"
+}
+
+test_zero_or_negative_budget_warns_and_falls_back_to_default() {
+  local block_zero warn_zero block_neg warn_neg
+  block_zero="$(rule_render_block "$FIX/rules" common 0 2>"$OUT/budget-zero.warn")"
+  warn_zero="$(cat "$OUT/budget-zero.warn")"
+  has "預算 0 印出警告" "$warn_zero" "RULE_BLOCK_BUDGET_INVALID"
+  has "退回預設值後仍然照樣渲染（不是靜默產出空區塊）" "$block_zero" "common-debug-artifact"
+
+  block_neg="$(rule_render_block "$FIX/rules" common -5 2>"$OUT/budget-neg.warn")"
+  warn_neg="$(cat "$OUT/budget-neg.warn")"
+  has "負數預算印出警告" "$warn_neg" "RULE_BLOCK_BUDGET_INVALID"
+  has "退回預設值後仍然照樣渲染（不是靜默產出空區塊）" "$block_neg" "common-debug-artifact"
+}
+
+test_render_block_is_deterministic() {
+  local block1 block2
+  block1="$(rule_render_block "$FIX/rules" nestjs 5000)"
+  block2="$(rule_render_block "$FIX/rules" nestjs 5000)"
+  eq "同樣輸入兩次產出完全一致（決定性）" "$block1" "$block2"
+}
+
+# 這是這次改動真正要解決的問題：改成 token 預算之前，A 路線（tfidf，
+# common 層 81 條）在「取前 20 條」上限下永遠吃滿，B 路線（taxonomy，
+# common 層只有 8 條）永遠吃不滿，注入量差了 2.9 倍——那是條數落差造成的
+# prompt 長度落差，不是規則品質的差異，會污染兩條路線的回測比較。改成
+# token 預算後，兩條路線在同一個預算下應該收斂到接近的注入量。
+test_two_routes_converge_in_block_size_under_same_budget() {
+  local tfidf_block taxonomy_block tfidf_chars taxonomy_chars
+  tfidf_block="$(rule_render_block "$MRA_DIR/agents/review-rules/tfidf" nestjs 5000)"
+  taxonomy_block="$(rule_render_block "$MRA_DIR/agents/review-rules/taxonomy" nestjs 5000)"
+  tfidf_chars="$(_rule_char_count "$tfidf_block")"
+  taxonomy_chars="$(_rule_char_count "$taxonomy_block")"
+  local larger smaller diff pct
+  if [ "$tfidf_chars" -ge "$taxonomy_chars" ]; then
+    larger="$tfidf_chars"; smaller="$taxonomy_chars"
+  else
+    larger="$taxonomy_chars"; smaller="$tfidf_chars"
+  fi
+  diff=$((larger - smaller))
+  pct=$((diff * 100 / larger))
+  # 舊制（取前 20 條）下兩條路線差了 2.9 倍（190% 的相對差距）。這裡只要
+  # 求差距遠低於那個量級，不要求完全相等——區塊末尾「最後一條規則的
+  # 剩餘空間用不滿」本來就會讓兩條路線有一點落差，重點是不再是「條數差
+  # 造成的量級落差」。
+  [ "$pct" -le 30 ] \
+    && ok "tfidf/taxonomy 在同一個 5000 token 預算下區塊大小接近（差距 ${pct}%，tfidf=${tfidf_chars} chars taxonomy=${taxonomy_chars} chars）" \
+    || fail "差距 ${pct}% 太大，改回條數上限的問題可能還在：tfidf=${tfidf_chars} chars taxonomy=${taxonomy_chars} chars"
 }
 
 # ---------------------------------------------------------------------------
@@ -379,11 +456,14 @@ test_block_omits_sources
 test_empty_ruleset_produces_no_block
 test_missing_rules_dir_warns_and_returns_empty
 test_unsafe_id_is_skipped_with_warning
-test_invalid_limit_falls_back_to_default_with_warning
-test_limit_takes_top_n_by_source_count_desc
-test_limit_tie_break_by_id_ascending
-test_limit_tie_break_is_by_id_not_glob_order
-test_default_limit_is_20
+test_invalid_budget_falls_back_to_default_with_warning
+test_render_block_takes_highest_ranked_rule_first
+test_render_block_tie_break_is_by_id_not_glob_order
+test_budget_boundary_takes_first_rule_not_second
+test_first_rule_included_even_if_it_alone_exceeds_budget
+test_zero_or_negative_budget_warns_and_falls_back_to_default
+test_render_block_is_deterministic
+test_two_routes_converge_in_block_size_under_same_budget
 test_inject_preserves_original_sections
 test_inject_places_block_after_focus_and_before_scope_note
 test_inject_places_block_after_focus_when_no_scope_note
