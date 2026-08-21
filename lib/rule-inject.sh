@@ -233,12 +233,22 @@ rule_inject_persona() {
   fi
 }
 
-# rule_inject_all <rules_dir> <layer> <out_persona_dir> [persona_src_dir] —
-# 對每個 persona 各做一次注入。<persona_src_dir> 預設是這支 lib 所在 repo
-# 的 agents/personas（用 BASH_SOURCE 自己算 repo 根目錄，跟 lib/*.sh 其他
-# 檔案的作法一致，不依賴呼叫端先定義好 MRA_DIR——brief 原本的參考實作直接
-# 用 ${MRA_DIR} 卻沒有定義它，這個變數在 lib/*.sh 裡不存在）。第四個參數
-# 是額外開的測試用覆蓋點，不影響三參數呼叫的預設行為。
+# rule_inject_all <rules_dir> <layer> <out_persona_dir> [persona_src_dir]
+# [token_budget] — 對每個 persona 各做一次注入。<persona_src_dir> 預設是這支
+# lib 所在 repo 的 agents/personas（用 BASH_SOURCE 自己算 repo 根目錄，跟
+# lib/*.sh 其他檔案的作法一致，不依賴呼叫端先定義好 MRA_DIR——brief 原本的
+# 參考實作直接用 ${MRA_DIR} 卻沒有定義它，這個變數在 lib/*.sh 裡不存在）。
+# 第四個參數是額外開的測試用覆蓋點，不影響三參數呼叫的預設行為。
+#
+# 第五個參數 <token_budget> 轉傳給 rule_render_block（見該函式），省略或傳
+# 空字串時完全不改變既有行為——連呼叫 rule_render_block 時都不多帶那個參數，
+# 不是傳一個「空字串」進去：rule_render_block 把空字串預算視為畸形輸入，會
+# 印 RULE_BLOCK_BUDGET_INVALID 警告再退回預設值，對「呼叫端根本沒打算覆寫」
+# 的正常呼叫印出這種警告是誤報。這個參數是 Task 8（帶規則回測）補上的：
+# run-rule-backtest.sh 要能覆寫 token 預算並讓它真的傳到 rule_render_block，
+# 但這個函式原本沒有任何管道能做到——不透過這裡就得在呼叫端重寫一份
+# 「列 persona、跳過 README、處理沒有 FOCUS 的情況」的邏輯，那樣兩份邏輯會
+# 漂移。
 #
 # 遇到「persona 沒有 FOCUS」（rule_inject_persona 回傳 2）不中止整批：這是
 # persona 本身的既有結構（例如 test-architect.md 用「KENT BECK 11
@@ -251,13 +261,19 @@ rule_inject_all() {
   local rules_dir="$1" layer="$2" out_dir="$3"
   local this_dir; this_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   local src="${4:-$this_dir/agents/personas}"
+  local budget="${5:-}"
   # persona 來源目錄不存在是設定錯誤，不是「剛好沒有 persona」的合法狀態
   # ——跟 rules_dir 不同，這個專案的 persona 目錄本來就該一直存在。悄悄
   # 回傳 n=0 會讓呼叫端誤以為注入完成了、只是零筆，看不出來其實是路徑錯了。
   [ -d "$src" ] || { printf 'RULE_INJECT_PERSONA_SRC_MISSING\t%s\n' "$src" >&2; return 1; }
   mkdir -p "$out_dir" || return 1
 
-  local block; block="$(rule_render_block "$rules_dir" "$layer")"
+  local block
+  if [ -n "$budget" ]; then
+    block="$(rule_render_block "$rules_dir" "$layer" "$budget")"
+  else
+    block="$(rule_render_block "$rules_dir" "$layer")"
+  fi
 
   local p n=0
   for p in "$src"/*.md; do

@@ -440,6 +440,36 @@ test_inject_all_fails_loudly_when_persona_src_missing() {
   has "印出 RULE_INJECT_PERSONA_SRC_MISSING" "$out" "RULE_INJECT_PERSONA_SRC_MISSING"
 }
 
+# 第五個參數（token_budget）是 Task 8 補上的：run-rule-backtest.sh 要能覆寫
+# token 預算並讓它真的傳到 rule_render_block，這裡直接驗證轉傳確實發生（用
+# 一個小到只能收下出處數最高那條規則的預算，觀察注入結果只含那一條）。
+test_inject_all_forwards_explicit_token_budget_to_render_block() {
+  local dir="$OUT/budget-forward-rules"
+  write_rank_rule "$dir" budget-fwd-many nestjs 10
+  write_rank_rule "$dir" budget-fwd-few nestjs 3
+  local tiny_budget
+  tiny_budget=$(( $(_rule_char_count "$(_rule_entry_text "$dir/budget-fwd-many.md")") / 2 ))
+  mkdir -p "$OUT/budget-fwd-personas"
+  cp "$FIX/persona.md" "$OUT/budget-fwd-personas/has-focus.md"
+  rule_inject_all "$dir" nestjs "$OUT/budget-fwd-out" "$OUT/budget-fwd-personas" \
+    "$tiny_budget" >/dev/null 2>"$OUT/budget-fwd.warn"
+  local body; body="$(cat "$OUT/budget-fwd-out/has-focus.md")"
+  has "出處數最高的規則入選（預算轉傳生效）" "$body" "[budget-fwd-many]"
+  lacks "出處數較低的規則沒入選（加上去會超過轉傳的小預算）" "$body" "[budget-fwd-few]"
+}
+
+# 省略第五個參數要完全不改變既有行為：不能連呼叫 rule_render_block 時都多帶
+# 一個空字串當預算——那樣會被判定成畸形輸入，印出 RULE_BLOCK_BUDGET_INVALID
+# 這種對「呼叫端根本沒打算覆寫」的正常呼叫而言是誤報的警告。
+test_inject_all_omitted_budget_does_not_warn() {
+  mkdir -p "$OUT/budget-omit-personas"
+  cp "$FIX/persona.md" "$OUT/budget-omit-personas/has-focus.md"
+  rule_inject_all "$FIX/rules" nestjs "$OUT/budget-omit-out" \
+    "$OUT/budget-omit-personas" >/dev/null 2>"$OUT/budget-omit.warn"
+  lacks "省略預算參數不印出 RULE_BLOCK_BUDGET_INVALID" \
+    "$(cat "$OUT/budget-omit.warn")" "RULE_BLOCK_BUDGET_INVALID"
+}
+
 # =============================================================================
 # 靜態檢查：這個專案已經為「2>/dev/null 吞掉診斷」付過四次代價，鎖住
 # lib/rule-inject.sh 裡不會出現這個模式。
@@ -476,6 +506,8 @@ test_existing_unterminated_begin_marker_is_rejected
 test_inject_all_default_persona_dir_resolves_without_external_mra_dir
 test_inject_all_skips_no_focus_persona_without_aborting_batch
 test_inject_all_fails_loudly_when_persona_src_missing
+test_inject_all_forwards_explicit_token_budget_to_render_block
+test_inject_all_omitted_budget_does_not_warn
 test_lib_never_discards_stderr_with_dev_null
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
