@@ -177,15 +177,25 @@ rule_validate() {
     problems=$((problems + 1))
   fi
 
-  local layer; layer="$(rule_field "$f" layer)"
-  if [ -n "$layer" ] && ! corpus_layers | grep -qx "$layer"; then
+  # 清單一律先收進變數再用 here-string 餵給 grep，不寫成 `producer | grep -q`。
+  # `grep -q` 配到就立刻退出，producer 還沒寫完就吃到 SIGPIPE 回 141，呼叫端
+  # 開著 pipefail 時整條管線被判成失敗，`!` 再反轉成「不合法」。實測 2026-08-22
+  # 那一輪回測就是這樣掛的：81 個 layer=common 的規則檔隨機中了 2 個，訊息
+  # 印出來還自相矛盾（「common 不在合法清單：common nestjs rails react vue」）。
+  # 只打到 common 是因為它是清單第一行，grep 最早退出、競態視窗最大。
+  local layer valid_layers
+  layer="$(rule_field "$f" layer)"
+  valid_layers="$(corpus_layers)"
+  if [ -n "$layer" ] && ! grep -qxF "$layer" <<<"$valid_layers"; then
     printf 'RULE_LAYER_INVALID\t%s\t%s 不在合法清單：%s\n' \
       "$f" "$layer" "$(corpus_layers | paste -sd ' ' -)" >&2
     problems=$((problems + 1))
   fi
 
-  local sev; sev="$(rule_field "$f" severity_default)"
-  if [ -n "$sev" ] && ! printf '%s\n' $RULE_VALID_SEVERITIES | grep -qx "$sev"; then
+  local sev valid_sevs
+  sev="$(rule_field "$f" severity_default)"
+  valid_sevs="$(printf '%s\n' $RULE_VALID_SEVERITIES)"
+  if [ -n "$sev" ] && ! grep -qxF "$sev" <<<"$valid_sevs"; then
     printf 'RULE_SEVERITY_INVALID\t%s\t%s 不在合法清單：%s\n' \
       "$f" "$sev" "$RULE_VALID_SEVERITIES" >&2
     problems=$((problems + 1))

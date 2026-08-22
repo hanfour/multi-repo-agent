@@ -343,6 +343,57 @@ test_id_is_safe_accepts_well_formed_id() {
   fi
 }
 
+# grep -q 會在配到的當下退出，producer 還沒寫完就吃到 SIGPIPE 回 141。呼叫端
+# 開著 pipefail 時，`! producer | grep -q` 會把這個 141 判成「沒配到」。2026-08-22
+# 那一輪回測就是這樣掛的：81 個 layer=common 的規則檔隨機中了 2 個，訊息還
+# 自相矛盾（「common 不在合法清單：common nestjs rails react vue」），整輪回測
+# 因為 RULES_INVALID 直接中止。
+#
+# 下面三支把 producer 的輸出撐到超過 pipe buffer（64KB），讓 SIGPIPE 必然發生，
+# 不靠 sleep 賭時序。合法值放第一行，grep 最早退出、競態視窗最大。
+_big_tail() { seq 1 20000; }   # 約 108KB，穩定超過 64KB pipe buffer
+
+test_layer_check_survives_early_grep_exit() {
+  sed -e 's/^layer: nestjs$/layer: common/' -e 's/^id: valid-example$/id: layer-common/' \
+    "$FIX/valid-example.md" > "$TMP/layer-common.md"
+  corpus_layers() { printf 'common\n'; _big_tail; }
+  local out rc
+  out="$(rule_validate "$TMP/layer-common.md" 2>&1)"; rc=$?
+  unset -f corpus_layers
+  source "$MRA_DIR/lib/corpus-targets.sh"
+  if [ "$rc" -eq 0 ]; then
+    ok "producer 提早收到 SIGPIPE 時 layer=common 仍判為合法"
+  else
+    fail "layer=common 被誤判成不合法（SIGPIPE 競態）：${out:0:160}"
+  fi
+}
+
+test_layer_check_still_rejects_unknown_layer_under_sigpipe() {
+  sed -e 's/^layer: nestjs$/layer: kotlin/' -e 's/^id: valid-example$/id: layer-bad/' \
+    "$FIX/valid-example.md" > "$TMP/layer-bad.md"
+  corpus_layers() { printf 'common\n'; _big_tail; }
+  local out; out="$(rule_validate "$TMP/layer-bad.md" 2>&1)"
+  unset -f corpus_layers
+  source "$MRA_DIR/lib/corpus-targets.sh"
+  has "同一條路徑下不合法的 layer 仍被擋" "$out" "RULE_LAYER_INVALID"
+}
+
+test_severity_check_survives_early_grep_exit() {
+  sed -e 's/^severity_default: HIGH$/severity_default: CRITICAL/' \
+      -e 's/^id: valid-example$/id: sev-first/' \
+    "$FIX/valid-example.md" > "$TMP/sev-first.md"
+  local saved="$RULE_VALID_SEVERITIES"
+  RULE_VALID_SEVERITIES="CRITICAL $(_big_tail | tr '\n' ' ')"
+  local out rc
+  out="$(rule_validate "$TMP/sev-first.md" 2>&1)"; rc=$?
+  RULE_VALID_SEVERITIES="$saved"
+  if [ "$rc" -eq 0 ]; then
+    ok "producer 提早收到 SIGPIPE 時 severity=CRITICAL 仍判為合法"
+  else
+    fail "severity=CRITICAL 被誤判成不合法（SIGPIPE 競態）：${out:0:160}"
+  fi
+}
+
 test_valid_fixture_passes
 test_missing_frontmatter_field
 test_missing_section
@@ -367,6 +418,9 @@ test_id_is_safe_rejects_single_slash
 test_id_is_safe_rejects_empty_string
 test_id_is_safe_rejects_embedded_newline
 test_id_is_safe_accepts_well_formed_id
+test_layer_check_survives_early_grep_exit
+test_layer_check_still_rejects_unknown_layer_under_sigpipe
+test_severity_check_survives_early_grep_exit
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
