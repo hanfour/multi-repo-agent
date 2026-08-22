@@ -191,6 +191,12 @@ for ((i = 0; i < n_conf; i++)); do
   fi
   if ! jq -e '.comments' "$f" >/dev/null 2>&1; then
     echo "REVIEW_SHAPE_INVALID：${f} 不符合 review 輸出格式，這個 PR 不計入本次彙總" >&2
+    # 跟下面 REVIEW_INCOMPLETE 同一個理由：輸出檔一定要刪。留著的話下次續跑
+    # 會被上面的 -s 判定成「已經有結果」而跳過，這個 PR 就永遠不會重跑。形狀
+    # 不合法最常見的來源正是回測被外力中止（額度耗盡、Ctrl-C）時 `> "$f"` 已
+    # 建檔但還沒寫完，而續跑正是這種中止之後才會做的事——不刪等於把一次可以
+    # 自動修復的中斷，變成一個要人工發現的永久缺口。
+    rm -f "$f"
     continue
   fi
 

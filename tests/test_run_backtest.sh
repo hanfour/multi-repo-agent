@@ -714,5 +714,47 @@ else
   ok "無 confirmed 時沒有輸出假的 summary.json"
 fi
 
+# --- 形狀不合法的輸出檔也要刪掉，續跑才會真的重跑 -------------------------
+# 跟 REVIEW_INCOMPLETE 同一個道理，但來源不同：形狀不合法最常見的成因是回測
+# 被外力中止（額度耗盡、Ctrl-C）時 `> "$f"` 已建檔卻還沒寫完，而續跑正是這種
+# 中止之後才會做的事。不刪的話，`-s` 會把這個半成品判成「已經有結果」而跳過，
+# 一次可以自動修復的中斷就變成一個要人工發現的永久缺口。
+#
+# 9301 的第一輪回傳合法 JSON 但沒有 comments 欄位（模擬寫到一半被截斷的檔案
+# 仍是合法 JSON 的情況），第二輪回傳正常結果，用來驗續跑真的會重跑。
+SHP_DIR="$TMP/bench-shape"
+mkdir -p "$SHP_DIR" "$TMP/bin-shape"
+cat > "$SHP_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":9301,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/a.rb","line":10,"severity":"HIGH","note":"a"}]}
+]
+J
+cat > "$TMP/bin-shape/mra" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s' '{"status":"CHANGES_REQUESTED","summary":"截斷"}'
+SHIM
+chmod +x "$TMP/bin-shape/mra"
+
+PATH="$TMP/bin-shape:$PATH" MRA_BENCHMARK_DIR="$SHP_DIR" MRA_BACKTEST_MIN_COVERAGE=0 \
+  bash "$S" --label shape-test >/dev/null 2>"$TMP/shape.err"
+has "stderr 印出 REVIEW_SHAPE_INVALID" "$(cat "$TMP/shape.err")" "REVIEW_SHAPE_INVALID"
+if [[ -e "$SHP_DIR/runs/shape-test/acme__rails-app-1__9301.json" ]]; then
+  fail "形狀不合法的輸出檔沒有被刪掉，下次續跑會被 -s 誤判成已完成而跳過"
+else
+  ok "形狀不合法的輸出檔有被刪掉"
+fi
+
+cat > "$TMP/bin-shape/mra" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+ {"path":"app/a.rb","line":10,"body":"x","severity":"HIGH"}]}'
+SHIM
+PATH="$TMP/bin-shape:$PATH" MRA_BENCHMARK_DIR="$SHP_DIR" MRA_BACKTEST_MIN_COVERAGE=0 \
+  bash "$S" --label shape-test >/dev/null 2>&1
+eq "續跑時形狀不合法的 PR 真的重跑並納入彙總" "1" \
+  "$(jq -r '.prs' "$SHP_DIR/runs/shape-test/summary.json")"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
