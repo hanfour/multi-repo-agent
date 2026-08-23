@@ -151,5 +151,46 @@ default_tol_review='{"status":"CHANGES_REQUESTED","summary":"x","comments":[
 mdt="$(backtest_match "$default_tol_review" "$default_tol_expected")"
 eq "不給容差引數時預設值是 5(距離 6 應該漏抓)" "null" "$(printf '%s' "$mdt" | jq -r '.[0].matched')"
 
+# --- backtest_file_missed：檔案層級的漏抓 -------------------------------
+# 行號容差指標對錨點高度敏感，這個指標用來分辨「沒看到那個檔案」與「看到了但
+# 錨點落在幾十行外」。
+fm_expected='[{"path":"app/a.rb","line":10,"severity":"HIGH","note":"a"},
+              {"path":"app/b.rb","line":20,"severity":"HIGH","note":"b"}]'
+
+# 同檔有講但離很遠：行號容差算漏，檔案層級不算漏。這是這個指標存在的理由。
+fm_far='{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+ {"path":"app/a.rb","line":99,"body":"同檔但離 89 行","severity":"HIGH"}]}'
+eq "同檔有 comment 就不算檔案層級漏抓(即使離 89 行)" "1" \
+  "$(backtest_file_missed "$fm_far" "$fm_expected")"
+eq "對照：同一組資料在 ±15 之下兩條都算漏抓" "2" \
+  "$(backtest_match "$fm_far" "$fm_expected" 15 | jq -r '[.[] | select(.matched == null)] | length')"
+
+eq "兩個檔案都沒 comment 時全算漏" "2" \
+  "$(backtest_file_missed '{"status":"APPROVED","summary":"x","comments":[]}' "$fm_expected")"
+eq "expected 為空時是 0" "0" \
+  "$(backtest_file_missed "$fm_far" '[]')"
+
+# 同一個檔案有多條 comment 不會讓漏抓數變成負的，也不會重複扣。
+fm_multi='{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+ {"path":"app/a.rb","line":1,"body":"x","severity":"HIGH"},
+ {"path":"app/a.rb","line":2,"body":"y","severity":"HIGH"},
+ {"path":"app/a.rb","line":3,"body":"z","severity":"HIGH"}]}'
+eq "同檔多條 comment 只抵銷該檔的 expected" "1" \
+  "$(backtest_file_missed "$fm_multi" "$fm_expected")"
+
+# 這個函式一定要逐 PR 呼叫。攤平多個 PR 的 comment 之後，A 的 expected 會配到
+# B 的同名檔案 comment，漏抓數偏低。這裡把那個誤用的後果釘住，讓以後有人想把
+# 它改成吃攤平陣列時，測試會告訴他為什麼不行。
+pr_a_expected='[{"path":"app/shared.rb","line":10,"severity":"HIGH","note":"PR A 的缺陷"}]'
+pr_a_review='{"status":"APPROVED","summary":"x","comments":[]}'
+pr_b_review='{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+ {"path":"app/shared.rb","line":500,"body":"PR B 對同名檔案的意見","severity":"HIGH"}]}'
+eq "逐 PR 算：PR A 沒講到 shared.rb，算 1 條漏抓" "1" \
+  "$(backtest_file_missed "$pr_a_review" "$pr_a_expected")"
+flattened="$(jq -n --argjson a "$pr_a_review" --argjson b "$pr_b_review" \
+  '{status:"CHANGES_REQUESTED", summary:"x", comments: ($a.comments + $b.comments)}')"
+eq "攤平後會誤判成 0（這就是不能餵攤平陣列的原因）" "0" \
+  "$(backtest_file_missed "$flattened" "$pr_a_expected")"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
