@@ -340,6 +340,31 @@ test_validates_rules_before_running
 test_partial_invalid_rules_reports_correct_count_and_blocks
 test_missing_rules_and_label_rejected
 test_empty_label_is_treated_as_missing
+# --recompute 要原樣傳給 run-backtest.sh。沒傳到的話，換容差再算一次會連帶
+# 重跑失敗的 PR 並覆寫它們的 .err（見 scripts/run-backtest.sh 的說明）。
+# 傳遞用的是未加引號的 $RECOMPUTE_FLAG，空值時必須完全不出現在 argv 裡，
+# 不能變成一個空字串參數 —— run-backtest.sh 對不認得的參數是直接 exit 1。
+test_recompute_flag_is_forwarded() {
+  reset_stub_logs
+  MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+    bash "$S" --rules "$FIX/rules" --label rc-fwd --recompute >/dev/null 2>&1
+  has "--recompute 有傳給 run-backtest.sh" "$(cat "$STUB/argv.log" 2>/dev/null)" "--recompute"
+}
+
+test_no_recompute_flag_when_not_given() {
+  reset_stub_logs
+  MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+    bash "$S" --rules "$FIX/rules" --label rc-off >/dev/null 2>&1
+  local argv; argv="$(cat "$STUB/argv.log" 2>/dev/null)"
+  lacks "沒給 --recompute 時 argv 裡不該出現它" "$argv" "--recompute"
+  # 空的 $RECOMPUTE_FLAG 若展開成一個空參數，argv 會多一個空欄位。用 tolerance
+  # 後面緊接著就是結尾來釘住這件事。
+  case "$argv" in
+    *"--tolerance 5") ok "argv 結尾就是 --tolerance 5，沒有多出空參數" ;;
+    *) fail "argv 結尾不對，可能多了空參數：[$argv]" ;;
+  esac
+}
+
 test_flag_missing_value_rejected_not_crashed
 test_unknown_flag_rejected
 test_token_budget_flag_overrides_and_is_forwarded
@@ -349,6 +374,8 @@ test_invalid_token_budget_falls_back_without_crashing
 test_prints_injection_ratio_with_skip_reason
 test_condition_record_captures_persona_injection_counts
 test_script_never_discards_stderr_with_dev_null
+test_recompute_flag_is_forwarded
+test_no_recompute_flag_when_not_given
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
