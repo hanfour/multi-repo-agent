@@ -178,11 +178,20 @@ rule_validate() {
   fi
 
   # 清單一律先收進變數再用 here-string 餵給 grep，不寫成 `producer | grep -q`。
-  # `grep -q` 配到就立刻退出，producer 還沒寫完就吃到 SIGPIPE 回 141，呼叫端
-  # 開著 pipefail 時整條管線被判成失敗，`!` 再反轉成「不合法」。實測 2026-08-22
-  # 那一輪回測就是這樣掛的：81 個 layer=common 的規則檔隨機中了 2 個，訊息
-  # 印出來還自相矛盾（「common 不在合法清單：common nestjs rails react vue」）。
-  # 只打到 common 是因為它是清單第一行，grep 最早退出、競態視窗最大。
+  #
+  # 2026-08-22 那一輪回測栽在這裡：81 個 layer=common 的規則檔隨機有 2 個沒過
+  # 驗證，訊息還自相矛盾（「common 不在合法清單：common nestjs rails react vue」），
+  # 整輪以 RULES_INVALID 中止。事後查證：那兩個檔案的 layer 值是乾淨的 6 bytes
+  # "common"，grep 的比對邏輯也沒問題，失敗的是管線本身的退出碼 —— pipefail
+  # 之下 `! producer | grep -q` 只要 producer 那一段非 0 就會反轉成「不合法」。
+  #
+  # 確切成因沒有查出來。試過的假設裡，SIGPIPE 被實測排除：corpus_layers 只印
+  # 5 行約 30 bytes，遠小於 pipe buffer，重跑 8000 次零誤判（producer 換成
+  # `seq 1 20000` 這種大輸出才會 200/200 全中）。剩下的可能性是當時系統上同時
+  # 跑著多個 review 程序，資源壓力下 subshell 本身失敗。
+  #
+  # here-string 不需要為 producer 開 subshell，那條路徑整個消失，所以不論確切
+  # 成因是什麼都不會再發生。severity_default 那一行是同樣的形狀，一起改。
   local layer valid_layers
   layer="$(rule_field "$f" layer)"
   valid_layers="$(corpus_layers)"
