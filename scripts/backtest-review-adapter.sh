@@ -130,7 +130,27 @@ codex_model="${MRA_BACKTEST_CODEX_MODEL:-gpt-5.5}"
 codex_effort="${MRA_BACKTEST_CODEX_EFFORT:-xhigh}"
 claude_model="${MRA_BACKTEST_CLAUDE_MODEL:-sonnet}"
 if [[ -z "${MRA_CONFIG:-}" ]]; then
-  derived_config="${MRA_BACKTEST_CONFIG_DIR:-${TMPDIR:-/tmp}}/mra-backtest-config.json"
+  # 檔名帶 PID：兩輪回測平行跑時，固定檔名會讓後啟動的那個把前一個正在用的
+  # 設定換掉。實測 personas 那一輪跑在 providerMode=codex 底下 —— 而
+  # run-conditions.json 是在這之前就寫好的，記的是 claude，兩份資料互相矛盾
+  # 但都沒有錯誤訊息。
+  #
+  # tmp→mv 只保證「這一次寫入是原子的」，不保證「別人不會在我讀之前換掉它」。
+  # 那是兩個不同的問題，這裡要的是後者。
+  # 呼叫端沒指定目錄時，檔名帶 PID 並在跑完刪掉；指定了就用固定檔名、也不刪，
+  # 由呼叫端自己負責隔離與清理（跟上面 MRA_BACKTEST_WT_ROOT 同一個原則，測試
+  # 需要一個可預測的路徑去檢查內容）。
+  if [[ -n "${MRA_BACKTEST_CONFIG_DIR:-}" ]]; then
+    derived_config="$MRA_BACKTEST_CONFIG_DIR/mra-backtest-config.json"
+    _bt_derived_config=""
+  else
+    derived_config="${TMPDIR:-/tmp}/mra-backtest-config-$$.json"
+    _bt_derived_config="$derived_config"
+    # 立刻註冊清理，不等下面 worktree 那個 trap：這中間還有好幾條 exit 路徑
+    # （CONFIG_PROMOTE_FAILED、PR_LOOKUP_FAILED…）。下面的 _bt_cleanup 會覆寫
+    # 這個 trap，它自己也清設定檔。
+    trap 'rm -f "${_bt_derived_config:-}" 2>/dev/null' EXIT
+  fi
   derived_tmp="${derived_config}.tmp"
   if [[ "$review_mode" == "standard" ]]; then
     if ! jq --arg m "$codex_model" --arg e "$codex_effort" \
@@ -250,12 +270,19 @@ fi
 # --- 查 PR 的 base/head SHA -------------------------------------------------
 # gh 本身失敗(網路中斷、認證過期、rate limit…)跟「查得到、但這筆 PR 資料裡沒有
 # base/head」是兩種不同的失敗，各自要能被獨立診斷，不能共用同一個結束方式。
-pr_json="$(gh api "repos/${repo}/pulls/${pr}" 2>/dev/null)"
+# gh 的 stderr 不能丟：一輪回測跑幾小時，失敗時 .err 檔裡只有「退出碼 1」
+# 的話，額度用盡、token 失權、repo 不存在這三件事完全分不出來 —— 而它們的
+# 處置分別是「等」「重新認證」「改基準集」。實測過一次，只剩退出碼那行。
+_gh_err="$(mktemp "${TMPDIR:-/tmp}/bt-gh-err.XXXXXX")"
+pr_json="$(gh api "repos/${repo}/pulls/${pr}" 2>"$_gh_err")"
 gh_rc=$?
 if [[ $gh_rc -ne 0 ]]; then
-  echo "PR_LOOKUP_FAILED：gh api repos/${repo}/pulls/${pr} 失敗(退出碼 ${gh_rc})" >&2
+  echo "PR_LOOKUP_FAILED：gh api repos/${repo}/pulls/${pr} 失敗(退出碼 ${gh_rc})，gh 的診斷如下" >&2
+  cat "$_gh_err" >&2
+  rm -f "$_gh_err"
   exit 1
 fi
+rm -f "$_gh_err"
 
 # gh 的 --jq 不接受 --arg，這裡不用 --jq，改用一般的 jq 另外解析。
 base_sha="$(printf '%s' "$pr_json" | jq -r '.base.sha // empty' 2>/dev/null)"
@@ -311,7 +338,16 @@ _ensure_commit_local "$head_sha" "refs/pull/${pr}/head" || exit 1
 #
 # 平行 workspace 根目錄：mra 從 cwd 找 workspace(見 lib/project-path.sh)，
 # 呼叫 mra review 時要 cd 到這裡，不是真正的 $WS。
-BT_WS="${MRA_BACKTEST_WT_ROOT:-${TMPDIR:-/tmp}/mra-backtest-ws}"
+# 根目錄帶上 PID：兩輪回測平行跑同一個 repo 時，路徑只依 project 名會讓後
+# 啟動的那個在「自救」階段把前一個正在 review 的 worktree 直接
+# `worktree remove --force` 掉。受害者的 review 在一個已經被刪的目錄裡跑完、
+# 退出 0、產出空的 comments 陣列 —— 那份輸出通過 run-backtest.sh 的三道關卡
+# （退出碼、.comments 形狀、status != COMMENT），被當成「跑完了、零發現」計入
+# 彙總，那個 PR 的 expected finding 全數算成漏抓。
+#
+# PID 不會撞，而且行程結束後路徑自然作廢。MRA_BACKTEST_WT_ROOT 仍可覆寫（測試
+# 用），覆寫時由呼叫端自己負責隔離。
+BT_WS="${MRA_BACKTEST_WT_ROOT:-${TMPDIR:-/tmp}/mra-backtest-ws-$$}"
 bt_project_dir="$BT_WS/$project"
 
 # 清理一定要綁 trap EXIT：review 跑完不管成功失敗、或中途哪一步提早 exit，
@@ -321,13 +357,23 @@ bt_project_dir="$BT_WS/$project"
 # exit：清理失敗不該讓一次已經成功的 review 變成回報失敗，那樣的假訊號
 # 比清理失敗本身更誤導人。
 _bt_cleanup() {
-  [[ -d "$bt_project_dir" ]] || return 0
-  if ! git -C "$project_dir" worktree remove --force "$bt_project_dir" >/dev/null 2>&1; then
-    if ! rm -rf "$bt_project_dir" 2>/dev/null; then
-      echo "WORKTREE_CLEANUP_FAILED：無法移除 worktree ${bt_project_dir}，需要手動清理(不影響這次 review 本身的結果)" >&2
+  if [[ -d "$bt_project_dir" ]]; then
+    if ! git -C "$project_dir" worktree remove --force "$bt_project_dir" >/dev/null 2>&1; then
+      if ! rm -rf "$bt_project_dir" 2>/dev/null; then
+        echo "WORKTREE_CLEANUP_FAILED：無法移除 worktree ${bt_project_dir}，需要手動清理(不影響這次 review 本身的結果)" >&2
+      fi
+      git -C "$project_dir" worktree prune >/dev/null 2>&1
     fi
-    git -C "$project_dir" worktree prune >/dev/null 2>&1
   fi
+  # 根目錄帶 PID 之後每個行程一份，不清會在 TMPDIR 累積 .collab 殘骸。只在
+  # 「是我們自己建的」時候清：呼叫端用 MRA_BACKTEST_WT_ROOT 指定的路徑歸呼叫端
+  # 管，我們不知道那裡面還有什麼。
+  if [[ -z "${MRA_BACKTEST_WT_ROOT:-}" && -d "$BT_WS" ]]; then
+    rm -rf "$BT_WS" 2>/dev/null || true
+  fi
+  # 衍生設定同樣是這個行程專屬的，跑完刪掉。
+  [[ -n "${_bt_derived_config:-}" ]] && rm -f "$_bt_derived_config" 2>/dev/null
+  return 0
 }
 trap _bt_cleanup EXIT
 
