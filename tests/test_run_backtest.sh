@@ -855,5 +855,29 @@ eq "重算後容差確實換成 15" "15" "$(jq -r '.tolerance' "$S_RC")"
 eq "只有跑得成的那筆計入彙總" "1" "$(jq -r '.prs' "$S_RC")"
 eq "跑不成的那筆記成 failed" "1" "$(jq -r '.failed_count' "$S_RC")"
 
+# --- 容差必須是非負數 -----------------------------------------------------
+# 只驗「是合法 JSON」的話 null、-3、[]、{} 全部會過，而 null 與負值的後果是
+# 每一條 expected 都不命中、漏抓率變成完美的 1.0（jq 的型別排序裡 null 小於
+# 任何數字，`距離 <= null` 恆為 false）。那個 1.0 會原樣寫進 summary.json，
+# 事後看不出它是垃圾。
+for bad_tol in null -3 '[]' '{}' abc '"5"'; do
+  out_tol="$(bash "$S" --label tol-test --tolerance "$bad_tol" 2>&1)"
+  rc_tol=$?
+  if [ "$rc_tol" -ne 0 ]; then
+    ok "容差 [$bad_tol] 被擋下來"
+  else
+    fail "容差 [$bad_tol] 應該被擋下來卻通過了"
+  fi
+  has "容差 [$bad_tol] 的訊息用 TOLERANCE_INVALID" "$out_tol" "TOLERANCE_INVALID"
+done
+# 合法值不能被誤擋：0 是合法的（要求 comment 精準落在 expected 那一行）。
+for good_tol in 0 5 15 2.5; do
+  bash "$S" --label tol-ok --tolerance "$good_tol" >/dev/null 2>&1
+  rc_tol=$?
+  # 這裡不會真的跑成功（stub 環境），只要不是被 TOLERANCE_INVALID 擋掉即可。
+  out_tol="$(bash "$S" --label tol-ok --tolerance "$good_tol" 2>&1)"
+  lacks "合法容差 [$good_tol] 沒被誤擋" "$out_tol" "TOLERANCE_INVALID"
+done
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
