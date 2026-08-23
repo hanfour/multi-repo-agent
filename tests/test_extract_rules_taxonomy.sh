@@ -342,7 +342,11 @@ test_large_payload_does_not_hit_arg_max() {
   eq "大量候選資料仍然成功產出規則檔" "1" "$(ls "$out_dir"/*.md 2>/dev/null | wc -l | tr -d ' ')"
 }
 
-# agent 吐空字串：沒有 id 欄位，走 REJECTED 路徑，不當成崩潰處理。
+# agent 吐空字串（exit 0，但沒有任何內容）：這跟「吐出來了但格式不合格」是
+# 兩種不同的失敗，要分開報。原本兩者都走 RULE_REJECTED，於是空輸出會得到一句
+# 「沒通過驗證」（根本沒有東西可驗）跟一個 1 byte 的 _rejected 檔（那個目錄
+# 存在的意義是留住原始產出供人判斷是 prompt 還是模型的問題，1 byte 的檔案兩者
+# 都判斷不了），還把「退回 K（驗證不過）」這個數字灌水。跟 A 路線同一套處置。
 test_agent_returns_empty_string() {
   cat > "$STUB/empty-agent" <<'SH'
 #!/usr/bin/env bash
@@ -353,8 +357,16 @@ SH
   local out_dir="$TMP/out-empty"; mkdir -p "$out_dir"
   local out
   out="$(run_extract "$IN/rich-react.jsonl" react "$out_dir" "$STUB/empty-agent" 2>&1)"
-  has "空字串輸出被記為 RULE_REJECTED" "$out" "RULE_REJECTED"
+  has "空輸出用自己的 token 報" "$out" "AGENT_EMPTY_OUTPUT"
+  lacks "空輸出不報成 RULE_REJECTED（它根本沒有東西可以驗）" "$out" "RULE_REJECTED"
   eq "空字串輸出不落地成規則檔" "0" "$(ls "$out_dir"/*.md 2>/dev/null | wc -l | tr -d ' ')"
+  eq "空輸出不留下 1 byte 的 _rejected 診斷檔" "0" \
+    "$(ls "$out_dir/_rejected"/*.md 2>/dev/null | wc -l | tr -d ' ')"
+  eq "八類全部空輸出，_agent_failed.tsv 就有八列" "8" \
+    "$(grep -c '空輸出' "$out_dir/_agent_failed.tsv")"
+  has "summary 用自己的數字報空輸出" "$out" "agent 空輸出 8"
+  has "summary 的「退回（驗證不過）」沒有把空輸出混進去" "$out" "退回 0（驗證不過）"
+  has "summary 的「agent 失敗」也沒有把空輸出混進去" "$out" "agent 失敗 0"
 }
 
 # corpus 檔缺 --corpus 旗標指到的路徑：要在跑任何一類之前就失敗，不要對空
@@ -408,6 +420,67 @@ test_min_hits_zero_lets_everything_through_the_threshold() {
   has "MIN_HITS=0 時沒有任何類別被丟棄" "$out" "丟棄 0"
 }
 
+# 對同一個 --out 目錄重跑「同一層」：那一層的舊列要被換掉，不是再疊一份。
+# 原本兩份 .tsv 都是無條件 append，同一層跑第二次會讓同一批列出現兩次，而同一
+# 個目錄裡的 _rejected/<層>-<class>.md 走的卻是覆蓋，一個目錄裡並存兩種相反的
+# 語意。選定的語意是「以來源層為單位，最後一次跑覆蓋前一次」，所以這裡同時驗
+# 重跑不會讓自己那一層變兩份，也不會把別層的列連帶掃掉。
+test_rerun_of_one_layer_replaces_only_that_layers_rows() {
+  local out_dir="$TMP/out-rerun"; mkdir -p "$out_dir"
+  cat > "$STUB/rerun-failing-agent" <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+exit 17
+SH
+  chmod +x "$STUB/rerun-failing-agent"
+
+  # rich 語料八類全部命中門檻，所以八類全部呼叫 agent、全部失敗：一次呼叫在
+  # _agent_failed.tsv 留八列、_dropped.tsv 留零列。sparse 語料反過來，八類全部
+  # 實例不足：_dropped.tsv 留八列。兩種都要驗到。
+  run_extract "$IN/rich-react.jsonl" layerA "$out_dir" "$STUB/rerun-failing-agent" >/dev/null 2>&1
+  run_extract "$IN/rich-react.jsonl" layerB "$out_dir" "$STUB/rerun-failing-agent" >/dev/null 2>&1
+  eq "兩層各跑一次後 _agent_failed.tsv 有十六列" "16" \
+    "$(grep -c . "$out_dir/_agent_failed.tsv")"
+
+  run_extract "$IN/rich-react.jsonl" layerA "$out_dir" "$STUB/rerun-failing-agent" >/dev/null 2>&1
+  eq "重跑同一層之後仍然是十六列，不是二十四列" "16" \
+    "$(grep -c . "$out_dir/_agent_failed.tsv")"
+  eq "重跑的那一層只留八列" "8" "$(grep -c '^layerA	' "$out_dir/_agent_failed.tsv")"
+  eq "沒被重跑的那一層還在" "8" "$(grep -c '^layerB	' "$out_dir/_agent_failed.tsv")"
+
+  # _dropped.tsv 的層欄位在第 3 欄，不是第 1 欄，所以清除舊列時用的欄位序號
+  # 跟 _agent_failed.tsv 不同。這幾個斷言就是在盯那個序號有沒有搞錯。
+  local drop_dir="$TMP/out-rerun-drop"; mkdir -p "$drop_dir"
+  printf '{"body":"nit: typo"}\n' > "$IN/rerun-sparse.jsonl"
+  run_extract "$IN/rerun-sparse.jsonl" layerA "$drop_dir" "$STUB/rerun-failing-agent" >/dev/null 2>&1
+  run_extract "$IN/rerun-sparse.jsonl" layerB "$drop_dir" "$STUB/rerun-failing-agent" >/dev/null 2>&1
+  eq "兩層各跑一次後 _dropped.tsv 有十六列" "16" "$(grep -c . "$drop_dir/_dropped.tsv")"
+  run_extract "$IN/rerun-sparse.jsonl" layerA "$drop_dir" "$STUB/rerun-failing-agent" >/dev/null 2>&1
+  eq "重跑同一層之後 _dropped.tsv 仍然是十六列" "16" "$(grep -c . "$drop_dir/_dropped.tsv")"
+  eq "重跑的那一層在 _dropped.tsv 只留八列" "8" \
+    "$(grep -c '	layerA	' "$drop_dir/_dropped.tsv")"
+  eq "沒被重跑的那一層在 _dropped.tsv 還在" "8" \
+    "$(grep -c '	layerB	' "$drop_dir/_dropped.tsv")"
+}
+
+# 目的地必須用原子的方式宣告，理由與 A 路線相同（見
+# tests/test_extract_rules_tfidf.sh 的同名測試）。真的去跑競態驗會是不穩定的
+# 測試，所以這裡把「宣告方式」本身鎖住。
+test_dest_is_claimed_atomically_not_check_then_move() {
+  local f="$MRA_DIR/scripts/extract-rules-taxonomy.sh" src
+  src="$(cat "$f")"
+  has "用 noclobber 的 O_EXCL 建檔宣告目的地" "$src" "set -o noclobber"
+  has "宣告失敗時區分得出是撞名還是寫入出錯" "$src" "DEST_CLAIM_FAILED"
+  local claim_ln mv_ln
+  claim_ln="$(grep -n 'set -o noclobber' "$f" | head -1 | cut -d: -f1)"
+  mv_ln="$(grep -n 'mv "\$tmp" "\$dest"' "$f" | head -1 | cut -d: -f1)"
+  if [ -n "$claim_ln" ] && [ -n "$mv_ln" ] && [ "$claim_ln" -lt "$mv_ln" ]; then
+    ok "目的地在 mv 之前就被原子地宣告掉"
+  else
+    fail "目的地沒有在 mv 之前被宣告（claim 在第 ${claim_ln:-無} 行、mv 在第 ${mv_ln:-無} 行）"
+  fi
+}
+
 test_all_eight_classes_defined
 test_class_ids_unique
 test_search_finds_matching_comment
@@ -427,6 +500,8 @@ test_missing_layer_flag_fails_loudly
 test_missing_agent_cmd_fails_loudly
 test_non_numeric_min_hits_fails_loudly
 test_min_hits_zero_lets_everything_through_the_threshold
+test_rerun_of_one_layer_replaces_only_that_layers_rows
+test_dest_is_claimed_atomically_not_check_then_move
 
 # --- 語料壞掉要跟「實例不足」分開報 ---------------------------------------
 # taxonomy_search 的退出碼原本被丟棄，語料檔有一行截斷的 JSON 時 jq 失敗、
@@ -454,6 +529,26 @@ if [ -s "$TMP/out-clean/_dropped.tsv" ]; then
 else
   fail "實例不足的類別沒有被記錄"
 fi
+
+
+# --- 旗標缺值時的訊息要指得到使用者打錯的東西 -----------------------------
+# 少了 arity 檢查的話會踩到 set -u，訊息是「$2: 未綁定的變數」，跟使用者打錯
+# 的東西完全對不上。這支腳本跑一次要幾小時、燒掉大量 API 額度，開場就給一句
+# 看不懂的話最糟。
+ARITY_IN="$TMP/arity-input.jsonl"
+printf '%s\n' '{"body":"x","url":"https://x/1"}' > "$ARITY_IN"
+for _flag in --corpus --layer --out; do
+  arity_out="$(bash "$MRA_DIR/scripts/extract-rules-taxonomy.sh" "$_flag" 2>&1)"
+  has "旗標 $_flag 缺值時的訊息指名它自己" "$arity_out" "$_flag"
+  lacks "旗標 $_flag 缺值時不是 set -u 的原始錯誤" "$arity_out" "未綁定"
+  lacks "旗標 $_flag 缺值時不是英文的 unbound variable" "$arity_out" "unbound variable"
+done
+
+# --out 整個沒給時 OUT 是空字串，mkdir 的訊息會是「mkdir: : No such file or
+# directory」，同樣跟輸入無關。
+out_missing="$(bash "$MRA_DIR/scripts/extract-rules-taxonomy.sh" --corpus "$ARITY_IN" --layer common 2>&1)"
+has "缺 --out 時用 OUT_MISSING 這個 token" "$out_missing" "OUT_MISSING"
+lacks "缺 --out 時不是 mkdir 的原始錯誤" "$out_missing" "mkdir"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

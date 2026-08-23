@@ -249,21 +249,38 @@ EOF
 }
 
 # =============================================================================
-# 邊界 5：殘缺輸出（實測真實 _rejected 有這種：模型輸出被截斷，整個檔案只剩
-# 一行 URL）。不可修復——直接對應真實的 react-clusters-2.md 那種形狀。
+# 邊界 5：殘缺輸出（實測真實 _rejected 有這種：模型輸出被截斷）。這個邊界要
+# 驗的命題是「殘缺輸出必定落在 3、4 其中一種形狀，一律不可修復，不會被誤判成
+# 可修復」，所以兩種截斷形狀都要在，而且要指名各自落在哪一條分支：
+#
+#   a) 整個檔案只剩出處那幾行 URL（模型從中間開始輸出）→ 第一行不是 ---
+#      （FIRST_LINE_NOT_DASH），對應真實的 react-clusters-2.md
+#   b) frontmatter 寫到一半就斷了，連一個 ## 都沒有 → 沒有插入點（NO_HEADING）
+#
+# 原本這裡只有 (a)，而且沒有斷言原因代碼：它跟邊界 4 走完全同一條分支、驗到的
+# 東西一模一樣，等於這個邊界沒有多驗到任何事。
 # =============================================================================
-test_boundary5_truncated_url_only_output_is_unfixable() {
+test_boundary5_truncated_output_lands_on_an_unfixable_shape() {
   local rejected="$TMP/b5-in" out="$TMP/b5-out"
   mkdir -p "$rejected" "$out"
   cat > "$rejected/react-clusters-5.md" <<'EOF'
 - https://github.com/example/repo/pull/1#discussion_r1
 - https://github.com/example/repo/pull/2#discussion_r2
 EOF
+  # 刻意在值的中間截斷，沒有收尾的引號、沒有 ---、沒有任何 ##。
+  printf '%s\n%s\n%s\n%s' '---' 'id: react-truncated-mid-frontmatter' 'layer: react' \
+    'frameworks: ["react@>=1' > "$rejected/react-clusters-6.md"
+
   local out_msg; out_msg="$(run_repair "$rejected" "$out" 2>"$TMP/b5.err")"
-  has "印出仍不通過 1" "$out_msg" "仍不通過 1"
+  has "兩個殘缺檔案都仍不通過" "$out_msg" "仍不通過 2"
+  has "兩個都算進 UNFIXABLE，不是別的原因" "$out_msg" "UNFIXABLE 2"
   eq "沒有搬到 out" "0" "$(count_md "$out")"
-  eq "原始檔案還在 _rejected（不可修復，留在原地）" "1" \
+  has "只剩 URL 的那個指名是第一行不是 ---" "$(cat "$TMP/b5.err")" "FIRST_LINE_NOT_DASH"
+  has "frontmatter 中途截斷的那個指名是沒有插入點" "$(cat "$TMP/b5.err")" "NO_HEADING"
+  eq "只剩 URL 的原始檔案還在 _rejected（不可修復，留在原地）" "1" \
     "$([ -f "$rejected/react-clusters-5.md" ] && echo 1 || echo 0)"
+  eq "中途截斷的原始檔案也還在 _rejected" "1" \
+    "$([ -f "$rejected/react-clusters-6.md" ] && echo 1 || echo 0)"
 }
 
 # =============================================================================
@@ -439,6 +456,39 @@ test_mixed_batch_summary_counts_are_correct() {
 # =============================================================================
 # 用法檢查：缺目錄參數要報錯、退出非 0，不能悄悄當成 0 個檔案處理完就結束。
 # =============================================================================
+# 需要值的旗標在缺值時，錯誤訊息要跟輸入有關。原本 `--rejected` 後面沒接東西
+# 會直接踩到 set -u，使用者看到的是「rule-repair.sh: 列 28: $2: 未綁定的變數」：
+# 那句話既沒說是哪個旗標的問題，也沒說要怎麼改。同一份專案的
+# scripts/run-rule-backtest.sh 每個帶值的旗標都有 `[ $# -ge 2 ]` 檢查，這裡照
+# 同一個做法補齊。
+#
+# 斷言用 `$2` 這個 needle 而不是 bash 的錯誤字串本身：那句話會隨 locale 變成
+# 「unbound variable」或「未綁定的變數」，但兩種都含 `$2`。
+test_flag_missing_its_value_fails_with_a_relevant_message() {
+  local out_msg rc
+  out_msg="$(bash "$MRA_DIR/scripts/rule-repair.sh" --rejected 2>&1)"; rc=$?
+  [ "$rc" -ne 0 ] && ok "--rejected 缺值時退出碼非 0" || fail "應該退出非 0"
+  has "訊息指名是 --rejected 缺值" "$out_msg" "--rejected 需要接一個目錄"
+  lacks "不會洩漏 bash 自己的 unbound variable 錯誤" "$out_msg" '$2'
+
+  out_msg="$(bash "$MRA_DIR/scripts/rule-repair.sh" --out 2>&1)"; rc=$?
+  [ "$rc" -ne 0 ] && ok "--out 缺值時退出碼非 0" || fail "應該退出非 0"
+  has "訊息指名是 --out 缺值" "$out_msg" "--out 需要接一個目錄"
+  lacks "--out 缺值也不會洩漏 unbound variable" "$out_msg" '$2'
+}
+
+# --out 整個沒給（不是缺值，是旗標不在）：OUT 是空字串，mkdir -p "" 會回一句
+# 「mkdir: : No such file or directory」，同樣跟輸入無關。
+test_omitted_out_flag_fails_with_a_relevant_message() {
+  local rejected="$TMP/omit-out-in"
+  mkdir -p "$rejected"
+  local out_msg rc
+  out_msg="$(bash "$MRA_DIR/scripts/rule-repair.sh" --rejected "$rejected" 2>&1)"; rc=$?
+  [ "$rc" -ne 0 ] && ok "沒給 --out 時退出碼非 0" || fail "應該退出非 0"
+  has "印出用法" "$out_msg" "用法"
+  lacks "不會洩漏 mkdir 對空路徑的錯誤" "$out_msg" "mkdir"
+}
+
 test_missing_rejected_dir_fails_loudly() {
   local out="$TMP/usage-out"
   mkdir -p "$out"
@@ -464,11 +514,13 @@ test_boundary1_already_closed_and_actually_valid_is_rescued_unmodified
 test_boundary2_stray_dash_after_heading_is_unfixable
 test_boundary3_no_heading_at_all_is_unfixable
 test_boundary4_first_line_not_dash_is_unfixable
-test_boundary5_truncated_url_only_output_is_unfixable
+test_boundary5_truncated_output_lands_on_an_unfixable_shape
 test_boundary7_existing_dest_file_is_not_overwritten
 test_critical1_unsafe_id_path_traversal_is_rejected
 test_important2_summary_breaks_down_five_failure_reasons_separately
 test_mixed_batch_summary_counts_are_correct
+test_flag_missing_its_value_fails_with_a_relevant_message
+test_omitted_out_flag_fails_with_a_relevant_message
 test_missing_rejected_dir_fails_loudly
 test_script_never_discards_stderr_with_dev_null
 

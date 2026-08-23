@@ -74,6 +74,13 @@
   - `backtest_hunks_of` → stdin 是 patch 文字，stdout 一行一個 `<起> <迄>`（新檔側行號，含頭含尾）
   - `backtest_ranges_overlap <ranges_a> <ranges_b>` → 兩組多行區間有交集時退出碼 0，否則非 0
 
+> 後記（2026-08-23）：`backtest_ranges_overlap` 實作出來之後沒有任何呼叫端，
+> 正式路徑走的是 `lib/backtest-hunks.sh` 的 `backtest_overlap`（由
+> `scripts/build-benchmark.sh` 呼叫）。它連同 13 支只測它的斷言已在階段三
+> 收尾時刪除，那些斷言真正還缺的覆蓋深度搬進了
+> `tests/test_backtest_groundtruth.sh`。這一段保留原樣是當時的計畫紀錄，
+> 不是現在的介面。
+
 - [ ] **Step 1: 寫失敗的測試**
 
 建立 `tests/test_backtest_hunks.sh`：

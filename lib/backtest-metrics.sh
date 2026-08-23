@@ -19,9 +19,24 @@
 #      的那個(排序後較前面)能拿到；輸給搶奪、沒有其他候選的那個算漏抓，不會
 #      讓同一顆 comment 同時墊高兩個 expected 的命中數，也不會讓 severity_rate
 #      的分母被重複計算。
-#   排序鍵選 (path, line) 而不是原始陣列順序，是要讓「誰先搶到」不隨呼叫端
-#   餵資料的順序而變，同一組 expected/review 不管原始陣列怎麼排都得出同一個
-#   結果。
+#   排序鍵選 (path, line, 整個 expected 的 JSON) 而不是原始陣列順序，是要讓
+#   「誰先搶到」不隨呼叫端餵資料的順序而變，同一組 expected/review 不管原始
+#   陣列怎麼排都得出同一個結果。
+#
+#   第三個鍵不能用 .key（原始索引）：那個值本身就是餵入順序，兩條 expected
+#   對調之後它也跟著換，等於沒補。要讓順序穩定，鍵必須來自內容。實測同一個
+#   檔案同一行有兩條 expected 時（例如同一行既有 CRITICAL 的安全問題又有 LOW
+#   的風格問題），只用 (path, line) 的話把兩條對調就會讓 severity_rate 從
+#   1.0 翻到 0.0：同一組資料算出兩個答案。
+#
+#   兩條 expected 連內容都完全相同時它們互換沒有可觀察的差異，所以不需要
+#   再往下分。
+#
+# review comment 的 line 是 null 時（有些 provider 對「整個檔案」層級的意見
+# 不給行號）不參與行號配對，直接跳過。舊版沒有這道 select，jq 的 fabs 對
+# null 會拋錯，整輪回測 exit 1，而診斷是一句 jq 的原始錯誤訊息，看不出是
+# 哪個 PR 的哪一條 comment。跳過之後那條 comment 會自然落進 unmatched，
+# 那是正確的歸類：它確實沒有對應到任何 expected finding。
 #
 # 同一個 expected 有多筆候選在容差窗內打平(距離相同)時，選原始 review.comments
 # 陣列裡排比較前面的那一筆——靠的是 jq sort_by 本身的排序穩定性，不是刻意另外
@@ -30,12 +45,13 @@ backtest_match() {
   local review="$1" expected="$2" tol="${3:-5}"
   jq -n --argjson review "$review" --argjson expected "$expected" --argjson tol "$tol" '
     ($review.comments | to_entries) as $rc
-    | ($expected | to_entries | sort_by([.value.path, .value.line])) as $se
+    | ($expected | to_entries | sort_by([.value.path, .value.line, (.value | tojson)])) as $se
     | (reduce $se[] as $item (
          {claimed: [], out: []};
          . as $acc
          | ( [ $rc[]
                | select(.value.path == $item.value.path)
+               | select(.value.line != null)
                | select((.value.line - $item.value.line) | fabs <= $tol)
                | select(([.key] | inside($acc.claimed)) | not) ]
              | sort_by((.value.line - $item.value.line) | fabs) ) as $cands

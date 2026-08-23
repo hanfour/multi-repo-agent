@@ -30,7 +30,17 @@ ok()   { echo "PASS: $1"; pass=$((pass+1)); }
 fail() { echo "FAIL: $1"; errors=$((errors+1)); }
 eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] got [$3]"; fi; }
 has()  { case "$2" in *"$3"*) ok "$1" ;; *) fail "$1 — 沒看到「$3」：$2" ;; esac; }
-lacks(){ case "$2" in *"$3"*) fail "$1 — 不該看到「$3」：$2" ;; *) ok "$1" ;; esac; }
+# 空的 haystack 直接算失敗：`lacks "..." "$(cat 不存在的檔案)" "needle"` 對
+# 空字串一定通過，而空字串幾乎總是「東西沒讀到」而不是「讀到了但不含它」。
+# 實測過一次：同一個函式裡配對的 has FAIL 而 lacks PASS，兩個斷言對同一份
+# 資料給出矛盾的結果。真的要斷言某處本來就該是空的，用 eq "" "$x" 講清楚。
+lacks(){
+  if [ -z "$2" ]; then
+    fail "$1 — 被檢查的內容是空的（多半是東西沒讀到，不是真的不含「$3」）"
+    return
+  fi
+  case "$2" in *"$3"*) fail "$1 — 不該看到「$3」：$2" ;; *) ok "$1" ;; esac
+}
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/run-rule-backtest-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
