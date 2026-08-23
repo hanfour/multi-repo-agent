@@ -91,7 +91,13 @@ case "${1:-}" in
     exit 0 ;;
 esac
 
-LABEL=""; TOL=5
+# --recompute：只拿已經存在的 review 輸出重算指標，一次 review 都不跑。
+#
+# 用途是「同一輪跑完之後換個容差再算一次」。沒有這個模式的話，那個動作會連帶
+# 重跑所有失敗的 PR，而重跑會覆寫它們的 .err —— 實測過一次：兩筆 PR 原本的
+# 失敗原因是 synthesize 輪數用盡，容差重算時 OAuth 剛好過期，.err 全被換成
+# OAuth 錯誤，原本的診斷證據就此消失。重算容差不該有副作用。
+LABEL=""; TOL=5; RECOMPUTE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --label)
@@ -100,8 +106,11 @@ while [[ $# -gt 0 ]]; do
     --tolerance)
       [[ $# -ge 2 ]] || { echo "用法：--tolerance 需要接一個值" >&2; exit 1; }
       TOL="$2"; shift 2 ;;
+    --recompute)
+      RECOMPUTE=1; shift ;;
     -h|--help)
-      echo "用法: run-backtest.sh --label <名稱> [--tolerance N] | --compare <a> <b>"
+      echo "用法: run-backtest.sh --label <名稱> [--tolerance N] [--recompute] | --compare <a> <b>"
+      echo "  --recompute：只用已存在的 review 輸出重算指標，不跑任何 review"
       exit 0 ;;
     *) echo "未知參數：$1" >&2; exit 1 ;;
   esac
@@ -162,6 +171,7 @@ all_matches='[]'; all_comments='[]'; prs=0
 # 當下看一眼 log 就沒了，之後回頭看 summary.json 也要查得到。
 incomplete_list='[]'; n_incomplete=0
 failed_list='[]'; n_failed=0
+file_missed=0
 for ((i = 0; i < n_conf; i++)); do
   item="$(jq -c "[.[] | select(.confirmed == true)] | .[$i]" "$C")"
   repo="$(printf '%s' "$item" | jq -r '.repo')"
@@ -180,6 +190,14 @@ for ((i = 0; i < n_conf; i++)); do
   # 進版控，不用擔心體積(單筆實測 1.78MB)。
   errf="$OUT/${safe_repo}__${pr}.err"
 
+  if [[ ! -s "$f" ]] && [[ "$RECOMPUTE" -eq 1 ]]; then
+    # --recompute：沒有現成結果的 PR 就是這一輪跑不出來的，記成 failed 跳過。
+    # 不重跑，也就不會覆寫它的 .err —— 那份 .err 是判斷失敗原因的唯一證據。
+    echo "RECOMPUTE_SKIP：${repo}#${pr} 沒有現成的 review 輸出，這個 PR 不計入本次彙總（--recompute 不跑 review）" >&2
+    n_failed=$((n_failed + 1))
+    failed_list="$(jq -n --argjson a "$failed_list" --arg k "${repo}#${pr}" '$a + [$k]')"
+    continue
+  fi
   if [[ ! -s "$f" ]]; then
     if ! MRA_BACKTEST_COND_FILE="$COND_FILE" "$MRA_CMD" review "$repo" --pr "$pr" --strategy personas --json > "$f" 2>"$errf"; then
       echo "REVIEW_FAILED：${repo}#${pr} 的 review 失敗，詳見 ${errf}，這個 PR 不計入本次彙總" >&2
@@ -232,6 +250,11 @@ for ((i = 0; i < n_conf; i++)); do
     'map(if .matched_idx == null then . else .matched_idx += $off end)' <<<"$m")"
   all_matches="$(jq -n --argjson a "$all_matches" --argjson b "$m" '$a + $b')"
   all_comments="$(jq -n --argjson a "$all_comments" --argjson r "$review" '$a + $r.comments')"
+  # 檔案層級的漏抓要在這裡逐 PR 累加，不能事後對攤平的陣列算一次：不同 PR
+  # 常常改到同名的檔案，攤平之後這個 PR 的 expected 會配到別的 PR 對同名檔案
+  # 的 comment，漏抓數偏低。上面 matched_idx 靠 offset 補救，這個沒有 offset
+  # 可補，只能不要攤平。
+  file_missed=$((file_missed + $(backtest_file_missed "$review" "$expected")))
   prs=$((prs + 1))
 done
 
@@ -329,14 +352,22 @@ _write_summary "$OUT/summary.json" \
   --argjson incomplete_count "$n_incomplete" --argjson incomplete_prs "$incomplete_list" \
   --argjson failed_count "$n_failed" --argjson failed_prs "$failed_list" \
   --argjson tolerance "$TOL" \
+  --argjson file_missed "$file_missed" \
   --argjson conditions "$conditions_json" --arg conditions_source "$conditions_source" \
   --arg candidates_sha "$candidates_sha" --argjson candidates_confirmed "$n_conf" \
   '$m + {prs: $prs, label: $label,
          incomplete_count: $incomplete_count, incomplete_prs: $incomplete_prs,
          failed_count: $failed_count, failed_prs: $failed_prs,
          tolerance: $tolerance,
+         file_missed: $file_missed,
+         file_miss_rate: (if $m.expected_total == 0 then 0
+                          else (($file_missed / $m.expected_total) * 100 | round) / 100 end),
+         anchor_drift: ($m.missed - $file_missed),
          candidates_sha: $candidates_sha, candidates_confirmed: $candidates_confirmed}
    + $conditions + {conditions_source: $conditions_source}' || exit 1
 
 echo "label=$LABEL prs=$prs incomplete=$n_incomplete failed=$n_failed"
-jq -r '"漏抓率 \(.miss_rate)  未對應率 \(.unmatched_rate)  嚴重度吻合率 \(.severity_rate)"' "$OUT/summary.json"
+# 四個數字一起印：只看漏抓率會把「沒看到那個檔案」與「看到了但錨點落在幾十行
+# 外」讀成同一件事。anchor_drift 是兩者的差，也就是「行號容差算漏、但同一個
+# 檔案其實有講」的條數。
+jq -r '"漏抓率 \(.miss_rate)  同檔完全沒講 \(.file_miss_rate)  錨點漂移 \(.anchor_drift) 條  未對應率 \(.unmatched_rate)  嚴重度吻合率 \(.severity_rate)"' "$OUT/summary.json"

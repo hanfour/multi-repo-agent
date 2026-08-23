@@ -74,3 +74,25 @@ backtest_metrics() {
         severity_agree: $agree,
         severity_rate: (if ($hits | length) == 0 then 0 else ($agree / ($hits | length)) | round2 end) }'
 }
+
+# 檔案層級的漏抓：expected finding 所在的檔案裡，一條 comment 都沒有。
+#
+# 為什麼要有這個：行號容差指標對錨點高度敏感。實測 baseline-personas 全量
+# 38 個 PR 的 37 條 ±15 漏抓裡，13 條其實同一個檔案有講、只是落在幾十行外
+# (react-app-1#201 那條 CRITICAL 是典型：expected 在
+# settings-page.tsx:52，comment 落在 :93，離 41 行)。只報行號容差會把
+# 「錨點漂移」讀成「沒看到」，而這兩者的處置完全不同：前者要調的是 comment
+# 錨在哪一行，後者要調的是 reviewer 有沒有看那個檔案。
+#
+# 一定要逐 PR 呼叫，不能像 backtest_metrics 那樣餵攤平後的陣列：不同 PR 常常
+# 改到同名的檔案(app/services/x.rb 在兩個 PR 都出現)，攤平之後 A 的 expected
+# 會配到 B 的 comment，算出來的漏抓數偏低。這跟 run-backtest.sh 裡 matched_idx
+# 要位移 offset 是同一類陷阱，差別是這個沒有 offset 可以補救，只能不要攤平。
+#
+# $1：這個 PR 的 review JSON。$2：這個 PR 的 expected_findings 陣列。
+backtest_file_missed() {
+  local review="$1" expected="$2"
+  jq -n --argjson r "$review" --argjson e "$expected" \
+    '([$r.comments[]?.path] | unique) as $paths
+     | [$e[] | select((.path | IN($paths[])) | not)] | length'
+}

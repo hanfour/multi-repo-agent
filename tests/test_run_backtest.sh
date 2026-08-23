@@ -756,5 +756,104 @@ PATH="$TMP/bin-shape:$PATH" MRA_BENCHMARK_DIR="$SHP_DIR" MRA_BACKTEST_MIN_COVERA
 eq "續跑時形狀不合法的 PR 真的重跑並納入彙總" "1" \
   "$(jq -r '.prs' "$SHP_DIR/runs/shape-test/summary.json")"
 
+# --- summary 要同時報行號漏抓與檔案層級漏抓 -------------------------------
+# 只報行號容差會把「沒看到那個檔案」與「看到了但錨點落在幾十行外」讀成同一件
+# 事，而兩者的處置完全不同。
+#
+# 這個 fixture 的重點在 9401 與 9402 都改到同名的 app/shared.rb：9401 對它
+# 一句話都沒說，9402 對它講了但落在 500 行外。逐 PR 算的話 9401 算 1 條檔案
+# 層級漏抓；若哪天有人把它改成對攤平後的 comment 陣列算一次，9401 的 expected
+# 會配到 9402 的 comment，file_missed 會變成 0。這裡把正確值釘住。
+FM_DIR="$TMP/bench-filemiss"
+mkdir -p "$FM_DIR" "$TMP/bin-filemiss"
+cat > "$FM_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":9401,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/shared.rb","line":10,"severity":"HIGH","note":"9401 完全沒講"}]},
+ {"repo":"acme/rails-app-1","pr":9402,"merged_at":"2026-08-02T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/shared.rb","line":20,"severity":"HIGH","note":"9402 同檔有講但很遠"}]}
+]
+J
+cat > "$TMP/bin-filemiss/mra" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"--pr 9401"*)
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+     {"path":"app/other.rb","line":10,"body":"講的是別的檔案","severity":"HIGH"}]}' ;;
+  *"--pr 9402"*)
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+     {"path":"app/shared.rb","line":520,"body":"同檔但離 500 行","severity":"HIGH"}]}' ;;
+  *) echo "unexpected: $*" >&2; exit 1 ;;
+esac
+SHIM
+chmod +x "$TMP/bin-filemiss/mra"
+
+PATH="$TMP/bin-filemiss:$PATH" MRA_BENCHMARK_DIR="$FM_DIR" MRA_BACKTEST_MIN_COVERAGE=0 \
+  bash "$S" --label filemiss-test >"$TMP/fm.out" 2>/dev/null
+S_FM="$FM_DIR/runs/filemiss-test/summary.json"
+eq "兩條 expected 在 ±5 之下都算漏抓" "2" "$(jq -r '.missed' "$S_FM")"
+eq "檔案層級只有 9401 算漏（9402 同檔有講）" "1" "$(jq -r '.file_missed' "$S_FM")"
+eq "file_miss_rate 是 1/2" "0.5" "$(jq -r '.file_miss_rate' "$S_FM")"
+eq "anchor_drift 是 missed 減 file_missed" "1" "$(jq -r '.anchor_drift' "$S_FM")"
+has "終端機摘要同時印出兩個指標" "$(cat "$TMP/fm.out")" "同檔完全沒講"
+has "終端機摘要印出錨點漂移" "$(cat "$TMP/fm.out")" "錨點漂移"
+
+# --- --recompute 只重算，不跑 review、不覆寫 .err -------------------------
+# 換個容差再算一次時，不該連帶重跑失敗的 PR。實測過一次代價：兩筆 PR 原本的
+# 失敗原因是 synthesize 輪數用盡，容差重算時 OAuth 剛好過期，.err 全被換成
+# OAuth 錯誤，原本的診斷證據消失。
+RC_DIR="$TMP/bench-recompute"
+mkdir -p "$RC_DIR" "$TMP/bin-recompute"
+cat > "$RC_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":9501,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/a.rb","line":10,"severity":"HIGH","note":"跑得成"}]},
+ {"repo":"acme/rails-app-1","pr":9502,"merged_at":"2026-08-02T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/b.rb","line":20,"severity":"HIGH","note":"跑不成"}]}
+]
+J
+# 第一輪：9501 成功、9502 失敗並留下一段可辨識的診斷訊息
+cat > "$TMP/bin-recompute/mra" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"--pr 9501"*)
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+     {"path":"app/a.rb","line":12,"body":"距離 2","severity":"HIGH"}]}' ;;
+  *"--pr 9502"*)
+    echo "ORIGINAL_FAILURE_REASON: synthesize 輪數用盡" >&2; exit 1 ;;
+esac
+SHIM
+chmod +x "$TMP/bin-recompute/mra"
+PATH="$TMP/bin-recompute:$PATH" MRA_BENCHMARK_DIR="$RC_DIR" MRA_BACKTEST_MIN_COVERAGE=0 \
+  bash "$S" --label rc-test >/dev/null 2>&1
+ERR_9502="$RC_DIR/runs/rc-test/acme__rails-app-1__9502.err"
+has "第一輪留下原始的失敗原因" "$(cat "$ERR_9502" 2>/dev/null)" "ORIGINAL_FAILURE_REASON"
+
+# 第二輪用 --recompute。把 mra 換成「一被呼叫就寫進 canary 檔並改寫 .err」的
+# 版本：--recompute 若真的沒跑 review，canary 不會出現、.err 不會變。
+cat > "$TMP/bin-recompute/mra" <<'SHIM'
+#!/usr/bin/env bash
+echo "CALLED $*" >> "$MRA_TEST_CANARY"
+echo "OVERWRITTEN_BY_RECOMPUTE" >&2
+exit 1
+SHIM
+CANARY="$TMP/recompute-canary"
+: > "$CANARY"
+out_rc="$(PATH="$TMP/bin-recompute:$PATH" MRA_BENCHMARK_DIR="$RC_DIR" \
+  MRA_BACKTEST_MIN_COVERAGE=0 MRA_TEST_CANARY="$CANARY" \
+  bash "$S" --label rc-test --tolerance 15 --recompute 2>"$TMP/rc2.err")"
+eq "--recompute 完全沒呼叫過 mra" "0" "$(wc -l < "$CANARY" | tr -d ' ')"
+has "第一輪的失敗原因沒有被覆寫" "$(cat "$ERR_9502" 2>/dev/null)" "ORIGINAL_FAILURE_REASON"
+lacks ".err 沒有被重跑的訊息汙染" "$(cat "$ERR_9502" 2>/dev/null)" "OVERWRITTEN_BY_RECOMPUTE"
+has "跑不成的 PR 印出 RECOMPUTE_SKIP" "$(cat "$TMP/rc2.err")" "RECOMPUTE_SKIP"
+S_RC="$RC_DIR/runs/rc-test/summary.json"
+eq "重算後容差確實換成 15" "15" "$(jq -r '.tolerance' "$S_RC")"
+eq "只有跑得成的那筆計入彙總" "1" "$(jq -r '.prs' "$S_RC")"
+eq "跑不成的那筆記成 failed" "1" "$(jq -r '.failed_count' "$S_RC")"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
