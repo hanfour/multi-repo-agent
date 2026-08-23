@@ -46,8 +46,19 @@ taxonomy_search() {
   }
   [ -s "$jsonl" ] || { printf 'CORPUS_MISSING\t%s\n' "$jsonl" >&2; return 1; }
 
-  jq -c --arg p "$pattern" \
-    'select((.body // "") | test($p; "i"))' "$jsonl" | head -"$limit"
+  # 用 jq 自己的 limit() 取筆數，不接 `| head -N`。管線那個寫法有兩個問題：
+  # head 配夠了就退出，jq 還在寫就吃到 SIGPIPE 回 141；更要緊的是 jq 真正的
+  # 失敗（語料檔有一行截斷的 JSON、檔案讀不到）也會被管線吃掉，呼叫端看到的
+  # 只是「撈到 0 則」。實測一行截斷的 JSON 讓 8 個類別裡的 7 個被誤報成
+  # 「實例不足」而丟棄，而真正的原因是語料壞了。
+  #
+  # 這裡不加 pipefail 而是整段拿掉管線：pipefail 只會把那個 141 變成另一個
+  # 難解讀的失敗，拿掉管線才讓 jq 的退出碼就是這個函式的退出碼。
+  #
+  # -n 搭配 inputs 逐行讀，不是把整個檔案 slurp 進記憶體：最大的一層是 40MB
+  # 兩萬行，符合 pattern 的通常是幾十則，limit() 收滿就停。
+  jq -c -n --arg p "$pattern" --argjson lim "$limit" \
+    '[inputs | select((.body // "") | test($p; "i"))] | limit($lim; .[])' "$jsonl"
 }
 
 # taxonomy_prompt_prefix <class_id> <class_name> <layer> — B 路線的 prompt

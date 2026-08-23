@@ -66,7 +66,15 @@ reject_from_tmp() {
 produced=0; dropped=0; rejected=0; agent_failed=0
 while IFS=$'\t' read -r class_id class_name _; do
   [ -n "$class_id" ] || continue
-  hits="$(taxonomy_search "$class_id" "$CORPUS" 40)"
+  # taxonomy_search 的退出碼一定要接住。不接的話，語料檔壞掉（一行截斷的
+  # JSON）與「這個類別在這一層真的沒有實例」會得到同一個結果：n=0，然後被
+  # 記成「撈到 0 則，少於 3」丟棄。實測一行截斷讓 8 個類別裡的 7 個被誤報成
+  # 實例不足，而真正的原因是語料壞了 —— 那是要重跑 materialize，不是要放寬
+  # MIN_HITS。
+  if ! hits="$(taxonomy_search "$class_id" "$CORPUS" 40)"; then
+    echo "CORPUS_SEARCH_FAILED：在 ${CORPUS} 搜尋類別 ${class_id} 失敗（見上方 jq 的診斷）。這不是「實例不足」，是語料本身有問題，先修語料再跑" >&2
+    exit 1
+  fi
   n="$(printf '%s' "$hits" | grep -c . || true)"
 
   if [ "$n" -lt "$MIN_HITS" ]; then

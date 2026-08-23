@@ -428,5 +428,32 @@ test_missing_agent_cmd_fails_loudly
 test_non_numeric_min_hits_fails_loudly
 test_min_hits_zero_lets_everything_through_the_threshold
 
+# --- 語料壞掉要跟「實例不足」分開報 ---------------------------------------
+# taxonomy_search 的退出碼原本被丟棄，語料檔有一行截斷的 JSON 時 jq 失敗、
+# 撈到 0 則，然後被記成「撈到 0 則，少於 3」丟棄。那兩件事的處置完全不同：
+# 前者要重跑 materialize，後者是這個類別在這一層真的沒有實例。
+BROKEN="$TMP/broken-corpus.jsonl"
+printf '%s\n' '{"body":"missing test coverage for the new branch","url":"https://x/1"}' > "$BROKEN"
+printf '%s\n' '{"body":"no test added for this convention","url":"https://x/2"}' >> "$BROKEN"
+printf '%s' '{"body":"這一行沒有收尾' >> "$BROKEN"
+
+out_broken="$(run_extract "$BROKEN" common "$TMP/out-broken" true 2>&1)"
+rc_broken=$?
+[ "$rc_broken" -ne 0 ] && ok "語料壞掉時退出碼非 0" || fail "應該退出非 0"
+has "用 CORPUS_SEARCH_FAILED 這個 token 報" "$out_broken" "CORPUS_SEARCH_FAILED"
+has "訊息說明是語料本身有問題" "$out_broken" "語料本身有問題"
+lacks "不該被誤報成撈到 0 則" "$out_broken" "少於"
+
+# 對照：語料正常但某個類別真的沒有實例時，仍然走「丟棄」那條路
+CLEAN="$TMP/clean-corpus.jsonl"
+printf '%s\n' '{"body":"完全無關的內容","url":"https://x/1"}' > "$CLEAN"
+out_clean="$(run_extract "$CLEAN" common "$TMP/out-clean" true 2>&1)"
+lacks "語料正常時不報 CORPUS_SEARCH_FAILED" "$out_clean" "CORPUS_SEARCH_FAILED"
+if [ -s "$TMP/out-clean/_dropped.tsv" ]; then
+  ok "實例不足的類別仍然被記進 _dropped.tsv"
+else
+  fail "實例不足的類別沒有被記錄"
+fi
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

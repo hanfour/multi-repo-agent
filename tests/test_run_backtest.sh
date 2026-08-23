@@ -977,5 +977,72 @@ PATH="$TMP/bin-early:$PATH" MRA_BENCHMARK_DIR="$EV_DIR" MRA_TEST_CANARY="$EV_CAN
   MRA_BACKTEST_MIN_COVERAGE=0 bash "$S" --label ev-ok --tolerance 5 >/dev/null 2>&1
 eq "值都合法時 review 有跑" "1" "$(wc -l < "$EV_CANARY" | tr -d ' ')"
 
+# --- --recompute 連跑兩次要得到一模一樣的結果 -----------------------------
+# 它自己宣告「重算容差不該有副作用」。原本會刪掉形狀不合法與 incomplete 的
+# 輸出檔，第二次跑時那些 PR 變成 RECOMPUTE_SKIP，失敗分類從 incomplete 變成
+# failed —— 同一個指令跑兩次得到不同的 summary。
+ID_DIR="$TMP/bench-idem"
+mkdir -p "$ID_DIR" "$TMP/bin-idem"
+cat > "$ID_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":9901,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/a.rb","line":10,"severity":"HIGH","note":"正常"}]},
+ {"repo":"acme/rails-app-1","pr":9902,"merged_at":"2026-08-02T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/b.rb","line":20,"severity":"HIGH","note":"沒跑完"}]},
+ {"repo":"acme/rails-app-1","pr":9903,"merged_at":"2026-08-03T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/c.rb","line":30,"severity":"HIGH","note":"形狀不合法"}]}
+]
+J
+cat > "$TMP/bin-idem/mra" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"--pr 9901"*) printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+     {"path":"app/a.rb","line":11,"body":"x","severity":"HIGH"}]}' ;;
+  *"--pr 9902"*) printf '%s' '{"status":"COMMENT","comments":[]}' ;;
+  *"--pr 9903"*) printf '%s' '{"status":"CHANGES_REQUESTED","summary":"缺 comments"}' ;;
+esac
+SHIM
+chmod +x "$TMP/bin-idem/mra"
+
+# 第一輪：正常模式，9902 記成 incomplete、9903 記成 failed，兩者的輸出檔被刪
+PATH="$TMP/bin-idem:$PATH" MRA_BENCHMARK_DIR="$ID_DIR" MRA_BACKTEST_MIN_COVERAGE=0 \
+  bash "$S" --label idem >/dev/null 2>&1
+
+# 第二輪與第三輪都用 --recompute。9902/9903 沒有現成輸出（第一輪刪了），所以
+# 兩輪都是 RECOMPUTE_SKIP，結果必須一致。
+PATH="$TMP/bin-idem:$PATH" MRA_BENCHMARK_DIR="$ID_DIR" MRA_BACKTEST_MIN_COVERAGE=0 \
+  bash "$S" --label idem --tolerance 15 --recompute >/dev/null 2>&1
+cp "$ID_DIR/runs/idem/summary.json" "$TMP/idem-run2.json"
+PATH="$TMP/bin-idem:$PATH" MRA_BENCHMARK_DIR="$ID_DIR" MRA_BACKTEST_MIN_COVERAGE=0 \
+  bash "$S" --label idem --tolerance 15 --recompute >/dev/null 2>&1
+cp "$ID_DIR/runs/idem/summary.json" "$TMP/idem-run3.json"
+if diff -q "$TMP/idem-run2.json" "$TMP/idem-run3.json" >/dev/null; then
+  ok "--recompute 連跑兩次的 summary 完全相同"
+else
+  fail "--recompute 連跑兩次得到不同的 summary：$(diff "$TMP/idem-run2.json" "$TMP/idem-run3.json" | head -5)"
+fi
+
+# 直接驗刪檔這件事：在 --recompute 下放一個形狀不合法的檔案，跑完它要還在
+printf '%s' '{"status":"CHANGES_REQUESTED","summary":"沒有 comments 欄位"}' \
+  > "$ID_DIR/runs/idem/acme__rails-app-1__9903.json"
+PATH="$TMP/bin-idem:$PATH" MRA_BENCHMARK_DIR="$ID_DIR" MRA_BACKTEST_MIN_COVERAGE=0 \
+  bash "$S" --label idem --recompute >/dev/null 2>&1
+if [ -f "$ID_DIR/runs/idem/acme__rails-app-1__9903.json" ]; then
+  ok "--recompute 不刪形狀不合法的輸出檔（那是判斷原因的證據）"
+else
+  fail "--recompute 刪掉了輸出檔，違反它自己宣告的無副作用"
+fi
+# 對照：正常模式下同一個檔案要被刪掉
+PATH="$TMP/bin-idem:$PATH" MRA_BENCHMARK_DIR="$ID_DIR" MRA_BACKTEST_MIN_COVERAGE=0 \
+  bash "$S" --label idem >/dev/null 2>&1
+if [ -f "$ID_DIR/runs/idem/acme__rails-app-1__9903.json" ]; then
+  fail "正常模式下形狀不合法的輸出檔應該被刪（不然續跑會跳過它）"
+else
+  ok "正常模式下仍然刪除，--recompute 的例外沒有波及正常路徑"
+fi
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

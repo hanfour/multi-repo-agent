@@ -419,12 +419,42 @@ test_recompute_and_token_budget_combine() {
   fi
 }
 
+# 執行條件記錄描述的是「summary 裡的數字是在什麼規則集下跑出來的」。
+# --recompute 不重跑 review，規則集卻可能已經改了，覆寫等於把記錄跟它描述的
+# 對象拆開 —— 檔案裡是新規則集、數字來自舊 review，從檔案本身看不出來。
+test_recompute_keeps_existing_inject_conditions() {
+  local cond="$MRA_BENCHMARK_DIR/runs/keepcond/rule-inject-conditions.json"
+  # 第一輪：正常模式，用 fixture 的規則集
+  reset_stub_logs
+  MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+    bash "$S" --rules "$FIX/rules" --label keepcond >/dev/null 2>&1
+  local n_before; n_before="$(jq -r '.n_rules' "$cond" 2>/dev/null)"
+
+  # 第二輪：--recompute，但指向一個條數不同的規則集
+  local other="$TMP/other-rules"
+  mkdir -p "$other"
+  write_common_rule "$other" keepcond-a 5
+  write_common_rule "$other" keepcond-b 4
+  local out
+  out="$(MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+    bash "$S" --rules "$other" --label keepcond --recompute 2>&1)"
+
+  has "印出保留既有記錄的訊息" "$out" "RECOMPUTE_KEEP_CONDITIONS"
+  eq "執行條件記錄沒有被新規則集覆寫" "$n_before" "$(jq -r '.n_rules' "$cond" 2>/dev/null)"
+
+  # 對照：同一個新規則集在正常模式下要真的覆寫
+  MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+    bash "$S" --rules "$other" --label keepcond >/dev/null 2>&1
+  eq "正常模式下記錄有更新成新規則集的條數" "2" "$(jq -r '.n_rules' "$cond" 2>/dev/null)"
+}
+
 test_flag_missing_value_rejected_not_crashed
 test_unknown_flag_rejected
 test_tolerance_must_be_non_negative_number
 test_valid_tolerance_not_rejected
 test_tolerance_env_var_is_used_and_validated
 test_recompute_and_token_budget_combine
+test_recompute_keeps_existing_inject_conditions
 test_token_budget_flag_overrides_and_is_forwarded
 test_token_budget_env_var_sets_default_when_no_flag
 test_default_token_budget_is_library_default_when_unset
