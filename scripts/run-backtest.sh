@@ -263,7 +263,11 @@ for ((i = 0; i < n_conf; i++)); do
     # 不合法最常見的來源正是回測被外力中止（額度耗盡、Ctrl-C）時 `> "$f"` 已
     # 建檔但還沒寫完，而續跑正是這種中止之後才會做的事——不刪等於把一次可以
     # 自動修復的中斷，變成一個要人工發現的永久缺口。
-    rm -f "$f"
+    #
+    # --recompute 例外：那個模式不重跑任何東西，刪掉只是把證據丟了，而且會讓
+    # 連跑兩次得到不同的結果（第二次變成 RECOMPUTE_SKIP），違反它自己宣告的
+    # 「重算容差不該有副作用」。
+    [[ "$RECOMPUTE" -eq 1 ]] || rm -f "$f"
     continue
   fi
 
@@ -280,7 +284,8 @@ for ((i = 0; i < n_conf; i++)); do
     echo "REVIEW_INCOMPLETE：${repo}#${pr} 的 review 沒有跑完(status=COMMENT)，詳見 ${errf}，這個 PR 不計入本次彙總" >&2
     # 輸出檔一定要刪：留著的話下次續跑會被上面的 -s 判定成「已經有結果」
     # 而跳過，這個 PR 就永遠不會重跑，永遠卡在跑不完的狀態。
-    rm -f "$f"
+    # --recompute 例外，理由同上面的 SHAPE_INVALID 分支。
+    [[ "$RECOMPUTE" -eq 1 ]] || rm -f "$f"
     n_incomplete=$((n_incomplete + 1))
     incomplete_list="$(jq -n --argjson a "$incomplete_list" --arg k "${repo}#${pr}" '$a + [$k]')"
     continue

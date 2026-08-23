@@ -225,30 +225,41 @@ else
   skipped_json='[]'
 fi
 
-if ! jq -n \
-  --arg label "$LABEL" \
-  --arg rules_dir "$RULES" \
-  --argjson n_rules "$n_rules" \
-  --arg persona_dir "$INJECTED" \
-  --argjson persona_total "$n_total" \
-  --argjson persona_injected "$n_injected" \
-  --argjson persona_skipped "$n_skipped" \
-  --argjson persona_skipped_names "$skipped_json" \
-  --argjson token_budget "$EFFECTIVE_BUDGET" \
-  --argjson tolerance "$TOL" \
-  '{label: $label, rules_dir: $rules_dir, n_rules: $n_rules,
-    persona_dir: $persona_dir, persona_total: $persona_total,
-    persona_injected: $persona_injected, persona_skipped: $persona_skipped,
-    persona_skipped_names: $persona_skipped_names,
-    token_budget: $token_budget, tolerance: $tolerance}' > "$COND_TMP"; then
-  echo "COND_WRITE_FAILED：寫入執行條件記錄失敗，${COND_FILE} 未變動" >&2
-  rm -f "$COND_TMP"
-  exit 1
-fi
-if ! mv "$COND_TMP" "$COND_FILE"; then
-  echo "COND_PROMOTE_FAILED：搬移執行條件記錄到 ${COND_FILE} 失敗" >&2
-  rm -f "$COND_TMP"
-  exit 1
+# --recompute 且已經有一份記錄時就保留它，不覆寫。這份記錄描述的是「summary
+# 裡的數字是在什麼規則集下跑出來的」；重算容差時 review 沒有重跑，規則集卻
+# 可能已經改了，覆寫等於把記錄跟它描述的對象拆開 —— 檔案裡是新規則集、數字
+# 來自舊 review，而且從檔案本身看不出這件事。
+#
+# 沒有既有記錄時照樣寫：那表示這個 label 是第一次跑，或上一輪的記錄遺失了，
+# 兩種情況下寫一份都比留空好。
+if [ -n "$RECOMPUTE_FLAG" ] && [ -f "$COND_FILE" ]; then
+  echo "RECOMPUTE_KEEP_CONDITIONS：保留既有的 ${COND_FILE}（--recompute 不重跑 review，覆寫會讓記錄與數字對不起來）" >&2
+else
+  if ! jq -n \
+    --arg label "$LABEL" \
+    --arg rules_dir "$RULES" \
+    --argjson n_rules "$n_rules" \
+    --arg persona_dir "$INJECTED" \
+    --argjson persona_total "$n_total" \
+    --argjson persona_injected "$n_injected" \
+    --argjson persona_skipped "$n_skipped" \
+    --argjson persona_skipped_names "$skipped_json" \
+    --argjson token_budget "$EFFECTIVE_BUDGET" \
+    --argjson tolerance "$TOL" \
+    '{label: $label, rules_dir: $rules_dir, n_rules: $n_rules,
+      persona_dir: $persona_dir, persona_total: $persona_total,
+      persona_injected: $persona_injected, persona_skipped: $persona_skipped,
+      persona_skipped_names: $persona_skipped_names,
+      token_budget: $token_budget, tolerance: $tolerance}' > "$COND_TMP"; then
+    echo "COND_WRITE_FAILED：寫入執行條件記錄失敗，${COND_FILE} 未變動" >&2
+    rm -f "$COND_TMP"
+    exit 1
+  fi
+  if ! mv "$COND_TMP" "$COND_FILE"; then
+    echo "COND_PROMOTE_FAILED：搬移執行條件記錄到 ${COND_FILE} 失敗" >&2
+    rm -f "$COND_TMP"
+    exit 1
+  fi
 fi
 
 # --- 呼叫階段二的 run-backtest.sh -------------------------------------------
