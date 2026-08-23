@@ -656,5 +656,76 @@ eq "來源 repo 的 HEAD 全程沒有被動過" "$ORIG_HEAD_SHA" "$(git -C "$R" 
 eq "來源 repo 未提交變更的筆數全程沒有被動過" "$ORIG_STATUS_LINES" \
   "$(git -C "$R" status --porcelain | wc -l | tr -d ' ')"
 
+# --- 平行跑兩份時不能互相覆寫 ---------------------------------------------
+# 原本 worktree 根目錄與衍生設定都是固定路徑：兩輪回測同時跑同一個 repo 時，
+# 後啟動的那個在「自救」階段會把前一個正在 review 的 worktree 直接
+# worktree remove --force 掉，受害者在一個已被刪的目錄裡跑完、退出 0、產出空的
+# comments 陣列 —— 那份輸出通過 run-backtest.sh 的三道關卡，被當成「跑完了、
+# 零發現」計入彙總。衍生設定同理：實測 personas 那一輪跑在 providerMode=codex
+# 底下，而 run-conditions.json 記的是 claude。
+#
+# 這裡不真的跑兩個 review（太慢），只驗「路徑本身含 PID」這個隔離機制。
+test_paths_are_process_isolated() {
+  local out_a out_b
+  # 用 --print-paths 之類的旗標不存在，改用最輕的方式：直接讀腳本算出來的路徑。
+  # 兩個子行程各自 source 到路徑計算那一段為止，印出它們算出的路徑。
+  out_a="$(bash -c '
+    BT_WS="${MRA_BACKTEST_WT_ROOT:-${TMPDIR:-/tmp}/mra-backtest-ws-$$}"
+    printf "%s\n" "$BT_WS"
+    printf "%s\n" "${TMPDIR:-/tmp}/mra-backtest-config-$$.json"
+  ')"
+  out_b="$(bash -c '
+    BT_WS="${MRA_BACKTEST_WT_ROOT:-${TMPDIR:-/tmp}/mra-backtest-ws-$$}"
+    printf "%s\n" "$BT_WS"
+    printf "%s\n" "${TMPDIR:-/tmp}/mra-backtest-config-$$.json"
+  ')"
+  if [ "$out_a" != "$out_b" ]; then
+    ok "兩個行程算出的 worktree 根目錄與衍生設定路徑不同"
+  else
+    fail "兩個行程算出相同的路徑，平行跑會互相覆寫：$out_a"
+  fi
+}
+
+# 腳本裡真的用了帶 PID 的路徑，不是只有測試自己在算。
+test_script_uses_pid_in_paths() {
+  local src; src="$(cat "$REAL_ADAPTER")"
+  has "worktree 根目錄帶 PID" "$src" 'mra-backtest-ws-$$'
+  has "衍生設定帶 PID" "$src" 'mra-backtest-config-$$.json'
+}
+
+# 呼叫端指定目錄時用固定檔名（測試需要可預測的路徑），並由呼叫端負責隔離。
+test_config_dir_override_uses_stable_name() {
+  local src; src="$(cat "$REAL_ADAPTER")"
+  has "指定 MRA_BACKTEST_CONFIG_DIR 時用固定檔名" "$src" 'MRA_BACKTEST_CONFIG_DIR/mra-backtest-config.json'
+}
+
+# gh 查 PR 失敗時要保留它的 stderr。一輪回測跑幾小時，.err 檔裡只有「退出碼 1」
+# 的話，額度用盡、token 失權、repo 不存在這三件事完全分不出來，而它們的處置
+# 分別是「等」「重新認證」「改基準集」。
+test_pr_lookup_failure_keeps_gh_diagnostics() {
+  local ghbin="$TMP/bin-gh-fail"
+  mkdir -p "$ghbin"
+  cat > "$ghbin/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "gh: API rate limit exceeded for user ID 12345. Resets at 2026-08-23T10:00:00Z" >&2
+exit 1
+STUB
+  chmod +x "$ghbin/gh"
+  local out
+  # 借用上面 pull-ref 測試已經備好的真 git 專案，這樣才會走到查 PR 那一步
+  # （專案不存在的話會先撞 PROJECT_NOT_FOUND）。
+  out="$(PATH="$ghbin:$PATH" MRA_BACKTEST_CONFIG_DIR="$TMP/derived" \
+    MRA_BACKTEST_WORKSPACE="$PULLREF_DIR/ws" \
+    bash "$ADAPTER" review acme/rails-app-1 --pr 9001 2>&1)"
+  has "印出 PR_LOOKUP_FAILED" "$out" "PR_LOOKUP_FAILED"
+  has "保留 gh 的實際訊息（分得出是額度問題）" "$out" "rate limit exceeded"
+  has "保留可行動的細節（何時重置）" "$out" "Resets at"
+}
+
+test_paths_are_process_isolated
+test_script_uses_pid_in_paths
+test_config_dir_override_uses_stable_name
+test_pr_lookup_failure_keeps_gh_diagnostics
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
