@@ -280,7 +280,8 @@ rule_inject_all() {
     [ -e "$p" ] || continue
     [ "$(basename "$p")" = "README.md" ] && continue
 
-    local dest="$out_dir/$(basename "$p")"
+    local dest
+    dest="$out_dir/$(basename "$p")"
     rule_inject_persona "$p" "$block" "$dest"
     local rc=$?
     if [ "$rc" -eq 2 ]; then

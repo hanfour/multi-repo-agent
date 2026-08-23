@@ -843,9 +843,9 @@ exit 1
 SHIM
 CANARY="$TMP/recompute-canary"
 : > "$CANARY"
-out_rc="$(PATH="$TMP/bin-recompute:$PATH" MRA_BENCHMARK_DIR="$RC_DIR" \
+PATH="$TMP/bin-recompute:$PATH" MRA_BENCHMARK_DIR="$RC_DIR" \
   MRA_BACKTEST_MIN_COVERAGE=0 MRA_TEST_CANARY="$CANARY" \
-  bash "$S" --label rc-test --tolerance 15 --recompute 2>"$TMP/rc2.err")"
+  bash "$S" --label rc-test --tolerance 15 --recompute >/dev/null 2>"$TMP/rc2.err"
 eq "--recompute 完全沒呼叫過 mra" "0" "$(wc -l < "$CANARY" | tr -d ' ')"
 has "第一輪的失敗原因沒有被覆寫" "$(cat "$ERR_9502" 2>/dev/null)" "ORIGINAL_FAILURE_REASON"
 lacks ".err 沒有被重跑的訊息汙染" "$(cat "$ERR_9502" 2>/dev/null)" "OVERWRITTEN_BY_RECOMPUTE"
