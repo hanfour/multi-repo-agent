@@ -31,6 +31,17 @@ errors=0; pass=0
 ok()   { echo "PASS: $1"; pass=$((pass+1)); }
 fail() { echo "FAIL: $1"; errors=$((errors+1)); }
 eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] got [$3]"; fi; }
+has()  { case "$2" in *"$3"*) ok "$1" ;; *) fail "$1 — 沒看到「$3」：$2" ;; esac; }
+lacks(){ case "$2" in *"$3"*) fail "$1 — 不該看到「$3」：$2" ;; *) ok "$1" ;; esac; }
+
+# 一個沒有定義的 helper 會讓 bash 印 "command not found" 然後繼續跑，那個
+# 斷言既不算 pass 也不算 fail，測試照樣印出 "Failed: 0"。實際踩過一次：三個
+# 斷言靜默消失，總數看起來還變多了。這道讓未定義的指令直接算成失敗。
+command_not_found_handle() {
+  fail "呼叫了未定義的指令 $1（斷言被靜默跳過）"
+  return 127
+}
+
 S="$MRA_DIR/scripts/review-benchmark.sh"
 C="$MRA_BENCHMARK_DIR/candidates.json"
 
@@ -210,6 +221,53 @@ out="$(MRA_BENCHMARK_DIR="$CORRUPT_DIR" bash "$S" --next 2>&1)"; rc=$?
 eq "讀取失敗退出非 0" "1" "$rc"
 case "$out" in *"READ_FAILED"*) ok "讀取失敗有獨立 token" ;; *) fail "沒有獨立 token：$out" ;; esac
 case "$out" in *完成*) fail "讀取失敗被誤報成確認完成：$out" ;; *) ok "讀取失敗不會被誤報成確認完成" ;; esac
+
+# --- --add 對「行號不在 PR diff 內」發警告 --------------------------------
+# reviewer 讀的是 diff，diff 外的行它看不到，標了等於保證漏抓，而且事後從
+# summary 完全看不出來。實測階段二的基準集 54 條裡有 10 條是這樣。
+#
+# 只警告不擋：標註者有可能刻意要記一個 diff 外的位置。所以斷言要驗兩件事 ——
+# 有警告，而且 finding 真的被寫進去了。
+OOB_BIN="$TMP/bin-oob"
+mkdir -p "$OOB_BIN"
+cat > "$OOB_BIN/gh" <<'SHIM'
+#!/usr/bin/env bash
+# 只回一個 hunk：新檔的 100 到 109 行
+printf '%s' '[{"filename":"app/x.rb","patch":"@@ -100,5 +100,10 @@\n context"}]'
+SHIM
+chmod +x "$OOB_BIN/gh"
+
+OOB_DIR="$TMP/bench-oobguard"
+mkdir -p "$OOB_DIR"
+cat > "$OOB_DIR/candidates.json" <<'J'
+[{"repo":"acme/rails-app-1","pr":9801,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":false,"expected_findings":[]}]
+J
+
+# 105 在 hunk 內（100..109），不該有警告
+out_in="$(PATH="$OOB_BIN:$PATH" MRA_BENCHMARK_DIR="$OOB_DIR" \
+  bash "$S" --add --repo acme/rails-app-1 9801 app/x.rb 105 HIGH "在 diff 內" 2>&1)"
+lacks "行號在 diff 內時不警告" "$out_in" "LINE_OUTSIDE_DIFF"
+
+# 500 在 hunk 外，要警告，但仍要寫進去
+out_oob="$(PATH="$OOB_BIN:$PATH" MRA_BENCHMARK_DIR="$OOB_DIR" \
+  bash "$S" --add --repo acme/rails-app-1 9801 app/x.rb 500 HIGH "在 diff 外" 2>&1)"
+has "行號在 diff 外時發警告" "$out_oob" "LINE_OUTSIDE_DIFF"
+has "警告指名是哪一個位置" "$out_oob" "app/x.rb:500"
+eq "警告之後 finding 仍然被寫進去（只警告不擋）" "2" \
+  "$(jq -r '.[0].expected_findings | length' "$OOB_DIR/candidates.json")"
+
+# gh 查不到時只是跳過這道檢查，不影響 --add
+cat > "$OOB_BIN/gh" <<'SHIM'
+#!/usr/bin/env bash
+exit 1
+SHIM
+PATH="$OOB_BIN:$PATH" MRA_BENCHMARK_DIR="$OOB_DIR" \
+  bash "$S" --add --repo acme/rails-app-1 9801 app/x.rb 700 HIGH "查不到 patch" >/dev/null 2>&1
+rc_nogh=$?
+eq "gh 查不到時 --add 仍然成功" "0" "$rc_nogh"
+eq "gh 查不到時 finding 照樣寫進去" "3" \
+  "$(jq -r '.[0].expected_findings | length' "$OOB_DIR/candidates.json")"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

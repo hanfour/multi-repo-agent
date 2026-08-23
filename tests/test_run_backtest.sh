@@ -860,24 +860,122 @@ eq "跑不成的那筆記成 failed" "1" "$(jq -r '.failed_count' "$S_RC")"
 # 每一條 expected 都不命中、漏抓率變成完美的 1.0（jq 的型別排序裡 null 小於
 # 任何數字，`距離 <= null` 恆為 false）。那個 1.0 會原樣寫進 summary.json，
 # 事後看不出它是垃圾。
+# 只驗退出碼非 0 是不夠的：這個區塊跑在上面已經被改成全 confirmed=false 的
+# 候選集上，NO_CONFIRMED 也會讓退出碼非 0。實測把容差驗證整段拿掉之後，
+# 那種斷言仍然全綠。所以只驗訊息內容，那才分得出是哪一道擋的。
 for bad_tol in null -3 '[]' '{}' abc '"5"'; do
   out_tol="$(bash "$S" --label tol-test --tolerance "$bad_tol" 2>&1)"
-  rc_tol=$?
-  if [ "$rc_tol" -ne 0 ]; then
-    ok "容差 [$bad_tol] 被擋下來"
-  else
-    fail "容差 [$bad_tol] 應該被擋下來卻通過了"
-  fi
-  has "容差 [$bad_tol] 的訊息用 TOLERANCE_INVALID" "$out_tol" "TOLERANCE_INVALID"
+  has "容差 [$bad_tol] 被 TOLERANCE_INVALID 擋下來" "$out_tol" "TOLERANCE_INVALID"
+  lacks "容差 [$bad_tol] 不是被別的檢查擋的" "$out_tol" "NO_CONFIRMED"
 done
 # 合法值不能被誤擋：0 是合法的（要求 comment 精準落在 expected 那一行）。
 for good_tol in 0 5 15 2.5; do
-  bash "$S" --label tol-ok --tolerance "$good_tol" >/dev/null 2>&1
-  rc_tol=$?
-  # 這裡不會真的跑成功（stub 環境），只要不是被 TOLERANCE_INVALID 擋掉即可。
+  # 這裡不會真的跑成功（候選集在上面已被改成全 confirmed=false），只要確認
+  # 擋下來的不是容差這一道即可。
   out_tol="$(bash "$S" --label tol-ok --tolerance "$good_tol" 2>&1)"
   lacks "合法容差 [$good_tol] 沒被誤擋" "$out_tol" "TOLERANCE_INVALID"
 done
+
+# --- MIN_COVERAGE 必須是 0 到 1 之間的數字 --------------------------------
+# 只驗「是合法 JSON」的話 null 與 true 都會過，而 jq 的型別排序裡兩者都小於
+# 任何數字，`$c < $m` 恆為 false，覆蓋率門檻被靜默關掉。那正是這道門檻要防的
+# 東西：10 筆 confirmed 只跑成 1 筆也照樣輸出 summary、退出碼 0。
+for bad_mc in null true '[]' abc 1.5 -0.1; do
+  out_mc="$(MRA_BACKTEST_MIN_COVERAGE="$bad_mc" bash "$S" --label mc-test 2>&1)"
+  has "MIN_COVERAGE [$bad_mc] 被擋下來" "$out_mc" "MIN_COVERAGE_INVALID"
+done
+for good_mc in 0 0.8 1; do
+  out_mc="$(MRA_BACKTEST_MIN_COVERAGE="$good_mc" bash "$S" --label mc-ok 2>&1)"
+  lacks "合法 MIN_COVERAGE [$good_mc] 沒被誤擋" "$out_mc" "MIN_COVERAGE_INVALID"
+done
+
+# --- 形狀不合法的 PR 要進 failed 計數，不能從三個計數器一起消失 ------------
+# 不計數的話 prs + failed + incomplete 會小於 candidates_confirmed，而
+# summary.json 裡沒有任何欄位解釋那個缺口。
+SC_DIR="$TMP/bench-shapecount"
+mkdir -p "$SC_DIR" "$TMP/bin-shapecount"
+cat > "$SC_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":9601,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/a.rb","line":10,"severity":"HIGH","note":"正常"}]},
+ {"repo":"acme/rails-app-1","pr":9602,"merged_at":"2026-08-02T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/b.rb","line":20,"severity":"HIGH","note":"形狀不合法"}]}
+]
+J
+cat > "$TMP/bin-shapecount/mra" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"--pr 9601"*)
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+     {"path":"app/a.rb","line":11,"body":"x","severity":"HIGH"}]}' ;;
+  *"--pr 9602"*)
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"缺 comments 欄位"}' ;;
+esac
+SHIM
+chmod +x "$TMP/bin-shapecount/mra"
+out_sc="$(PATH="$TMP/bin-shapecount:$PATH" MRA_BENCHMARK_DIR="$SC_DIR" \
+  MRA_BACKTEST_MIN_COVERAGE=0 bash "$S" --label sc-test 2>&1)"
+S_SC="$SC_DIR/runs/sc-test/summary.json"
+eq "形狀不合法的 PR 計入 failed" "1" "$(jq -r '.failed_count' "$S_SC")"
+eq "failed_prs 清單指名是哪一個" "acme/rails-app-1#9602" "$(jq -r '.failed_prs[0]' "$S_SC")"
+eq "prs + failed + incomplete 等於 candidates_confirmed" "2" \
+  "$(jq -r '.prs + .failed_count + .incomplete_count' "$S_SC")"
+has "SHAPE_INVALID 訊息指名 repo#pr" "$out_sc" "acme/rails-app-1#9602"
+
+# --- --compare 要擋掉容差不同的兩份 summary -------------------------------
+# 三個率全部由容差決定：同一批 review 輸出在 tol 5 與 tol 15 下可以是
+# miss_rate 1.0 對 0.0，看起來像完勝。
+CP_DIR="$TMP/bench-compare"
+mkdir -p "$CP_DIR/runs/cp-a" "$CP_DIR/runs/cp-b"
+echo '{"tolerance":5,"missed":1,"miss_rate":1.0,"expected_total":1,"comments_total":1,"unmatched":1,"unmatched_rate":1.0,"severity_agree":0,"severity_rate":0}' \
+  > "$CP_DIR/runs/cp-a/summary.json"
+echo '{"tolerance":15,"missed":0,"miss_rate":0.0,"expected_total":1,"comments_total":1,"unmatched":0,"unmatched_rate":0,"severity_agree":1,"severity_rate":1}' \
+  > "$CP_DIR/runs/cp-b/summary.json"
+out_cp="$(MRA_BENCHMARK_DIR="$CP_DIR" bash "$S" --compare cp-a cp-b 2>&1)"
+rc_cp=$?
+[ "$rc_cp" -ne 0 ] && ok "容差不同時 --compare 拒絕比較" || fail "應該擋下來"
+has "訊息用 TOLERANCE_MISMATCH" "$out_cp" "TOLERANCE_MISMATCH"
+# 容差相同時要正常比，而且要把容差本身印出來
+cp "$CP_DIR/runs/cp-a/summary.json" "$CP_DIR/runs/cp-b/summary.json"
+out_cp2="$(MRA_BENCHMARK_DIR="$CP_DIR" bash "$S" --compare cp-a cp-b 2>&1)"
+has "容差相同時正常比較並印出容差" "$out_cp2" "tolerance"
+
+# --- 兩道輸入驗證都要在跑任何 review 之前擋下來 ---------------------------
+# 這支腳本一輪要跑幾小時、燒掉大量額度。一個打錯的 --tolerance 或
+# MRA_BACKTEST_MIN_COVERAGE 如果等到全部跑完才報錯，那幾小時就白費了。
+# 用 canary 檔驗證：擋下來的時候一次 review 都沒跑過。
+EV_DIR="$TMP/bench-early"
+mkdir -p "$EV_DIR" "$TMP/bin-early"
+cat > "$EV_DIR/candidates.json" <<'J'
+[{"repo":"acme/rails-app-1","pr":9701,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/a.rb","line":10,"severity":"HIGH","note":"x"}]}]
+J
+cat > "$TMP/bin-early/mra" <<'SHIM'
+#!/usr/bin/env bash
+echo "CALLED" >> "$MRA_TEST_CANARY"
+printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
+SHIM
+chmod +x "$TMP/bin-early/mra"
+EV_CANARY="$TMP/early-canary"
+
+: > "$EV_CANARY"
+PATH="$TMP/bin-early:$PATH" MRA_BENCHMARK_DIR="$EV_DIR" MRA_TEST_CANARY="$EV_CANARY" \
+  bash "$S" --label ev-test --tolerance null >/dev/null 2>&1
+eq "容差不合法時一次 review 都沒跑" "0" "$(wc -l < "$EV_CANARY" | tr -d ' ')"
+
+: > "$EV_CANARY"
+PATH="$TMP/bin-early:$PATH" MRA_BENCHMARK_DIR="$EV_DIR" MRA_TEST_CANARY="$EV_CANARY" \
+  MRA_BACKTEST_MIN_COVERAGE=null bash "$S" --label ev-test >/dev/null 2>&1
+eq "MIN_COVERAGE 不合法時一次 review 都沒跑" "0" "$(wc -l < "$EV_CANARY" | tr -d ' ')"
+
+# 對照：兩個值都合法時真的會跑
+: > "$EV_CANARY"
+PATH="$TMP/bin-early:$PATH" MRA_BENCHMARK_DIR="$EV_DIR" MRA_TEST_CANARY="$EV_CANARY" \
+  MRA_BACKTEST_MIN_COVERAGE=0 bash "$S" --label ev-ok --tolerance 5 >/dev/null 2>&1
+eq "值都合法時 review 有跑" "1" "$(wc -l < "$EV_CANARY" | tr -d ' ')"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

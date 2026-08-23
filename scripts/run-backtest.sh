@@ -80,7 +80,22 @@ case "${1:-}" in
       echo "SUMMARY_MALFORMED：${SUM_A} 不是合法 JSON" >&2; exit 1; }
     jq -e . >/dev/null 2>&1 <<<"$JSON_B" || {
       echo "SUMMARY_MALFORMED：${SUM_B} 不是合法 JSON" >&2; exit 1; }
+    # 容差不同的兩份 summary 不能比：三個率全部由它決定，同一批 review 輸出
+    # 在 tol 5 與 tol 15 下可以是 miss_rate 1.0 對 0.0，看起來像完勝。這正是
+    # summary.json 會記 tolerance 欄位的原因（見下面寫入處的說明），但
+    # --compare 原本既不印也不檢查它。舊的 summary 沒有這個欄位，讀到 null
+    # 時只警告不擋——擋下來會讓這個功能對階段二的既有資料完全不能用。
+    TOL_A="$(jq -r '.tolerance // "null"' <<<"$JSON_A")"
+    TOL_B="$(jq -r '.tolerance // "null"' <<<"$JSON_B")"
+    if [[ "$TOL_A" != "$TOL_B" ]]; then
+      echo "TOLERANCE_MISMATCH：${LABEL_A} 用容差 ${TOL_A}、${LABEL_B} 用容差 ${TOL_B}，三個指標全部由容差決定，這兩份數字不能直接比" >&2
+      exit 1
+    fi
+    if [[ "$TOL_A" == "null" ]]; then
+      echo "TOLERANCE_UNKNOWN：兩份 summary 都沒有記 tolerance（階段二之前的舊格式），無法確認它們用同一個容差算出來" >&2
+    fi
     printf '%-18s %10s %10s\n' "指標" "$LABEL_A" "$LABEL_B"
+    printf '%-18s %10s %10s\n' "tolerance" "$TOL_A" "$TOL_B"
     for k in expected_total missed miss_rate comments_total unmatched unmatched_rate severity_agree severity_rate; do
       VAL_A="$(printf '%s' "$JSON_A" | jq -r --arg k "$k" '.[$k]' 2>/dev/null)" ||
         { echo "READ_FAILED：解析 ${SUM_A} 失敗" >&2; exit 1; }
@@ -125,6 +140,20 @@ done
 # 全部不命中。那個 1.0 還會原樣寫進 summary.json，事後看不出它是垃圾。
 if ! jq -n --argjson t "$TOL" -e '($t | type) == "number" and $t >= 0' >/dev/null 2>&1; then
   echo "TOLERANCE_INVALID：--tolerance 的值「${TOL}」不是非負數" >&2
+  exit 1
+fi
+
+# 覆蓋率門檻同樣在開跑之前驗，不要等到幾小時的 review 全部跑完才報錯 —— 這支
+# 腳本自己的原則就是「失敗要早、要響」。
+#
+# 驗的是「0 到 1 之間的數字」，不是「合法 JSON」。只驗後者的話 null 與 true
+# 都會過，而 jq 的型別排序裡兩者都小於任何數字，底下的 `$c < $m` 恆為 false，
+# 覆蓋率門檻被靜默關掉：10 筆 confirmed 只跑成 1 筆也照樣輸出 summary、退出碼
+# 0。那正是這道門檻要防的東西。跟 --tolerance 同一個形狀。
+MIN_COVERAGE="${MRA_BACKTEST_MIN_COVERAGE:-0.8}"
+if ! jq -n --argjson m "$MIN_COVERAGE" -e \
+     '($m | type) == "number" and $m >= 0 and $m <= 1' >/dev/null 2>&1; then
+  echo "MIN_COVERAGE_INVALID：MRA_BACKTEST_MIN_COVERAGE=${MIN_COVERAGE} 不是 0 到 1 之間的數字" >&2
   exit 1
 fi
 
@@ -220,7 +249,15 @@ for ((i = 0; i < n_conf; i++)); do
     fi
   fi
   if ! jq -e '.comments' "$f" >/dev/null 2>&1; then
-    echo "REVIEW_SHAPE_INVALID：${f} 不符合 review 輸出格式，這個 PR 不計入本次彙總" >&2
+    echo "REVIEW_SHAPE_INVALID：${repo}#${pr} 的輸出 ${f} 不符合 review 輸出格式，這個 PR 不計入本次彙總" >&2
+    # 併進 failed 計數，不要讓它從三個計數器裡一起消失：不計數的話
+    # prs + failed + incomplete 會小於 candidates_confirmed，而 summary.json
+    # 裡沒有任何欄位解釋那個缺口。覆蓋率門檻算的是 prs / n_conf，所以少算的
+    # PR 仍然會壓低覆蓋率、該擋的還是會擋；問題純粹是事後看 summary 時查不到
+    # 那個 PR 去哪了。這種「數字對不起來但沒有錯誤訊息」正是這支腳本一路在防
+    # 的形狀。
+    n_failed=$((n_failed + 1))
+    failed_list="$(jq -n --argjson a "$failed_list" --arg k "${repo}#${pr}" '$a + [$k]')"
     # 跟下面 REVIEW_INCOMPLETE 同一個理由：輸出檔一定要刪。留著的話下次續跑
     # 會被上面的 -s 判定成「已經有結果」而跳過，這個 PR 就永遠不會重跑。形狀
     # 不合法最常見的來源正是回測被外力中止（額度耗盡、Ctrl-C）時 `> "$f"` 已
@@ -294,11 +331,6 @@ fi
 # 檢查(成功比例永遠 >= 0，不可能小於 0)。剛好等於門檻算通過(用 < 不用
 # <=)。輸入先驗證是不是合法數字，不合法時用自己的 token 擋下來，不要讓
 # 使用者看到 jq 自己吐的 parse error。
-MIN_COVERAGE="${MRA_BACKTEST_MIN_COVERAGE:-0.8}"
-if ! jq -n --argjson m "$MIN_COVERAGE" 'true' >/dev/null 2>&1; then
-  echo "MIN_COVERAGE_INVALID：MRA_BACKTEST_MIN_COVERAGE=${MIN_COVERAGE} 不是合法數字" >&2
-  exit 1
-fi
 coverage="$(jq -n --argjson p "$prs" --argjson n "$n_conf" '$p / $n')"
 if jq -n --argjson c "$coverage" --argjson m "$MIN_COVERAGE" -e '$c < $m' >/dev/null; then
   coverage_display="$(jq -n --argjson c "$coverage" '($c * 10000 | round) / 10000')"

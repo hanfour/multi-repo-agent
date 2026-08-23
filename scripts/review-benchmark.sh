@@ -210,6 +210,25 @@ case "${1:---next}" in
 
     resolved="$(_resolve_repo "$pr" "$repo")" || exit 1
 
+    # 行號落在 PR 沒改到的地方時警告。reviewer 讀的是 diff，那些行它看不到，
+    # 標了等於保證漏抓，而且事後從 summary 完全看不出來。實測階段二的基準集
+    # 54 條裡有 10 條是這樣。
+    #
+    # 只警告不擋：標註者有可能刻意要記一個 diff 外的位置（缺陷的根源在別處，
+    # PR 只是暴露了它）。擋下來會讓那種情況無法記錄。查不到 patch 時（網路
+    # 失敗、權限不足）也只是跳過這道檢查，不影響 --add 本身。
+    if _pr_patch="$(gh api "repos/${resolved}/pulls/${pr}/files?per_page=100" 2>/dev/null)"; then
+      _in_diff="$(jq -r --arg p "$path" --argjson l "$line" '
+        [.[] | select(.filename == $p) | .patch // ""] | .[0] // ""
+        | [scan("@@ -[0-9]+(?:,[0-9]+)? \\+([0-9]+)(?:,([0-9]+))? @@")]
+        | map({start: (.[0]|tonumber), len: ((.[1] // "1")|tonumber)})
+        | map(select($l >= .start and $l <= (.start + .len - 1)))
+        | length' <<<"$_pr_patch" 2>/dev/null)" || _in_diff=""
+      if [[ "${_in_diff:-0}" == "0" ]]; then
+        echo "LINE_OUTSIDE_DIFF：${path}:${line} 不在 ${resolved}#${pr} 改動到的行裡。reviewer 讀的是 diff，這一行它看不到，這條 finding 會保證漏抓。確認行號是不是該指向 PR 實際改動的位置" >&2
+      fi
+    fi
+
     _write "追加 ${resolved}#${pr} 的 finding" \
       --argjson p "$pr" --arg r "$resolved" --arg path "$path" --argjson line "$line" --arg sev "$sev" --arg note "$note" \
       'map(if .pr == $p and .repo == $r

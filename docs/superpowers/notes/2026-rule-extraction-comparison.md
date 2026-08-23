@@ -61,12 +61,54 @@ taxonomy 進去的 8 條是它的 common 層全部：`missing-convention-unteste
 
 第三個指標的必要性來自一個實例。`react-app-1#201` 有一條 CRITICAL：
 設定頁沒有任何權限控管，expected 標在 `settings-page.tsx:52`。基準線與帶
-規則的兩輪其實都抓到了這件事，comment 分別落在 `:93` 與 `:92`，離 expected
-40 行，兩個容差都算漏。
+規則的兩輪都講了這件事，comment 分別落在 `:93` 與 `:92`，離 expected 40 行，
+兩個容差都算漏。
 
 把「±15 算漏但同檔有講」單獨列出來，就能分辨兩件事：reviewer 沒看到那個地方，
-還是看到了但錨點落在幾十行外。基準線 personas 全量 38 個 PR 的 37 條 ±15
+還是講了同一個檔案但錨點對不上。基準線 personas 全量 38 個 PR 的 37 條 ±15
 漏抓裡，13 條是後者，只有 24 條是真的完全沒看到。
+
+## 基準集有 10 條標在 PR 沒改到的行
+
+上面那個例子的成因不是 reviewer 錨得不準。查 `react-app-1#201` 的
+diff：`settings-page.tsx` 的 `:52` 不在這個 PR 改動的任何一個 hunk 裡。
+reviewer 讀的是 diff，那一行它看不到，只能在它真的改到的地方（`:92`）講同一
+件事。
+
+把 54 條 expected 逐條對 PR 的 patch hunk 檢查，10 條的行號落在 PR 改動範圍
+之外。這些行 reviewer 結構上不可能命中，四條路線一律漏抓。
+
+| PR | 位置 | 嚴重度 |
+| --- | --- | --- |
+| react-app-1#150 | `list-actions.tsx:192` | MEDIUM |
+| react-app-1#153 | `list-actions.tsx:192` | MEDIUM |
+| react-app-1#176 | `list-actions.tsx:175` | MEDIUM |
+| react-app-1#201 | `settings-page.tsx:52` | CRITICAL |
+| nest-monorepo-2.0#410 | `env.schema.ts:41` | CRITICAL |
+| nest-monorepo-2.0#743 | `$recordId.tsx:390` | HIGH |
+| nest-monorepo-2.0#760 | `update-line-item.use-case.ts:72` | CRITICAL |
+| nest-monorepo-2.0#813 | `use-cross-channel-tracker-form.ts:19` | HIGH |
+| nest-monorepo-2.0#817 | `$recordId.tsx:125` | MEDIUM |
+| nest-monorepo-2.0#866 | `$recordId.tsx:380` | HIGH |
+
+成因在建基準集的流程：人工確認時只驗行號是正數，沒有驗它落在 PR 的 diff 內。
+標註者看的是「這個缺陷在檔案裡的位置」，那個位置常常來自修復後的版本或缺陷
+的根源處，不是 PR 這次動到的行。
+
+排除這 10 條之後重算（同一批 36 個 PR，42 條 expected，1 條約 2.38 個百分點）：
+
+| 路線 | 漏抓 ±5 | 漏抓 ±15 | 同檔完全沒講 |
+| --- | --- | --- | --- |
+| standard+codex | 0.86 (36) | 0.79 (33) | 0.69 (29) |
+| personas | 0.81 (34) | 0.64 (27) | 0.45 (19) |
+| rules-tfidf | 0.86 (36) | 0.69 (29) | 0.40 (17) |
+| rules-taxonomy | 0.71 (30) | 0.62 (26) | 0.45 (19) |
+
+四條路線的相對關係完全不變，taxonomy 對 tfidf 的 ±5 差距從 12 個百分點變成
+15 個。排除這個偏差之後結論更明確，不是更模糊。
+
+後面各節的數字仍以全部 51 條為準，方便與階段二的基準線對照；需要絕對值時
+用這一節的表。
 
 ### 配對只看行距，不看內容
 
@@ -347,12 +389,15 @@ taxonomy 相對於無規則的基準線也有改善，±5 少漏 4 條，且四�
 第三，改善的絕對量小。taxonomy 的 ±5 漏抓率仍有 0.76，51 條 expected 裡漏掉
 39 條。以「拿去當團隊 code review skill」的標準看，這個數字還不能用。
 
-第四，指標本身有誤差，而且是雙向低估。抽樣 70 條未對應 comment 判讀出 9 條
-漏判：6 條是基準集該收卻沒收（事後真的有人修），3 條是配對把抓對的 CRITICAL
-算成漏抓。兩個偏差方向相同，四條路線的漏抓率都比真實值高。
+第四，指標本身有誤差，而且是三重低估。10 條 expected 標在 PR 沒改到的行，
+reviewer 結構上不可能命中；抽樣 70 條未對應 comment 又判讀出 9 條漏判，其中
+6 條是基準集該收卻沒收（事後真的有人修）、3 條是配對把抓對的 CRITICAL 算成
+漏抓。三個偏差方向相同，四條路線的漏抓率都比真實值高。
 
-比較的相對關係不受影響：兩條路線的誤配暴險相近（38%、33%、33%），用最悲觀
-的方式折抵之後，只有 taxonomy 命中的仍有 8 條、只有 tfidf 的 4 條，方向不翻。
+比較的相對關係不受影響，這一點有直接證據：排除 10 條 out-of-diff 之後重算，
+四條路線的排序完全不變，taxonomy 對 tfidf 的差距還從 12 個百分點擴大到 15 個。
+兩條路線的誤配暴險也相近（38%、33%、33%），用最悲觀的方式折抵之後，只有
+taxonomy 命中的仍有 8 條、只有 tfidf 的 4 條，方向不翻。
 另外 taxonomy 的產出量是三條 persona 路線裡最少的（184 對 194 對 205）卻命中
 最多，排除了「講得多比較容易矇到」這個偏誤。
 
