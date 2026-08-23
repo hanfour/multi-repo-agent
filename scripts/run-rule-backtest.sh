@@ -72,12 +72,16 @@ done
 [ -n "$RULES" ] && [ -n "$LABEL" ] || { echo "缺 --rules 或 --label" >&2; exit 1; }
 
 # --tolerance 最終會被 --argjson 塞進下面的執行條件 JSON（tolerance 欄位），
-# 也會原樣傳給 run-backtest.sh。跟 run-backtest.sh 自己驗 MIN_COVERAGE 合法性
-# 的作法一致（見該檔案），用 jq 探測是不是合法數字，不合法就用自己的 token
-# 擋下來，不要讓使用者在規則驗證都通過、注入都做完之後，才在寫執行條件記錄
-# 那一步看到一句跟輸入完全無關的 jq parse error。
-if ! jq -n --argjson t "$TOL" 'true' >/dev/null 2>&1; then
-  echo "TOLERANCE_INVALID：--tolerance 的值「${TOL}」不是合法數字" >&2
+# 也會原樣傳給 run-backtest.sh。不合法就用自己的 token 擋下來，不要讓使用者
+# 在規則驗證都通過、注入都做完之後，才在寫執行條件記錄那一步看到一句跟輸入
+# 完全無關的 jq parse error。
+#
+# 檢查的是「非負數」，不是「合法 JSON」。只驗 `jq --argjson t "$TOL" 'true'`
+# 的話，`null`、`-3`、`[]`、`{}` 全部會過，而 null 與負值的後果是每一條
+# expected 都不命中、漏抓率變成完美的 1.0（jq 的型別排序裡 null 小於任何
+# 數字，`距離 <= null` 恆為 false）。那是一個沒有錯誤訊息的假結果。
+if ! jq -n --argjson t "$TOL" -e '($t | type) == "number" and $t >= 0' >/dev/null 2>&1; then
+  echo "TOLERANCE_INVALID：--tolerance 的值「${TOL}」不是非負數" >&2
   exit 1
 fi
 

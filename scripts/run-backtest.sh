@@ -116,6 +116,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -z "$LABEL" ]] && { echo "缺 --label" >&2; exit 1; }
+
+# 容差必須是非負數。這一道要在這裡驗，不能只靠呼叫端：$TOL 一路傳到
+# backtest_match 裡做 `距離 <= $tol` 的比較。jq 的型別排序是 null 小於任何
+# 數字，所以 $tol 是 null 時這個比較恆為 false —— 每一條 expected 都不命中，
+# 漏抓率變成完美的 1.0，不會有任何錯誤訊息。負值的結果一樣。
+# 實測過：`backtest_match` 在 tolerance=null 與 -3 時都正常回傳 JSON，只是
+# 全部不命中。那個 1.0 還會原樣寫進 summary.json，事後看不出它是垃圾。
+if ! jq -n --argjson t "$TOL" -e '($t | type) == "number" and $t >= 0' >/dev/null 2>&1; then
+  echo "TOLERANCE_INVALID：--tolerance 的值「${TOL}」不是非負數" >&2
+  exit 1
+fi
+
 [[ -f "$C" ]] || { echo "找不到 ${C}" >&2; exit 1; }
 
 n_conf="$(jq '[.[] | select(.confirmed == true)] | length' "$C")" ||
