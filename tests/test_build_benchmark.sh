@@ -29,9 +29,10 @@ case "$*" in
     # 模擬真實事故：org 的 /commits 端點局部中斷（404），/pulls 端點不受影響。
     # 開關用環境變數，其他測試不用改就自動不受影響。
     if [[ "${MRA_TEST_COMMITS_FAIL:-0}" == "1" ]]; then exit 1; fi
-    printf '%s' '[{"sha":"own999","commit":{"message":"fix(x): the PR itself (#4919)"}},
-                  {"sha":"aaa111","commit":{"message":"fix(y): overlapping fix"}},
-                  {"sha":"bbb222","commit":{"message":"fix(z): unrelated file"}}]' ;;
+    # 陣列的陣列：真實的 `gh api --paginate --slurp` 就是這個形狀，一頁一個元素。
+    printf '%s' '[[{"sha":"own999","commit":{"message":"fix(x): the PR itself (#4919)"}},
+                   {"sha":"aaa111","commit":{"message":"fix(y): overlapping fix"}},
+                   {"sha":"bbb222","commit":{"message":"fix(z): unrelated file"}}]]' ;;
   *"pulls?state=closed"*)
     # 第四個獨立開關：讓 PR 列表本身（/pulls）失敗，commits／pr-files 都
     # 正常。跟另外三個開關獨立、不會互相觸發。

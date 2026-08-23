@@ -31,17 +31,21 @@ case "$*" in
   *"commits/iii999"*)
     printf '%s' '{"files":[{"filename":"app/a.rb","patch":"@@ -99,7 +99,7 @@ def update\n r"}]}' ;;
   *"commits?since"*|*"commits?"*)
-    printf '%s' '[{"sha":"own999","commit":{"message":"fix(x): the PR itself"}},
-                  {"sha":"aaa111","commit":{"message":"fix(y): overlapping fix"}},
-                  {"sha":"bbb222","commit":{"message":"fix(z): unrelated file"}},
-                  {"sha":"ccc333","commit":{"message":"feat(w): add new endpoint"}},
-                  {"sha":"ddd444","commit":{"message":"fix(q): mentions the PR (#4919)"}},
-                  {"sha":"fff666","commit":{"message":"Merge pull request #4873 from acme/misc-20260513-fix-seq"}},
-                  {"sha":"jjj000","commit":{"message":"修正 function 不存在問題"}},
-                  {"sha":"kkk111","commit":{"message":"修復 API 逾時問題"}},
-                  {"sha":"lll222","commit":{"message":"雜項調整 20260316\nfix rubocop\nfix rspec"}},
-                  {"sha":"mmm333","commit":{"message":"季度盤點作業\n本次一併修正相關欄位對應"}},
-                  {"sha":"nnn444","commit":{"message":"[ODM] 上刊通報 修正轉檔"}}]' ;;
+    # 真實的 `gh api --paginate --slurp` 回的是「陣列的陣列」，一頁一個元素。
+    # 這裡刻意分成兩頁：第二頁放 nnn444，模擬跨頁的情況。GitHub 的 commits
+    # 端點是新到舊排序，所以第二頁裝的是比較舊的、也就是最接近 PR 合併時間
+    # 的那批 —— fix commit 最可能出現的位置。沒有分頁的實作看不到第二頁。
+    printf '%s' '[[{"sha":"own999","commit":{"message":"fix(x): the PR itself"}},
+                   {"sha":"aaa111","commit":{"message":"fix(y): overlapping fix"}},
+                   {"sha":"bbb222","commit":{"message":"fix(z): unrelated file"}},
+                   {"sha":"ccc333","commit":{"message":"feat(w): add new endpoint"}},
+                   {"sha":"ddd444","commit":{"message":"fix(q): mentions the PR (#4919)"}},
+                   {"sha":"fff666","commit":{"message":"Merge pull request #4873 from acme/misc-20260513-fix-seq"}},
+                   {"sha":"jjj000","commit":{"message":"修正 function 不存在問題"}},
+                   {"sha":"kkk111","commit":{"message":"修復 API 逾時問題"}},
+                   {"sha":"lll222","commit":{"message":"雜項調整 20260316\nfix rubocop\nfix rspec"}},
+                   {"sha":"mmm333","commit":{"message":"季度盤點作業\n本次一併修正相關欄位對應"}}],
+                  [{"sha":"nnn444","commit":{"message":"[ODM] 上刊通報 修正轉檔"}}]]' ;;
   *"pulls?state=closed"*)
     printf '%s' '[{"number":4920,"created_at":"2026-08-15T00:00:00Z","merged_at":"2026-08-16T00:00:00Z","merge_commit_sha":"www999"},
                   {"number":4919,"created_at":"2026-08-05T00:00:00Z","merged_at":"2026-08-10T09:09:52Z","merge_commit_sha":"own999"},
@@ -57,6 +61,15 @@ errors=0; pass=0
 ok()   { echo "PASS: $1"; pass=$((pass+1)); }
 fail() { echo "FAIL: $1"; errors=$((errors+1)); }
 eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] got [$3]"; fi; }
+has()  { case "$2" in *"$3"*) ok "$1" ;; *) fail "$1 — 沒看到「$3」：$2" ;; esac; }
+lacks(){ case "$2" in *"$3"*) fail "$1 — 不該看到「$3」：$2" ;; *) ok "$1" ;; esac; }
+
+# 未定義的指令會讓 bash 印 command not found 然後繼續，那個斷言既不算 pass
+# 也不算 fail，測試照樣印 Failed: 0。這道讓它直接算成失敗。
+command_not_found_handle() {
+  fail "呼叫了未定義的指令 $1（斷言被靜默跳過）"
+  return 127
+}
 
 eq "只取 merged(4918 沒有 merged_at 被排除)" "[4920,4919]" \
   "$(backtest_merged_prs acme/rails-app-1 10 | jq -c '[.[].n]')"
@@ -175,6 +188,13 @@ eq "邊界相接(fix 終點=PR 起點)算重疊" "1" "$(backtest_overlap "$a" "$
 # 用來確保上面兩筆邊界相接測試不是靠「全部都算重疊」矇混過關。
 g="$(backtest_commit_ranges acme/rails-app-1 iii999)"
 eq "相鄰不重疊" "[]" "$(backtest_overlap "$a" "$g" | jq -c .)"
+
+# commits 端點一定要分頁。GitHub 回的是新到舊排序，只取第一頁會截斷掉最舊的
+# 那批 —— 也就是最接近 PR 合併時間、fix commit 最可能出現的位置。上面的 stub
+# 刻意把 nnn444 放在第二頁，所以「候選 fix commit」那條斷言已經在驗跨頁；
+# 這裡再直接釘住旗標本身，讓有人拿掉 --paginate 時錯誤訊息指得更清楚。
+has "commits 查詢有帶 --paginate" "$(cat "$GH_CALLS")" "--paginate"
+has "commits 查詢有帶 --slurp" "$(cat "$GH_CALLS")" "--slurp"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
