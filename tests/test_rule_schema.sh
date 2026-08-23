@@ -343,14 +343,17 @@ test_id_is_safe_accepts_well_formed_id() {
   fi
 }
 
-# grep -q 會在配到的當下退出，producer 還沒寫完就吃到 SIGPIPE 回 141。呼叫端
-# 開著 pipefail 時，`! producer | grep -q` 會把這個 141 判成「沒配到」。2026-08-22
-# 那一輪回測就是這樣掛的：81 個 layer=common 的規則檔隨機中了 2 個，訊息還
-# 自相矛盾（「common 不在合法清單：common nestjs rails react vue」），整輪回測
-# 因為 RULES_INVALID 直接中止。
+# 合法值的檢查不能因為「清單怎麼產生的」而失敗。2026-08-22 那一輪回測栽在
+# 這裡：81 個 layer=common 的規則檔隨機有 2 個沒過驗證，訊息還自相矛盾
+# （「common 不在合法清單：common nestjs rails react vue」），整輪以
+# RULES_INVALID 中止。當時的寫法是 `! corpus_layers | grep -qx "$layer"`，
+# pipefail 之下只要 producer 那一段非 0 就會反轉成「不合法」。
 #
-# 下面三支把 producer 的輸出撐到超過 pipe buffer（64KB），讓 SIGPIPE 必然發生，
-# 不靠 sleep 賭時序。合法值放第一行，grep 最早退出、競態視窗最大。
+# 下面三支用「producer 提早被關掉 pipe」這個最容易觸發的情境當代表：把輸出
+# 撐到超過 64KB pipe buffer，grep -q 配到第一行就退出，producer 必定寫不完。
+# 這不是那次失敗的確切成因（實測排除了 SIGPIPE：corpus_layers 只印 5 行約
+# 30 bytes，重跑 8000 次零誤判），但它們鎖住的是同一件事 —— 合法值的判定
+# 不該受 producer 的退出碼影響。here-string 寫法對這整類問題免疫。
 _big_tail() { seq 1 20000; }   # 約 108KB，穩定超過 64KB pipe buffer
 
 test_layer_check_survives_early_grep_exit() {
