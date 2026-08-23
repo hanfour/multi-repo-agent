@@ -365,8 +365,66 @@ test_no_recompute_flag_when_not_given() {
   esac
 }
 
+# run-rule-backtest.sh 自己那道容差驗證原本零覆蓋：整段刪掉測試也全綠。
+# 驗的是「非負數」不是「合法 JSON」，null 與負值都會讓每一條 expected 都不
+# 命中、漏抓率變成完美的 1.0（jq 的型別排序裡 null 小於任何數字）。
+test_tolerance_must_be_non_negative_number() {
+  local bad out
+  for bad in null -3 '[]' '{}' abc '"5"'; do
+    reset_stub_logs
+    out="$(MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+      bash "$S" --rules "$FIX/rules" --label tol-bad --tolerance "$bad" 2>&1)"
+    has "容差 [$bad] 被 TOLERANCE_INVALID 擋下來" "$out" "TOLERANCE_INVALID"
+    # 擋下來的時候不該已經做完規則驗證與注入 —— 那是這道檢查放在最前面的理由
+    lacks "容差 [$bad] 擋在注入之前" "$out" "注入 "
+  done
+}
+
+test_valid_tolerance_not_rejected() {
+  local good out
+  for good in 0 5 15 2.5; do
+    reset_stub_logs
+    out="$(MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+      bash "$S" --rules "$FIX/rules" --label tol-ok --tolerance "$good" 2>&1)"
+    lacks "合法容差 [$good] 沒被誤擋" "$out" "TOLERANCE_INVALID"
+  done
+}
+
+# MRA_RULE_BACKTEST_TOL 是 --tolerance 的環境變數版本，同樣沒被測過。
+test_tolerance_env_var_is_used_and_validated() {
+  reset_stub_logs
+  MRA_RULE_BACKTEST_TOL=15 MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+    bash "$S" --rules "$FIX/rules" --label tol-env >/dev/null 2>&1
+  has "MRA_RULE_BACKTEST_TOL 有傳給 run-backtest.sh" \
+    "$(cat "$STUB/argv.log" 2>/dev/null)" "--tolerance 15"
+
+  local out
+  out="$(MRA_RULE_BACKTEST_TOL=null MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+    bash "$S" --rules "$FIX/rules" --label tol-env-bad 2>&1)"
+  has "環境變數版本也走同一道驗證" "$out" "TOLERANCE_INVALID"
+}
+
+# --recompute 與 --token-budget 併用：兩個旗標都要生效，不能互相吃掉。
+test_recompute_and_token_budget_combine() {
+  reset_stub_logs
+  MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+    bash "$S" --rules "$FIX/rules" --label combo --token-budget 3000 --recompute >/dev/null 2>&1
+  local argv; argv="$(cat "$STUB/argv.log" 2>/dev/null)"
+  has "--recompute 有傳下去" "$argv" "--recompute"
+  local cond="$MRA_BENCHMARK_DIR/runs/combo/rule-inject-conditions.json"
+  if [ -f "$cond" ]; then
+    eq "--token-budget 有生效（記進執行條件）" "3000" "$(jq -r '.token_budget' "$cond")"
+  else
+    fail "沒有產生執行條件記錄：$cond"
+  fi
+}
+
 test_flag_missing_value_rejected_not_crashed
 test_unknown_flag_rejected
+test_tolerance_must_be_non_negative_number
+test_valid_tolerance_not_rejected
+test_tolerance_env_var_is_used_and_validated
+test_recompute_and_token_budget_combine
 test_token_budget_flag_overrides_and_is_forwarded
 test_token_budget_env_var_sets_default_when_no_flag
 test_default_token_budget_is_library_default_when_unset

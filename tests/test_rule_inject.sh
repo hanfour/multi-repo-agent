@@ -259,27 +259,98 @@ test_render_block_is_deterministic() {
 # common 層只有 8 條）永遠吃不滿，注入量差了 2.9 倍——那是條數落差造成的
 # prompt 長度落差，不是規則品質的差異，會污染兩條路線的回測比較。改成
 # token 預算後，兩條路線在同一個預算下應該收斂到接近的注入量。
+# 用自建 fixture，不讀 agents/review-rules/ 成品目錄：那個目錄是萃取階段的
+# 產出，會被重新產生，也可能被清空。實測清空後兩條路線都是 1 char、差距 0%，
+# 這支測試照樣綠 —— 它宣稱在驗的事情完全沒被驗到。
+#
+# fixture 反映真實的形狀：條數多的那邊每條短、條數少的那邊每條長，兩邊的
+# 內容總量都遠超預算。實測回測時 taxonomy 的 8 條注入後是 20.5KB、tfidf 的
+# 7 條是 18.3KB —— 條數少的那邊反而略大，因為它每條寫得比較長。
+#
+# 這個形狀才是 token 預算要處理的：兩邊都有足夠內容，差別只在怎麼切成條。
+# 條數上限（取前 20 條）之下，40 條那邊拿 20 條、8 條那邊只有 8 條，注入量
+# 由條數決定；token 預算之下兩邊都吃到預算上限，差距收斂。
+#
+# 第一版 fixture 用 40 條短的對 8 條短的，8 條那邊總量只有 935 chars、吃不滿
+# 預算，差距 79%。那不是 token 預算的問題，是 fixture 沒有反映真實形狀。
+_write_bulky_rule() {
+  local dir="$1" id="$2" n_sources="$3" pad_lines="$4"
+  local body="" i
+  for ((i = 0; i < pad_lines; i++)); do
+    body="${body}判準補充第 ${i} 行：這條規則的判準需要足夠的篇幅說明，才能反映"
+    body="${body}真實規則檔的長度。實測 taxonomy 的規則平均比 tfidf 長。"$'\n'
+  done
+  local sources="" j
+  for ((j = 0; j < n_sources; j++)); do
+    sources="${sources}- https://github.com/o/r/pull/1#discussion_r${j}"$'\n'
+  done
+  cat > "$dir/$id.md" <<EOF
+---
+id: $id
+layer: common
+frameworks: ["*"]
+severity_default: HIGH
+---
+## 觸發訊號
+diff 中出現這個形狀。
+
+## 判準
+$body
+
+## 嚴重度
+HIGH：後果明確。
+
+## 反例（不該報）
+前提不成立時。
+
+## 出處
+$sources
+EOF
+}
+
 test_two_routes_converge_in_block_size_under_same_budget() {
-  local tfidf_block taxonomy_block tfidf_chars taxonomy_chars
-  tfidf_block="$(rule_render_block "$MRA_DIR/agents/review-rules/tfidf" nestjs 5000)"
-  taxonomy_block="$(rule_render_block "$MRA_DIR/agents/review-rules/taxonomy" nestjs 5000)"
-  tfidf_chars="$(_rule_char_count "$tfidf_block")"
-  taxonomy_chars="$(_rule_char_count "$taxonomy_block")"
+  local many few
+  many="$TMP/route-many"; few="$TMP/route-few"
+  mkdir -p "$many" "$few"
+  local i
+  # 40 條短的（每條約 2 行判準），總量遠超 5000 token
+  for i in $(seq 1 40); do _write_bulky_rule "$many" "common-many-$i" 10 2; done
+  # 8 條長的（每條約 12 行判準），總量同樣遠超 5000 token
+  for i in $(seq 1 8);  do _write_bulky_rule "$few"  "common-few-$i"  10 12; done
+
+  local many_block few_block many_chars few_chars
+  many_block="$(rule_render_block "$many" nestjs 5000)"
+  few_block="$(rule_render_block "$few" nestjs 5000)"
+  many_chars="$(_rule_char_count "$many_block")"
+  few_chars="$(_rule_char_count "$few_block")"
+
+  # 兩邊都要真的渲染出規則。少了這道，空目錄會讓兩邊都只剩區塊標頭，差距
+  # 計算得到一個小數字，看起來像「完美收斂」—— 原版就是這樣：讀成品目錄，
+  # 目錄清空後兩邊都是 1 char、差距 0%、測試綠。
+  #
+  # 判準用「規則行的條數」不用字元數：空目錄時區塊標頭本身就有 500 字元以上，
+  # 用字元數當門檻只是換一個猜出來的數字。
+  local many_rules few_rules
+  many_rules="$(printf '%s\n' "$many_block" | grep -c '^- \[' || true)"
+  few_rules="$(printf '%s\n' "$few_block" | grep -c '^- \[' || true)"
+  if [ "$many_rules" -lt 2 ] || [ "$few_rules" -lt 2 ]; then
+    fail "區塊裡幾乎沒有規則，差距計算沒有意義：many=${many_rules} 條 few=${few_rules} 條"
+    return
+  fi
+
   local larger smaller diff pct
-  if [ "$tfidf_chars" -ge "$taxonomy_chars" ]; then
-    larger="$tfidf_chars"; smaller="$taxonomy_chars"
+  if [ "$many_chars" -ge "$few_chars" ]; then
+    larger="$many_chars"; smaller="$few_chars"
   else
-    larger="$taxonomy_chars"; smaller="$tfidf_chars"
+    larger="$few_chars"; smaller="$many_chars"
   fi
   diff=$((larger - smaller))
   pct=$((diff * 100 / larger))
-  # 舊制（取前 20 條）下兩條路線差了 2.9 倍（190% 的相對差距）。這裡只要
-  # 求差距遠低於那個量級，不要求完全相等——區塊末尾「最後一條規則的
-  # 剩餘空間用不滿」本來就會讓兩條路線有一點落差，重點是不再是「條數差
-  # 造成的量級落差」。
+  # 兩邊的內容總量都遠超預算，所以在 token 預算下應該都吃到接近上限。
+  # 條數上限（取前 20 條）之下，8 條那邊拿不滿，差距會拉開。
   [ "$pct" -le 30 ] \
-    && ok "tfidf/taxonomy 在同一個 5000 token 預算下區塊大小接近（差距 ${pct}%，tfidf=${tfidf_chars} chars taxonomy=${taxonomy_chars} chars）" \
-    || fail "差距 ${pct}% 太大，改回條數上限的問題可能還在：tfidf=${tfidf_chars} chars taxonomy=${taxonomy_chars} chars"
+    && ok "條數差 5 倍、每條長度也不同的兩個規則集，在同一個 5000 token 預算下區塊大小接近（差距 ${pct}%，40 條=${many_chars} chars 8 條=${few_chars} chars）" \
+    || fail "差距 ${pct}% 太大，改回條數上限的問題可能還在：40 條=${many_chars} chars 8 條=${few_chars} chars"
 }
 
 # ---------------------------------------------------------------------------
