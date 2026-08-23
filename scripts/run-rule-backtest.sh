@@ -40,6 +40,7 @@ TOL="${MRA_RULE_BACKTEST_TOL:-5}"
 # 公平比較）。空字串表示「不覆寫」，讓 rule_inject_all 用它自己的預設值
 # （$RULE_INJECT_DEFAULT_TOKEN_BUDGET，目前是 5000）。
 BUDGET="${MRA_RULE_TOKEN_BUDGET:-}"
+RECOMPUTE_FLAG=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,8 +56,13 @@ while [ $# -gt 0 ]; do
     --token-budget)
       [ $# -ge 2 ] || { echo "用法：--token-budget 需要接一個值" >&2; exit 1; }
       BUDGET="$2"; shift 2 ;;
+    --recompute)
+      # 換容差再算一次時用。原樣傳給 run-backtest.sh，見那邊的說明：不加這個
+      # 旗標的話，重算會連帶重跑失敗的 PR 並覆寫它們的 .err。
+      RECOMPUTE_FLAG="--recompute"; shift ;;
     -h|--help)
-      echo "用法：run-rule-backtest.sh --rules <目錄> --label <名稱> [--tolerance N] [--token-budget N]"
+      echo "用法：run-rule-backtest.sh --rules <目錄> --label <名稱> [--tolerance N] [--token-budget N] [--recompute]"
+      echo "  --recompute：只重算指標，不跑 review、不覆寫失敗 PR 的 .err"
       exit 0 ;;
     *)
       echo "用法：不認得的旗標 $1" >&2
@@ -250,6 +256,6 @@ MRA_BACKTEST_CMD="${MRA_BACKTEST_CMD:-$MRA_DIR/scripts/backtest-review-adapter.s
 MRA_BACKTEST_REVIEW_MODE=personas \
 MRA_REVIEW_PERSONA_MAX_TURNS=20 \
 MRA_PERSONAS_DIR="$INJECTED" \
-  bash "$BACKTEST" --label "$LABEL" --tolerance "$TOL"
+  bash "$BACKTEST" --label "$LABEL" --tolerance "$TOL" $RECOMPUTE_FLAG
 backtest_rc=$?
 exit "$backtest_rc"
