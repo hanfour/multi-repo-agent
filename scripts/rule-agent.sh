@@ -2,7 +2,6 @@
 # scripts/rule-agent.sh — 讀 stdin 的群組 JSON，呼叫 claude 產出 canonical 規則。
 # 兩條萃取路線共用這支，差別只在餵進來的 JSON 形狀與 prompt 前綴。
 set -uo pipefail
-MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 input="$(cat)"
 prefix="${MRA_RULE_PROMPT_PREFIX:-這是一組主題相近的 code review 意見。}"
 
@@ -64,7 +63,10 @@ ${input}"
 # prompt 之後遠超 ARG_MAX）會讓 execve 直接回
 # `claude: Argument list too long`，那一群連模型都沒呼叫到就失敗。
 # `claude -p` 不帶引數時從 stdin 讀 prompt，改成這樣就沒有長度上限。
-printf '%s' "$prompt" | MRA_REVIEW_EMIT_JSON= claude -p \
+# MRA_REVIEW_EMIT_JSON 明確設成空字串（不是漏打值）：這支腳本可能在
+# MRA_REVIEW_EMIT_JSON=1 的回測環境底下被呼叫，那個變數會讓 lib/review.sh
+# 把診斷訊息改道 stderr，污染這裡要解析的模型輸出。
+printf '%s' "$prompt" | MRA_REVIEW_EMIT_JSON='' claude -p \
   --model "${MRA_RULE_AGENT_MODEL:-sonnet}" \
   --max-turns "${MRA_RULE_AGENT_MAX_TURNS:-4}" \
   --disallowedTools "Write,Edit,NotebookEdit,Read,Grep,Glob,Bash,WebFetch,WebSearch,Task" \
