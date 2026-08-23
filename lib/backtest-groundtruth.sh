@@ -80,9 +80,19 @@ backtest_fix_commits() {
   # `Merge ` 開頭的合併 commit 額外排除——像 `Merge pull request #4873 from
   # acme/misc-20260513-fix-seq` 這種標題，分支名裡常帶 "fix" 字樣，子字串
   # 比對會誤收，但這只是合併雜訊，不是真正的 fix commit。
-  gh api "repos/$repo/commits?since=$merged&until=$until&per_page=100" 2>/dev/null \
+  # --paginate --slurp：GitHub 的 commits 端點回的是新到舊排序，只取第一頁的話
+  # 截斷掉的是「最舊的那些」—— 也就是最接近 PR 合併時間的那批，而 fix commit
+  # 通常就緊接在合併之後。這個截斷的方向剛好砍掉最該收的資料。
+  #
+  # --slurp 把每一頁的陣列包成陣列的陣列，所以下面要先 add 攤平。沒有 --slurp
+  # 的話 gh 會把多頁輸出成多個獨立的 JSON 陣列（不是一個），jq 只會處理第一個。
+  #
+  # 上限用 until 那個時間窗控制（呼叫端給的），不另外設頁數上限：設了就是回到
+  # 同一個問題，只是門檻高一點而已。
+  gh api --paginate --slurp \
+    "repos/$repo/commits?since=$merged&until=$until&per_page=100" 2>/dev/null \
     | jq --arg own "$own" --arg pr "$pr" '
-      [ .[]
+      [ (add // []) | .[]
         | (.commit.message | split("\n")[0]) as $title
         | select(.sha != $own)
         | select($title | test("fix|hotfix|bugfix|bug|修正|修復|修掉"; "i"))

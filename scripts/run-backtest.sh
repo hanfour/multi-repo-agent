@@ -166,6 +166,18 @@ if [[ "$n_conf" -eq 0 ]]; then
   exit 1
 fi
 
+# 有 confirmed 的 PR 不代表有 expected finding。`--set true` 做了、`--add` 還
+# 沒做的話，n_conf 是正的但每一筆的 expected_findings 都是空陣列，跑出來的
+# summary 會是 expected_total=0、三個率全部 0、退出碼 0 —— 一份看起來完美的
+# 成績單，實際上什麼都沒量到。這跟開頭那個 NO_CONFIRMED 是同一種假象，只是
+# 少了一層。
+n_findings="$(jq '[.[] | select(.confirmed == true) | .expected_findings | length] | add // 0' "$C")" ||
+  { echo "READ_FAILED：讀取 ${C} 的 expected_findings 失敗" >&2; exit 1; }
+if [[ "$n_findings" -eq 0 ]]; then
+  echo "NO_EXPECTED_FINDINGS：${n_conf} 個 PR 標成 confirmed，但一條 expected finding 都沒有。用 scripts/review-benchmark.sh --add 補上，不然算出來的三個率全部是 0，看起來像滿分" >&2
+  exit 1
+fi
+
 # (repo, pr) 是每個 PR 輸出檔的鍵，同一個鍵在 confirmed==true 裡出現兩次，
 # 第二筆會直接讀到第一筆跑出來的快取檔、再算一次、再疊加進彙總——不是報錯，
 # 是悄悄把同一個 PR 的 match／comment 多算一輪，把 expected_total、

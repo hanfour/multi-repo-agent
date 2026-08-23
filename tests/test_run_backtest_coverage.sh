@@ -34,7 +34,7 @@ C="$MRA_BENCHMARK_DIR/candidates.json"
 
 # --- 7/10 成功的基準集：9201~9207 成功、9208~9210 失敗 --------------------
 jq -n '[range(9201;9211) | {repo:"acme/rails-app-1", pr:., merged_at:"2026-08-10T00:00:00Z",
-        fix_commits:[], confirmed:true, expected_findings:[]}]' > "$C"
+        fix_commits:[], confirmed:true, expected_findings:[{path:"app/x.rb", line:10, severity:"HIGH", note:"讓基準集不是空的"}]}]' > "$C"
 
 cat > "$TMP/bin/mra" <<'SHIM'
 #!/usr/bin/env bash
@@ -130,7 +130,7 @@ has "門檻給非法數字：印出 MIN_COVERAGE_INVALID" "$(cat "$err_invalid")
 # --- 案例 5：全部成功時，行為完全不變(不受這道新檢查影響) ------------------
 C2="$MRA_BENCHMARK_DIR/candidates-all-ok.json"
 jq -n '[9301,9302,9303] | map({repo:"acme/rails-app-1", pr:., merged_at:"2026-08-11T00:00:00Z",
-        fix_commits:[], confirmed:true, expected_findings:[]})' > "$C2"
+        fix_commits:[], confirmed:true, expected_findings:[{path:"app/x.rb", line:10, severity:"HIGH", note:"讓基準集不是空的"}]})' > "$C2"
 cat > "$TMP/bin/mra" <<'SHIM2'
 #!/usr/bin/env bash
 case "$*" in

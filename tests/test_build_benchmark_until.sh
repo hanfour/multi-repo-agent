@@ -30,8 +30,9 @@ case "$*" in
   *"commits/fix4802"*)
     printf '%s' '{"files":[{"filename":"app/b.rb","patch":"@@ -21,2 +21,4 @@ def z\n q"}]}' ;;
   *"commits?since"*|*"commits?"*)
-    printf '%s' '[{"sha":"fix4801","commit":{"message":"fix(a): overlapping fix for 4801"}},
-                  {"sha":"fix4802","commit":{"message":"fix(b): overlapping fix for 4802"}}]' ;;
+    # 陣列的陣列：真實的 `gh api --paginate --slurp` 就是這個形狀，一頁一個元素。
+    printf '%s' '[[{"sha":"fix4801","commit":{"message":"fix(a): overlapping fix for 4801"}},
+                   {"sha":"fix4802","commit":{"message":"fix(b): overlapping fix for 4802"}}]]' ;;
   *"pulls?state=closed"*)
     printf '%s' '[{"number":4802,"created_at":"2026-08-10T00:00:00Z","merged_at":"2026-08-11T00:00:00Z","merge_commit_sha":"own4802"},
                   {"number":4801,"created_at":"2026-08-01T00:00:00Z","merged_at":"2026-08-02T00:00:00Z","merge_commit_sha":"own4801"}]' ;;

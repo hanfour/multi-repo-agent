@@ -536,7 +536,7 @@ mkdir -p "$COND_DIR" "$TMP/bin-cond"
 cat > "$COND_DIR/candidates.json" <<'J'
 [
  {"repo":"acme/rails-app-1","pr":8601,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
-  "confirmed":true,"expected_findings":[]}
+  "confirmed":true,"expected_findings":[{"path":"app/x.rb","line":10,"severity":"HIGH","note":"讓基準集不是空的"}]}
 ]
 J
 cat > "$TMP/bin-cond/mra" <<'SHIM'
@@ -634,7 +634,8 @@ mkdir -p "$UNAVAIL_DIR" "$TMP/bin-cond-unavail"
 cat > "$UNAVAIL_DIR/candidates.json" <<'J'
 [
  {"repo":"acme/rails-app-1","pr":8602,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
-  "confirmed":true,"expected_findings":[]}
+  "confirmed":true,
+  "expected_findings":[{"path":"app/x.rb","line":10,"severity":"HIGH","note":"讓基準集不是空的"}]}
 ]
 J
 cat > "$TMP/bin-cond-unavail/mra" <<'SHIM'
@@ -670,7 +671,7 @@ mkdir -p "$SHA_DIR" "$TMP/bin-sha"
 cat > "$SHA_DIR/candidates.json" <<'J'
 [
  {"repo":"acme/rails-app-1","pr":8801,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
-  "confirmed":true,"expected_findings":[]}
+  "confirmed":true,"expected_findings":[{"path":"app/x.rb","line":10,"severity":"HIGH","note":"讓基準集不是空的"}]}
 ]
 J
 cat > "$TMP/bin-sha/mra" <<'SHIM'
@@ -1043,6 +1044,49 @@ if [ -f "$ID_DIR/runs/idem/acme__rails-app-1__9903.json" ]; then
 else
   ok "正常模式下仍然刪除，--recompute 的例外沒有波及正常路徑"
 fi
+
+# --- confirmed 有值但一條 expected finding 都沒有 -------------------------
+# `--set true` 做了、`--add` 還沒做的話，n_conf 是正的但每一筆的
+# expected_findings 都是空陣列。跑出來的 summary 是 expected_total=0、三個率
+# 全部 0、退出碼 0 —— 一份看起來完美的成績單，實際上什麼都沒量到。這跟
+# NO_CONFIRMED 是同一種假象，只是少了一層。
+NEF_DIR="$TMP/bench-nofindings"
+mkdir -p "$NEF_DIR" "$TMP/bin-nef"
+cat > "$NEF_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":8901,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,"expected_findings":[]},
+ {"repo":"acme/rails-app-1","pr":8902,"merged_at":"2026-08-02T00:00:00Z","fix_commits":[],
+  "confirmed":true,"expected_findings":[]}
+]
+J
+cat > "$TMP/bin-nef/mra" <<'SHIM'
+#!/usr/bin/env bash
+echo "CALLED" >> "$MRA_TEST_CANARY"
+printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
+SHIM
+chmod +x "$TMP/bin-nef/mra"
+NEF_CANARY="$TMP/nef-canary"; : > "$NEF_CANARY"
+out_nef="$(PATH="$TMP/bin-nef:$PATH" MRA_BENCHMARK_DIR="$NEF_DIR" \
+  MRA_TEST_CANARY="$NEF_CANARY" bash "$S" --label nef 2>&1)"
+rc_nef=$?
+[ "$rc_nef" -ne 0 ] && ok "全部 confirmed 但零 finding 時退出非 0" || fail "應該退出非 0"
+has "用 NO_EXPECTED_FINDINGS 這個 token" "$out_nef" "NO_EXPECTED_FINDINGS"
+has "訊息說明會看起來像滿分" "$out_nef" "看起來像滿分"
+eq "擋下來時一次 review 都沒跑" "0" "$(wc -l < "$NEF_CANARY" | tr -d ' ')"
+if [ -e "$NEF_DIR/runs/nef/summary.json" ]; then
+  fail "不該輸出 summary.json（那份會是三個率全 0 的假滿分）"
+else
+  ok "沒有輸出假滿分的 summary.json"
+fi
+
+# 對照：只要有一條 finding 就放行
+jq '.[0].expected_findings = [{"path":"app/a.rb","line":1,"severity":"HIGH","note":"x"}]' \
+  "$NEF_DIR/candidates.json" > "$NEF_DIR/c.json"
+mv "$NEF_DIR/c.json" "$NEF_DIR/candidates.json"
+out_nef2="$(PATH="$TMP/bin-nef:$PATH" MRA_BENCHMARK_DIR="$NEF_DIR" \
+  MRA_TEST_CANARY="$NEF_CANARY" MRA_BACKTEST_MIN_COVERAGE=0 bash "$S" --label nef2 2>&1)"
+lacks "有 finding 時不再被擋" "$out_nef2" "NO_EXPECTED_FINDINGS"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
