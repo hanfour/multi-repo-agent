@@ -163,13 +163,20 @@ b="$(backtest_commit_ranges acme/rails-app-1 aaa111)"
 eq "重疊一筆"   "1"          "$(backtest_overlap "$a" "$b" | jq 'length')"
 eq "重疊在 a.rb" '"app/a.rb"' "$(backtest_overlap "$a" "$b" | jq -c '.[0].path')"
 
+# 下面三筆「不重疊」的斷言都各配一筆前置斷言，先釘住那個 commit 真的有區間
+# 可以比。原因：backtest_overlap 對「兩邊沒有交集」跟「有一邊根本是空的」都回
+# `[]`,少了前置斷言的話,backtest_commit_ranges 壞掉回 `{}` 時這三筆照樣綠,
+# 量出來的「沒有重疊」其實是「沒有資料」。
+
 # bbb222 只動 app/c.rb,PR 沒碰過
 c="$(backtest_commit_ranges acme/rails-app-1 bbb222)"
+eq "前置:bbb222 查得到區間" '{"app/c.rb":[[1,2]]}' "$(printf '%s' "$c" | jq -cS .)"
 eq "不同檔案不重疊" "[]" "$(backtest_overlap "$a" "$c" | jq -c .)"
 
 # eee555 改到 PR 也碰過的 app/b.rb,但行號 60-62 不落在 PR 的 10-14 內——
 # 同檔案、不同行號,是唯一能分辨「照路徑比對」跟「照行號比對」的案例。
 d="$(backtest_commit_ranges acme/rails-app-1 eee555)"
+eq "前置:eee555 查得到區間" '{"app/b.rb":[[60,62]]}' "$(printf '%s' "$d" | jq -cS .)"
 eq "同檔不同行不重疊" "[]" "$(backtest_overlap "$a" "$d" | jq -c .)"
 
 # 邊界相接(inclusive)測試。PR 的 app/a.rb 區間是 92-98。
@@ -187,7 +194,36 @@ eq "邊界相接(fix 終點=PR 起點)算重疊" "1" "$(backtest_overlap "$a" "$
 # iii999 的起點(99)在 PR 終點(98)之後,是真正不相鄰、沒有交集,必須不算重疊——
 # 用來確保上面兩筆邊界相接測試不是靠「全部都算重疊」矇混過關。
 g="$(backtest_commit_ranges acme/rails-app-1 iii999)"
+eq "前置:iii999 查得到區間" '{"app/a.rb":[[99,105]]}' "$(printf '%s' "$g" | jq -cS .)"
 eq "相鄰不重疊" "[]" "$(backtest_overlap "$a" "$g" | jq -c .)"
+
+# --- 空區間集：backtest_overlap 的 `// []` 守衛 -------------------------------
+# 這是行為斷言,不是源碼文字比對。fix commit 的 patch 全是純刪除時,
+# backtest_commit_ranges 會誠實地回一個空物件,而 scripts/build-benchmark.sh
+# 會照樣把它餵給 backtest_overlap。少了 `// []`,$b[$pa.key] 拿到的 null 會讓
+# jq 以 "Cannot iterate over null" 中斷:退出碼非 0、標準輸出是空字串,
+# 呼叫端接著跑的 `jq 'length'` 又吃到空字串再失敗一次。
+# 分成「輸出是 []」與「退出碼是 0」兩筆:只驗輸出的話,jq 中斷時輸出的空字串
+# 跟 `[]` 差得夠遠會轉紅,但錯誤訊息指不出是中斷還是算錯。
+empty_ov="$(backtest_overlap '{"app/a.rb":[[92,98]]}' '{}')"; empty_rc=$?
+eq "b 側為空區間集時回空清單" "[]" "$empty_ov"
+eq "b 側為空區間集時不中斷" "0" "$empty_rc"
+
+# a 側為空的方向由 jq 的 to_entries 天然處理,一併釘住,免得日後有人把外層
+# 換成需要 a 非空的寫法。
+empty_a_ov="$(backtest_overlap '{}' '{"app/a.rb":[[92,98]]}')"; empty_a_rc=$?
+eq "a 側為空區間集時回空清單" "[]" "$empty_a_ov"
+eq "a 側為空區間集時不中斷" "0" "$empty_a_rc"
+
+# --- 同一個檔案有多個區間 -----------------------------------------------------
+# PR 在一個檔案裡改好幾段是常態。只比第一段的話,落在後面幾段的真候選會漏掉,
+# 而漏掉的候選補不回來。
+eq "同檔多區間任一重疊即命中" "1" \
+  "$(backtest_overlap '{"app/a.rb":[[1,5],[100,110]]}' '{"app/a.rb":[[105,120]]}' | jq 'length')"
+eq "命中的是重疊的那一段,不是第一段" "[100,110]" \
+  "$(backtest_overlap '{"app/a.rb":[[1,5],[100,110]]}' '{"app/a.rb":[[105,120]]}' | jq -c '.[0].pr_range')"
+eq "同檔多區間全不重疊為空" "[]" \
+  "$(backtest_overlap '{"app/a.rb":[[1,5]]}' '{"app/a.rb":[[10,20],[30,40]]}' | jq -c .)"
 
 # commits 端點一定要分頁。GitHub 回的是新到舊排序，只取第一頁會截斷掉最舊的
 # 那批 —— 也就是最接近 PR 合併時間、fix commit 最可能出現的位置。上面的 stub

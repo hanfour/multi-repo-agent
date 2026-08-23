@@ -70,6 +70,18 @@ print((d + datetime.timedelta(days=int(sys.argv[2]))).strftime('%Y-%m-%dT%H:%M:%
 " "$start" "$days"
 }
 
+# 已知限制，跟 scripts/run-backtest.sh 的 candidates_sha 有關（那支腳本另有人在改，
+# 這裡只留紀錄）：candidates_sha 是對整份 candidates.json 取雜湊，涵蓋範圍比它想
+# 代表的東西寬。它想代表的是「這次回測用的分母」，而分母只由 confirmed=true 的
+# 項目與其 expected_findings 構成。但雜湊也吃進了兩類跟分母無關的內容：
+#   1. confirmed 還沒填（false／null）的候選：這些不進分母，光是多抓到一筆新候選
+#      就會讓 sha 變。
+#   2. 這個函式產出的 fix_commits：build-benchmark.sh 的合併規則只保留舊檔的
+#      confirmed 與 expected_findings，fix_commits 屬於「機器算出來的欄位」，
+#      每次重建都用新值蓋回去，值一變 sha 就跟著變。
+# 偏誤方向只有一邊：sha 會多報「分母不同」，不會漏報「分母其實換了」。所以拿兩份
+# summary 對比時，sha 相同仍可信；sha 不同則不足以斷定分母變了，要自己再看一眼
+# confirmed 的內容。
 backtest_fix_commits() {
   local repo="$1" pr="$2" merged="$3" own="$4" days="${5:-14}"
   local until; until="$(backtest_window_end "$merged" "$days")"
@@ -132,8 +144,16 @@ backtest_commit_ranges() {
 
 # 邊界刻意用 <=（inclusive）而不是 <：fix hunk 從 PR 新增區間的最後一行接著往下寫,
 # 是很常見的真實形狀（在 PR 剛加的那段結尾繼續補東西）。若邊界改成 exclusive,
-# 這種候選會憑空消失——而漏掉的候選補不回來,跟 lib/backtest-hunks.sh 的
-# backtest_ranges_overlap 用同一個判準，是同一件事的兩份保險。
+# 這種候選會憑空消失，而漏掉的候選補不回來。
+#
+# `// []` 是 load-bearing，不是防禦性冗餘：fix commit 完全沒碰到 PR 改過的檔案時
+# $b[$pa.key] 是 null，少了它 jq 會直接 "Cannot iterate over null" 中斷，
+# 呼叫端 scripts/build-benchmark.sh 拿到的是空字串而不是 "[]"，一個真的沒有重疊
+# 的 fix commit 會變成整趟掃描的例外。這種輸入必須安靜地回空清單。
+#
+# 這裡沒有逆序區間（起 > 迄）的守衛，因為輸入只可能來自 backtest_hunks_of，
+# 它的輸出恆滿足 起 <= 迄（見 lib/backtest-hunks.sh）。改動那邊的產生規則時
+# 要一起想這裡。
 backtest_overlap() {
   local a="$1" b="$2"
   jq -n --argjson a "$a" --argjson b "$b" '

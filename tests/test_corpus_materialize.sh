@@ -52,10 +52,19 @@ eq "只留下非 bot 的一則" "1" "$n1"
 eq "stdout 印出寫入筆數" "1" "$n1_stdout"
 
 # --- 案例 2：每行是合法 JSON 物件（不是陣列） -------------------------------
+# 迴圈後不要無條件 ok：迴圈內已經 fail 過的話，這一行照樣印 PASS，讀者看到
+# 一綠一紅卻不知道哪個才算數；輸入檔缺席時迴圈跑零次，那就是純綠。用計數器
+# 把兩件事分開：檢查了幾行、其中幾行不合格。
+obj_checked=0; obj_bad=0
 while IFS= read -r line; do
-  printf '%s' "$line" | jq -e 'type == "object"' >/dev/null || fail "有一行不是 JSON 物件：$line"
+  obj_checked=$((obj_checked + 1))
+  printf '%s' "$line" | jq -e 'type == "object"' >/dev/null || obj_bad=$((obj_bad + 1))
 done < "$OUT1/nestjs.jsonl"
-ok "每行都是 JSON 物件"
+if [ "$obj_checked" -eq 0 ]; then
+  fail "一行都沒讀到，「每行都是 JSON 物件」這個判斷沒有意義"
+else
+  eq "每行都是 JSON 物件（檢查了 ${obj_checked} 行）" "0" "$obj_bad"
+fi
 
 # 額外驗欄位值本身，不只是「合法 JSON」：lib/corpus-filter.sh 的 corpus_project
 # 已經把 .user.login 改名成 .reviewer、.author_association 改名成
@@ -214,12 +223,16 @@ rmdir "$OUT9/nestjs.jsonl"
 out9_retry="$(corpus_materialize_repo nestjs/nest "$OUT9")"; rc9_retry=$?
 eq "續跑退出碼是 0（短路跳過）" "0" "$rc9_retry"
 eq "續跑印出跟 marker 一致的筆數" "1" "$out9_retry"
+# if/else 兩邊都算過的話，綠燈無法告訴讀者實際發生了哪一種。這裡要驗的其實
+# 只有一件事：短路之後不會補寫，所以筆數只可能是「維持短少的 1」或「檔案還
+# 缺席」，絕不會是 2。把它寫成單一斷言，讓綠燈的意思唯一。
 if [ -f "$OUT9/nestjs.jsonl" ]; then
   n9="$(wc -l < "$OUT9/nestjs.jsonl" | tr -d ' ')"
-  eq "layer.jsonl 筆數是 1（短少過的狀態），不是 2（沒有重複）" "1" "$n9"
 else
-  ok "layer.jsonl 仍然缺席（短少而非重複——短路後不會補寫）"
+  n9=0   # 檔案缺席等同於零筆，同樣不是「補寫成 2」
 fi
+eq "續跑不補寫：筆數是 1（維持短少）或 0（檔案缺席），不是 2" "true" \
+  "$([ "$n9" -le 1 ] && echo true || echo false)"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

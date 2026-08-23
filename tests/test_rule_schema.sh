@@ -371,7 +371,10 @@ test_layer_check_survives_early_grep_exit() {
   fi
 }
 
-test_layer_check_still_rejects_unknown_layer_under_sigpipe() {
+# 這支在管線與 here-string 兩種寫法下都會綠，它不是 SIGPIPE 的迴歸測試。
+# 它守的是另一件事：修法不能是「把檢查關掉」。少了它，一個把整段 layer 驗證
+# 刪光的改動會讓上面兩支「合法值仍判為合法」全部通過。
+test_layer_check_still_rejects_unknown_layer() {
   sed -e 's/^layer: nestjs$/layer: kotlin/' -e 's/^id: valid-example$/id: layer-bad/' \
     "$FIX/valid-example.md" > "$TMP/layer-bad.md"
   corpus_layers() { printf 'common\n'; _big_tail; }
@@ -422,7 +425,7 @@ test_id_is_safe_rejects_empty_string
 test_id_is_safe_rejects_embedded_newline
 test_id_is_safe_accepts_well_formed_id
 test_layer_check_survives_early_grep_exit
-test_layer_check_still_rejects_unknown_layer_under_sigpipe
+test_layer_check_still_rejects_unknown_layer
 test_severity_check_survives_early_grep_exit
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"

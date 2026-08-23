@@ -191,18 +191,18 @@ eq "candidates_sha 長度是 16 碼(不是完整 64 碼的 sha256)" "16" \
 # shim 是裸的假指令，不認得 MRA_BACKTEST_COND_FILE，run-backtest.sh 讀不到
 # 執行條件回報檔。這八個欄位這時候要一律是 null，conditions_source 要是
 # "unavailable"，絕對不能悄悄退回讀共用 $MRA_DIR/config.json 的值(那正是
-# 更早一輪要修掉的東西：記錯的值比沒有欄位更糟)。用 -e 讀確定是 JSON
-# null，不是字串 "null" 或空字串，jq -r 在這兩種狀況下印出來的文字剛好
-# 一樣，光看字面比不出差異。
-eq "沒有 cond 檔可讀時 model 是 JSON null(不是字串)" "null" \
-  "$(jq -e '.model' "$S1")"
-eq "沒有 cond 檔可讀時 provider 是 null" "null" "$(jq -e '.provider' "$S1")"
-eq "沒有 cond 檔可讀時 reasoning_effort 是 null" "null" "$(jq -e '.reasoning_effort' "$S1")"
-eq "沒有 cond 檔可讀時 review_mode 是 null" "null" "$(jq -e '.review_mode' "$S1")"
-eq "沒有 cond 檔可讀時 max_turns 是 null" "null" "$(jq -e '.max_turns' "$S1")"
-eq "沒有 cond 檔可讀時 synth_max_turns 是 null" "null" "$(jq -e '.synth_max_turns' "$S1")"
-eq "沒有 cond 檔可讀時 worktree_isolated 是 null" "null" "$(jq -e '.worktree_isolated' "$S1")"
-eq "沒有 cond 檔可讀時 mra_config_path 是 null" "null" "$(jq -e '.mra_config_path' "$S1")"
+# 更早一輪要修掉的東西：記錯的值比沒有欄位更糟)。
+#
+# 直接斷言型別，不繞道 jq -e。舊寫法的註解說辨別力來自 -e，那是錯的：-e 只
+# 影響退出碼，而退出碼在 command substitution 裡被丟掉了。真正在分辨 JSON
+# null 與字串 "null" 的是「沒有加 -r」——字串會印成帶引號的 "null"。那個機制
+# 有效但很隱晦，而且被一句錯的註解蓋住。`| type` 把判準直接寫出來，欄位缺席
+# 時回 "null" 以外的值也一樣抓得到。
+for _cond_key in model provider reasoning_effort review_mode max_turns \
+                 synth_max_turns worktree_isolated mra_config_path; do
+  eq "沒有 cond 檔可讀時 ${_cond_key} 的型別是 null" "null" \
+    "$(jq -r --arg k "$_cond_key" '.[$k] | type' "$S1")"
+done
 eq "conditions_source 記成 unavailable" "unavailable" "$(jq -r '.conditions_source' "$S1")"
 
 # --- mra shim：after label(輸出跟 baseline 完全不同，--compare 才有東西可比)
@@ -1087,6 +1087,78 @@ mv "$NEF_DIR/c.json" "$NEF_DIR/candidates.json"
 out_nef2="$(PATH="$TMP/bin-nef:$PATH" MRA_BENCHMARK_DIR="$NEF_DIR" \
   MRA_TEST_CANARY="$NEF_CANARY" MRA_BACKTEST_MIN_COVERAGE=0 bash "$S" --label nef2 2>&1)"
 lacks "有 finding 時不再被擋" "$out_nef2" "NO_EXPECTED_FINDINGS"
+
+# --- candidates_effective_sha 只對真正影響比較的部分敏感 ------------------
+# candidates_sha 算整份檔案，加一筆 confirmed=false 的候選或重跑
+# build-benchmark.sh 讓 fix_commits 換了，它就變 —— 兩輪看起來像換了基準集，
+# 實際上分母一模一樣。
+ESHA_DIR="$TMP/bench-esha"
+mkdir -p "$ESHA_DIR" "$TMP/bin-esha"
+cat > "$ESHA_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":9001,"merged_at":"2026-08-01T00:00:00Z",
+  "fix_commits":[{"sha":"aaa","message":"fix: x"}],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/a.rb","line":10,"severity":"HIGH","note":"x"}]}
+]
+J
+cat > "$TMP/bin-esha/mra" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
+SHIM
+chmod +x "$TMP/bin-esha/mra"
+run_esha() {
+  PATH="$TMP/bin-esha:$PATH" MRA_BENCHMARK_DIR="$ESHA_DIR" MRA_BACKTEST_MIN_COVERAGE=0 \
+    bash "$S" --label "$1" >/dev/null 2>&1
+  jq -r '"\(.candidates_sha) \(.candidates_effective_sha)"' "$ESHA_DIR/runs/$1/summary.json"
+}
+base_shas="$(run_esha esha1)"
+
+# 加一筆 confirmed=false 的候選：兩個 sha 應該一個變、一個不變
+jq '. + [{"repo":"acme/rails-app-1","pr":9002,"merged_at":"2026-08-02T00:00:00Z",
+          "fix_commits":[],"confirmed":false,"expected_findings":[]}]' \
+  "$ESHA_DIR/candidates.json" > "$ESHA_DIR/c.json"
+mv "$ESHA_DIR/c.json" "$ESHA_DIR/candidates.json"
+after_unconfirmed="$(run_esha esha2)"
+if [ "$(cut -d' ' -f1 <<<"$base_shas")" != "$(cut -d' ' -f1 <<<"$after_unconfirmed")" ]; then
+  ok "加一筆未確認的候選：candidates_sha 變了（它算整份檔案）"
+else
+  fail "candidates_sha 應該變（整份檔案的內容確實改了）"
+fi
+eq "加一筆未確認的候選：candidates_effective_sha 不變" \
+  "$(cut -d' ' -f2 <<<"$base_shas")" "$(cut -d' ' -f2 <<<"$after_unconfirmed")"
+
+# 換掉 fix_commits：同樣一個變、一個不變
+jq '.[0].fix_commits = [{"sha":"bbb","message":"fix: 重跑 build-benchmark 抓到不同的 commit"}]' \
+  "$ESHA_DIR/candidates.json" > "$ESHA_DIR/c.json"
+mv "$ESHA_DIR/c.json" "$ESHA_DIR/candidates.json"
+after_fixcommits="$(run_esha esha3)"
+eq "換掉 fix_commits：candidates_effective_sha 仍然不變" \
+  "$(cut -d' ' -f2 <<<"$base_shas")" "$(cut -d' ' -f2 <<<"$after_fixcommits")"
+
+# 真正改到 expected_findings：effective sha 一定要變
+jq '.[0].expected_findings[0].line = 999' "$ESHA_DIR/candidates.json" > "$ESHA_DIR/c.json"
+mv "$ESHA_DIR/c.json" "$ESHA_DIR/candidates.json"
+after_findings="$(run_esha esha4)"
+if [ "$(cut -d' ' -f2 <<<"$base_shas")" != "$(cut -d' ' -f2 <<<"$after_findings")" ]; then
+  ok "改到 expected_findings：candidates_effective_sha 變了"
+else
+  fail "改到 expected_findings 時 effective sha 必須變，不然它偵測不到基準集換了"
+fi
+
+# expected_findings 的順序不該影響 effective sha（--add 的先後是任意的）
+jq '.[0].expected_findings = [{"path":"app/b.rb","line":20,"severity":"LOW","note":"y"},
+                              {"path":"app/a.rb","line":10,"severity":"HIGH","note":"x"}]' \
+  "$ESHA_DIR/candidates.json" > "$ESHA_DIR/c.json"
+mv "$ESHA_DIR/c.json" "$ESHA_DIR/candidates.json"
+order1="$(run_esha esha5)"
+jq '.[0].expected_findings = [{"path":"app/a.rb","line":10,"severity":"HIGH","note":"x"},
+                              {"path":"app/b.rb","line":20,"severity":"LOW","note":"y"}]' \
+  "$ESHA_DIR/candidates.json" > "$ESHA_DIR/c.json"
+mv "$ESHA_DIR/c.json" "$ESHA_DIR/candidates.json"
+order2="$(run_esha esha6)"
+eq "expected_findings 的順序不影響 effective sha" \
+  "$(cut -d' ' -f2 <<<"$order1")" "$(cut -d' ' -f2 <<<"$order2")"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

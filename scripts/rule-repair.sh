@@ -23,14 +23,27 @@ source "$MRA_DIR/lib/corpus-targets.sh"
 source "$MRA_DIR/lib/rule-schema.sh"
 
 REJECTED=""; OUT=""
+# 需要值的旗標在取 "$2" 之前先確認真的還有下一個引數。少了這道檢查的話，
+# `--rejected` 後面沒接東西會直接踩到 set -u，使用者看到的是
+# 「rule-repair.sh: 列 28: $2: 未綁定的變數」：那句話既沒說是哪個旗標的問題，
+# 也沒說要怎麼改，讀的人得先去翻原始碼第 28 行才知道發生什麼事。用自己的
+# token 擋下來，訊息才跟輸入有關。作法照 scripts/run-rule-backtest.sh 的參數
+# 解析，同一份專案裡不要有兩套。
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --rejected) REJECTED="$2"; shift 2 ;;
-    --out) OUT="$2"; shift 2 ;;
+    --rejected)
+      [ $# -ge 2 ] || { echo "用法：--rejected 需要接一個目錄" >&2; exit 1; }
+      REJECTED="$2"; shift 2 ;;
+    --out)
+      [ $# -ge 2 ] || { echo "用法：--out 需要接一個目錄" >&2; exit 1; }
+      OUT="$2"; shift 2 ;;
     *) echo "用法：rule-repair.sh --rejected <目錄> --out <目錄>" >&2; exit 1 ;;
   esac
 done
 [ -d "$REJECTED" ] || { echo "用法：rule-repair.sh --rejected <目錄> --out <目錄>" >&2; exit 1; }
+# --out 整個沒給時 OUT 是空字串，下面的 mkdir -p "" 會回一句「mkdir: : No such
+# file or directory」：那句話同樣跟輸入無關，讀的人看不出是少給了哪個旗標。
+[ -n "$OUT" ] || { echo "用法：rule-repair.sh --rejected <目錄> --out <目錄>" >&2; exit 1; }
 mkdir -p "$OUT" || exit 1
 
 # rule_repair_plan <file> — 印出一行修復計畫到 stdout，tab 分隔：

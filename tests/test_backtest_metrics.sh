@@ -192,5 +192,39 @@ flattened="$(jq -n --argjson a "$pr_a_review" --argjson b "$pr_b_review" \
 eq "攤平後會誤判成 0（這就是不能餵攤平陣列的原因）" "0" \
   "$(backtest_file_missed "$flattened" "$pr_a_expected")"
 
+# --- 同一個 (path, line) 有兩條 expected 時結果要穩定 ---------------------
+# 排序鍵原本只有 (path, line)，兩條 expected 落在同一個檔案同一行時前兩個鍵
+# 完全相同，誰先搶到 comment 就回頭取決於呼叫端餵資料的順序。實測把兩條對調
+# 之後 severity_rate 從 1.0 翻到 0.0 —— 同一組資料算出兩個答案。
+same_line_a='[{"path":"a.rb","line":10,"severity":"CRITICAL","note":"安全"},
+              {"path":"a.rb","line":10,"severity":"LOW","note":"風格"}]'
+same_line_b='[{"path":"a.rb","line":10,"severity":"LOW","note":"風格"},
+              {"path":"a.rb","line":10,"severity":"CRITICAL","note":"安全"}]'
+same_line_review='{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+ {"path":"a.rb","line":9,"body":"距離 1","severity":"CRITICAL"},
+ {"path":"a.rb","line":11,"body":"距離 1","severity":"LOW"}]}'
+sl_a="$(backtest_metrics "$(backtest_match "$same_line_review" "$same_line_a" 5)" "$same_line_review")"
+sl_b="$(backtest_metrics "$(backtest_match "$same_line_review" "$same_line_b" 5)" "$same_line_review")"
+eq "同一行兩條 expected：不管餵入順序，severity_rate 一致" \
+  "$(jq -r '.severity_rate' <<<"$sl_a")" "$(jq -r '.severity_rate' <<<"$sl_b")"
+eq "同一行兩條 expected：missed 也一致" \
+  "$(jq -r '.missed' <<<"$sl_a")" "$(jq -r '.missed' <<<"$sl_b")"
+
+# --- comment 沒有 line 時不該讓整輪掛掉 -----------------------------------
+# 有些 provider 對「整個檔案」層級的意見不給行號。舊版沒有擋，jq 的 fabs 對
+# null 拋錯、整輪 exit 1，診斷是一句 jq 的原始錯誤，看不出是哪個 PR 的哪一條。
+null_line_expected='[{"path":"a.rb","line":10,"severity":"HIGH","note":"x"}]'
+null_line_review='{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+ {"path":"a.rb","line":null,"body":"整個檔案層級的意見","severity":"HIGH"},
+ {"path":"a.rb","line":11,"body":"有行號","severity":"HIGH"}]}'
+nl_match="$(backtest_match "$null_line_review" "$null_line_expected" 5)"
+nl_rc=$?
+[ "$nl_rc" -eq 0 ] && ok "comment 的 line 是 null 時不會讓 backtest_match 失敗" \
+  || fail "backtest_match 因為 null line 失敗（退出碼 $nl_rc）"
+eq "有行號的那條仍然正常命中" "11" "$(jq -r '.[0].matched.line' <<<"$nl_match")"
+nl_metrics="$(backtest_metrics "$nl_match" "$null_line_review")"
+eq "沒有行號的那條落進 unmatched（不是被靜默忽略）" "1" "$(jq -r '.unmatched' <<<"$nl_metrics")"
+eq "comments_total 仍然算它一條" "2" "$(jq -r '.comments_total' <<<"$nl_metrics")"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

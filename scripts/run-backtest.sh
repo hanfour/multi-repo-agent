@@ -320,7 +320,17 @@ for ((i = 0; i < n_conf; i++)); do
   # 常常改到同名的檔案，攤平之後這個 PR 的 expected 會配到別的 PR 對同名檔案
   # 的 comment，漏抓數偏低。上面 matched_idx 靠 offset 補救，這個沒有 offset
   # 可補，只能不要攤平。
-  file_missed=$((file_missed + $(backtest_file_missed "$review" "$expected")))
+  # 退出碼要接住。寫成 `$((x + $(cmd)))` 的話，cmd 失敗時它的輸出是空字串，
+  # 算術展開把空字串當 0，於是 file_missed 保持不變、prs 照樣加一 —— 那個 PR
+  # 的檔案層級漏抓被靜默算成 0，而 anchor_drift（missed 減 file_missed）跟著
+  # 多算。整份 summary 沒有任何地方顯示這件事發生過。
+  if ! _pr_file_missed="$(backtest_file_missed "$review" "$expected")"; then
+    echo "FILE_MISSED_FAILED：計算 ${repo}#${pr} 的檔案層級漏抓失敗，這個 PR 不計入本次彙總" >&2
+    n_failed=$((n_failed + 1))
+    failed_list="$(jq -n --argjson a "$failed_list" --arg k "${repo}#${pr}" '$a + [$k]')"
+    continue
+  fi
+  file_missed=$((file_missed + _pr_file_missed))
   prs=$((prs + 1))
 done
 
@@ -408,6 +418,26 @@ fi
 # 欄位是 run-backtest.sh 自己知道的東西，不受這次改動影響，維持原樣。
 candidates_sha="$(shasum -a 256 "$C" | cut -c1-16)"
 
+# candidates_effective_sha：只涵蓋真正影響比較的部分，也就是 confirmed==true
+# 的項目的 (repo, pr, expected_findings)。
+#
+# candidates_sha 算的是整份檔案，包含 confirmed=false 的候選與每次重跑
+# build-benchmark.sh 都會變的 fix_commits。那兩樣都不參與指標計算，卻會讓
+# sha 變動 —— 加一筆還沒人工確認的候選，兩輪的 sha 就對不上，看起來像基準集
+# 換了，實際上分母一模一樣。方向是過度敏感，不會把不同的基準集誤判成相同
+# （那才危險），但會讓相同的被誤判成不同，而那正是這個欄位要回答的問題。
+#
+# 兩個都留：舊欄位讓階段二已經跑完的四份 summary 仍然可以對照，新欄位給出
+# 正確的語意。expected_findings 內部先排序再算，避免同一組 finding 因為
+# --add 的順序不同而算出不同的指紋。
+candidates_effective_sha="$(jq -S -c '
+  [ .[] | select(.confirmed == true)
+    | {repo, pr, expected_findings: (.expected_findings | sort_by([.path, .line, .severity, .note])) } ]
+  | sort_by([.repo, .pr])' "$C" | shasum -a 256 | cut -c1-16)" || {
+  echo "SHA_FAILED：計算 candidates_effective_sha 失敗" >&2
+  exit 1
+}
+
 _write_summary "$OUT/summary.json" \
   --argjson m "$summary_metrics" --argjson prs "$prs" --arg label "$LABEL" \
   --argjson incomplete_count "$n_incomplete" --argjson incomplete_prs "$incomplete_list" \
@@ -415,7 +445,9 @@ _write_summary "$OUT/summary.json" \
   --argjson tolerance "$TOL" \
   --argjson file_missed "$file_missed" \
   --argjson conditions "$conditions_json" --arg conditions_source "$conditions_source" \
-  --arg candidates_sha "$candidates_sha" --argjson candidates_confirmed "$n_conf" \
+  --arg candidates_sha "$candidates_sha" \
+  --arg candidates_effective_sha "$candidates_effective_sha" \
+  --argjson candidates_confirmed "$n_conf" \
   '$m + {prs: $prs, label: $label,
          incomplete_count: $incomplete_count, incomplete_prs: $incomplete_prs,
          failed_count: $failed_count, failed_prs: $failed_prs,
@@ -424,7 +456,9 @@ _write_summary "$OUT/summary.json" \
          file_miss_rate: (if $m.expected_total == 0 then 0
                           else (($file_missed / $m.expected_total) * 100 | round) / 100 end),
          anchor_drift: ($m.missed - $file_missed),
-         candidates_sha: $candidates_sha, candidates_confirmed: $candidates_confirmed}
+         candidates_sha: $candidates_sha,
+         candidates_effective_sha: $candidates_effective_sha,
+         candidates_confirmed: $candidates_confirmed}
    + $conditions + {conditions_source: $conditions_source}' || exit 1
 
 echo "label=$LABEL prs=$prs incomplete=$n_incomplete failed=$n_failed"

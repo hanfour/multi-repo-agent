@@ -49,14 +49,24 @@ test_separates_distinct_topics() {
 }
 
 test_members_stay_within_topic() {
-  # 每一群的成員 path 前綴應該一致（a/b/c），混群表示分群失效
-  local mixed=0
+  # 每一群的成員 path 前綴應該一致（a/b/c），混群表示分群失效。
+  #
+  # 先斷言真的讀到群：mixed 從 0 開始，輸入檔缺席或是空的時候迴圈跑零次、
+  # mixed 停在 0，`eq "沒有跨主題混群" 0 0` 照樣通過。那種綠燈的意思是
+  # 「什麼都沒檢查」，不是「檢查過而且沒問題」。實測把輸出檔案的產生挪到
+  # 這支測試之後，它仍然 PASS。
+  local checked=0 mixed=0
   while IFS= read -r line; do
     local prefixes
     prefixes="$(printf '%s' "$line" | jq -r '[.members[].path | .[0:1]] | unique | length')"
+    checked=$((checked + 1))
     [ "$prefixes" -gt 1 ] && mixed=$((mixed + 1))
   done < "$OUT/nestjs-clusters.jsonl"
-  eq "沒有跨主題混群" "0" "$mixed"
+  if [ "$checked" -eq 0 ]; then
+    fail "一個群都沒讀到，「沒有跨主題混群」這個判斷沒有意義"
+    return
+  fi
+  eq "沒有跨主題混群（檢查了 ${checked} 群）" "0" "$mixed"
 }
 
 test_deterministic() {
@@ -366,6 +376,22 @@ test_all_stopword_vocab_produces_empty_top_terms_without_crash() {
   local n; n="$(wc -l < "$OUT/stopwords.jsonl" | tr -d ' ')"
   [ "$n" -ge 2 ] && [ "$n" -le 3 ] && ok "空 vocab 時群數仍在界限內（實際 ${n}）" \
     || fail "群數 $n 超出 2-3"
+
+  # 測試名稱說的是 top_terms，前面卻沒有任何斷言碰它 —— 名字宣稱驗了一件事，
+  # 實際上只驗了「不崩潰」。空 vocab 時每個群的 top_terms 應該是空陣列，
+  # 不是缺這個鍵、也不是 null：下游的 rule-agent prompt 會直接 join 它。
+  local missing_key=0 non_empty=0 checked=0
+  while IFS= read -r line; do
+    checked=$((checked + 1))
+    [ "$(jq -r 'has("top_terms")' <<<"$line")" = "true" ] || missing_key=$((missing_key + 1))
+    [ "$(jq -r '.top_terms | length' <<<"$line")" = "0" ] || non_empty=$((non_empty + 1))
+  done < "$OUT/stopwords.jsonl"
+  if [ "$checked" -eq 0 ]; then
+    fail "一個群都沒讀到，top_terms 的斷言沒有意義"
+    return
+  fi
+  eq "每個群都有 top_terms 這個鍵（不是缺鍵）" "0" "$missing_key"
+  eq "空 vocab 時 top_terms 是空陣列（檢查了 ${checked} 群）" "0" "$non_empty"
 }
 
 # --sample-cap 的等距抽樣公式本身：k = 總數 // cap，取索引 0、k、2k…。

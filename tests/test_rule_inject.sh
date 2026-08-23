@@ -34,7 +34,17 @@ ok()   { echo "PASS: $1"; pass=$((pass+1)); }
 fail() { echo "FAIL: $1"; errors=$((errors+1)); }
 eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] got [$3]"; fi; }
 has()  { case "$2" in *"$3"*) ok "$1" ;; *) fail "$1 — 沒看到「$3」：$2" ;; esac; }
-lacks(){ case "$2" in *"$3"*) fail "$1 — 不該看到「$3」：$2" ;; *) ok "$1" ;; esac; }
+# 空的 haystack 直接算失敗：`lacks "..." "$(cat 不存在的檔案)" "needle"` 對
+# 空字串一定通過，而空字串幾乎總是「東西沒讀到」而不是「讀到了但不含它」。
+# 實測過一次：同一個函式裡配對的 has FAIL 而 lacks PASS，兩個斷言對同一份
+# 資料給出矛盾的結果。真的要斷言某處本來就該是空的，用 eq "" "$x" 講清楚。
+lacks(){
+  if [ -z "$2" ]; then
+    fail "$1 — 被檢查的內容是空的（多半是東西沒讀到，不是真的不含「$3」）"
+    return
+  fi
+  case "$2" in *"$3"*) fail "$1 — 不該看到「$3」：$2" ;; *) ok "$1" ;; esac
+}
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/rule-inject-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -147,8 +157,10 @@ test_unsafe_id_is_skipped_with_warning() {
   local block warn
   block="$(rule_render_block "$dir" nestjs 2>"$OUT/unsafe-id.warn")"
   warn="$(cat "$OUT/unsafe-id.warn")"
-  lacks "不安全的 id 沒有被渲染進區塊（樣板本身雖然有前後綴保護，仍不放行）" \
-    "$block" "$RULE_BLOCK_END"
+  # 唯一一條規則的 id 不安全時整個區塊應該是空的，不是「有區塊但不含那條」。
+  # 用 eq "" 直接講，比 lacks 精確：lacks 對空字串一定通過，那個綠燈的意思是
+  # 「什麼都沒渲染」還是「渲染了但不含它」分不出來。
+  eq "唯一一條規則的 id 不安全時，整個區塊是空的" "" "$block"
   has "印出 RULE_RENDER_SKIP_UNSAFE_ID" "$warn" "RULE_RENDER_SKIP_UNSAFE_ID"
 }
 
@@ -537,8 +549,9 @@ test_inject_all_omitted_budget_does_not_warn() {
   cp "$FIX/persona.md" "$OUT/budget-omit-personas/has-focus.md"
   rule_inject_all "$FIX/rules" nestjs "$OUT/budget-omit-out" \
     "$OUT/budget-omit-personas" >/dev/null 2>"$OUT/budget-omit.warn"
-  lacks "省略預算參數不印出 RULE_BLOCK_BUDGET_INVALID" \
-    "$(cat "$OUT/budget-omit.warn")" "RULE_BLOCK_BUDGET_INVALID"
+  # 省略預算參數是完全正常的呼叫，stderr 應該一個字都沒有，不只是「沒有那個
+  # 特定的 token」。用 eq "" 比 lacks 強：多印了任何別的警告也會被抓到。
+  eq "省略預算參數時 stderr 完全沒有輸出" "" "$(cat "$OUT/budget-omit.warn")"
 }
 
 # =============================================================================
