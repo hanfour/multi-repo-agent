@@ -16,8 +16,11 @@ cat > "$TMP/bin/gh" <<'SHIM'
 echo "$*" >> "$GH_CALLS"
 case "$*" in
   *"pulls/4919/files"*)
-    printf '%s' '[{"filename":"app/a.rb","patch":"@@ -92,7 +92,7 @@ def update\n x"},
-                  {"filename":"app/b.rb","patch":"@@ -10,5 +10,5 @@ def x\n y"}]' ;;
+    # 陣列的陣列：真實的 `gh api --paginate --slurp` 就是這個形狀，一頁一個
+    # 元素。backtest_pr_ranges 現在要分頁（PR 可能改到超過 100 個檔案），
+    # 所以 stub 也要回這個形狀，否則測的是一個不存在的回應。
+    printf '%s' '[[{"filename":"app/a.rb","patch":"@@ -92,7 +92,7 @@ def update\n x"},
+                   {"filename":"app/b.rb","patch":"@@ -10,5 +10,5 @@ def x\n y"}]]' ;;
   *"commits/aaa111"*)
     printf '%s' '{"files":[{"filename":"app/a.rb","patch":"@@ -95,2 +95,4 @@ def update\n z"}]}' ;;
   *"commits/bbb222"*)
@@ -231,6 +234,49 @@ eq "同檔多區間全不重疊為空" "[]" \
 # 這裡再直接釘住旗標本身，讓有人拿掉 --paginate 時錯誤訊息指得更清楚。
 has "commits 查詢有帶 --paginate" "$(cat "$GH_CALLS")" "--paginate"
 has "commits 查詢有帶 --slurp" "$(cat "$GH_CALLS")" "--slurp"
+
+# PR 的檔案清單同樣要分頁：per_page 上限是 100，改到 180 個檔案的 PR 只會回
+# 前 100 筆，而截斷的後果不是報錯，是「這個 PR 沒有候選」——fix commit 若重疊
+# 在第 150 個檔案上，區間表裡根本沒有那個檔案，比對必然落空。
+: > "$GH_CALLS"
+backtest_pr_ranges acme/rails-app-1 4919 >/dev/null
+pr_files_call="$(grep 'pulls/4919/files' "$GH_CALLS")"
+has "PR 檔案查詢有帶 --paginate" "$pr_files_call" "--paginate"
+has "PR 檔案查詢有帶 --slurp" "$pr_files_call" "--slurp"
+
+# $limit 直接進 per_page，而 GitHub 的上限是 100：給 300 的話 API 靜默回 100
+# 筆，呼叫端以為分母是 300、實際是 100，沒有任何訊號。這裡要的是明確失敗，
+# 不是一個比要求少的分母。
+limit_err="$(backtest_merged_prs acme/rails-app-1 300 2>&1)"; limit_rc=$?
+if [[ "$limit_rc" -ne 0 ]]; then
+  ok "limit 超過 100 時退出非 0"
+else
+  fail "limit 超過 100 必須擋下來，不能靜默給一個比要求少的分母"
+fi
+has "印出 LIMIT_TOO_LARGE" "$limit_err" "LIMIT_TOO_LARGE"
+
+limit_bad="$(backtest_merged_prs acme/rails-app-1 abc 2>&1)"; limit_bad_rc=$?
+if [[ "$limit_bad_rc" -ne 0 ]]; then
+  ok "limit 非數字時退出非 0"
+else
+  fail "limit 非數字必須擋下來"
+fi
+has "印出 LIMIT_INVALID" "$limit_bad" "LIMIT_INVALID"
+
+# 邊界：100 本身要放行，不然這道守衛會連正常用法都擋掉。
+backtest_merged_prs acme/rails-app-1 100 >/dev/null 2>&1
+eq "limit 剛好 100 時放行" "0" "$?"
+
+# backtest_overlap 對畸形輸入要回非 0。scripts/build-benchmark.sh 現在會接住
+# 它的退出碼（舊版丟掉，jq 失敗時 $ov 是空字串，而 bash 的算術比較把空字串
+# 當 0，一筆真正的候選就這樣被當成「沒有重疊」悄悄消失）。它若對畸形輸入
+# 照樣回 0，那個守衛就是死碼。
+backtest_overlap '{}' 'not json' >/dev/null 2>&1
+if [[ "$?" -ne 0 ]]; then
+  ok "backtest_overlap 對畸形輸入退出非 0（呼叫端的守衛才有意義）"
+else
+  fail "backtest_overlap 對畸形輸入回 0，呼叫端接退出碼等於白接"
+fi
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

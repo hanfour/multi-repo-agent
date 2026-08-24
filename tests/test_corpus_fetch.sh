@@ -159,6 +159,9 @@ eq "mv 失敗不洩漏暫存檔" "0" "$tmp_after"
 comp_repo="acme/complete-check"
 comp_dir="$(corpus_repo_dir "$comp_repo")"
 mkdir -p "$comp_dir"
+# 這個 fixture 是手工造的、沒真的跑過 fetch，所以方向標記要自己補。少了它，
+# 下面每一條斷言都會先撞上 CACHE_STALE_SORT，測不到它們各自要測的東西。
+printf '%s\n' "$CORPUS_FETCH_DIRECTION" > "$comp_dir/.sort-direction"
 
 # 沒有 .complete：沒有「應該有幾頁」的依據，expected 老實印成 ?，不假裝算得出來。
 out="$(corpus_check_complete "$comp_repo")"; rc=$?
@@ -190,6 +193,56 @@ printf '[{"id":2}]' > "$comp_dir/0002.json"
 out="$(corpus_check_complete "$comp_repo")"; rc=$?
 eq "補齊後退出 0" "0" "$rc"
 eq "補齊後無輸出" "" "$out"
+
+# --- 排序方向：頁號快取只在同一個方向下才有意義 ----------------------------
+#
+# 續抓把「第 N 頁」當成穩定的鍵。這個假設只在新資料 append 到最後一頁時成立，
+# 也就是 direction=asc。desc 之下最新的留言永遠在第 1 頁，抓完之後只要有人再
+# 留言，每一頁的內容都會往後位移：已快取的頁全部被跳過（新留言永遠抓不到），
+# 被擠到新末頁的舊留言又會被重抓一次（因此重複）。
+has "抓取用的是 asc" "$(cat "$GH_CALL_LOG")" "direction=asc"
+lacks "不再送 direction=desc" "$(cat "$GH_CALL_LOG")" "direction=desc"
+
+# 抓成功的 repo 要留下方向標記，之後才分得出「這份快取是用哪個方向抓的」。
+eq "抓完的 repo 有方向標記" "asc" "$(cat "$TMP/cache/vuejs__vue/.sort-direction" 2>/dev/null)"
+
+# 沒有方向標記的快取（改用 asc 之前抓下來的那些）不能拿去篩選：頁數看起來是
+# 齊的，逐頁檢查抓不到這件事，要用自己的 token 單獨擋。
+stale_repo="acme/stale-sort"
+stale_dir="$(corpus_repo_dir "$stale_repo")"
+mkdir -p "$stale_dir"
+printf '1\n' > "$stale_dir/.complete"
+printf '[{"id":1}]' > "$stale_dir/0001.json"
+out="$(corpus_check_complete "$stale_repo")"; rc=$?
+eq "沒有方向標記時退出 1" "1" "$rc"
+eq "沒有方向標記：token" "CACHE_STALE_SORT" "$(printf '%s' "$out" | head -1 | cut -f1)"
+
+# 方向標記存在但寫的是另一個方向：同樣擋下來。只驗「標記不存在」的話，一個
+# 只檢查檔案在不在、不比對內容的實作也會通過。
+printf 'desc\n' > "$stale_dir/.sort-direction"
+out="$(corpus_check_complete "$stale_repo")"; rc=$?
+eq "方向標記是 desc 時退出 1" "1" "$rc"
+eq "方向標記是 desc：token" "CACHE_STALE_SORT" "$(printf '%s' "$out" | head -1 | cut -f1)"
+
+# 補上正確的方向標記之後就放行——證明上面兩條擋下來的是方向，不是別的東西。
+printf '%s\n' "$CORPUS_FETCH_DIRECTION" > "$stale_dir/.sort-direction"
+out="$(corpus_check_complete "$stale_repo")"; rc=$?
+eq "方向正確時退出 0" "0" "$rc"
+eq "方向正確時無輸出" "" "$out"
+
+# 方向不符的頁在續抓時要被當成沒抓過，這樣才會重抓覆寫，不需要任何手動清理。
+printf 'desc\n' > "$stale_dir/.sort-direction"
+if _corpus_page_cached "$stale_repo" 1; then
+  fail "方向不符的頁不該被視為已快取"
+else
+  ok "方向不符的頁視為未快取（續抓會重抓覆寫）"
+fi
+printf '%s\n' "$CORPUS_FETCH_DIRECTION" > "$stale_dir/.sort-direction"
+if _corpus_page_cached "$stale_repo" 1; then
+  ok "方向相符時仍然視為已快取"
+else
+  fail "方向相符的頁該被視為已快取"
+fi
 
 # corpus_fetch_repo resume 時，已快取的頁不該觸發 gh api rate_limit。
 # rails/rails 這時候的快取狀態是頁 1 合法（最上面第一次抓時寫入）、頁 2、3

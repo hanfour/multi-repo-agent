@@ -242,7 +242,7 @@ review_project() {
   [[ -z "$changed_count" ]] && changed_count=0
 
   if [[ "$working" == "true" && "$changed_count" -eq 0 ]]; then
-    log_info "no uncommitted changes to review" "review"
+    _review_maybe_stderr_log log_info "no uncommitted changes to review" "review"
     return 0
   fi
 
@@ -266,7 +266,11 @@ review_project() {
       log_error "review: PR #$pr_number has no changes visible in '$range_expr' — this checkout does not contain the PR head, so there is nothing to review. Check out the PR first (gh pr checkout $pr_number) and re-run." "review"
       return 1
     fi
-    log_info "review: no changes in '$range_expr' — nothing to review" "review"
+    # 這一行在 --range 路徑上，正是回測 adapter 走的那條。沒轉成 stderr 版本的
+    # 話，MRA_REVIEW_EMIT_JSON=1 時它會印到 stdout 並 return 0，呼叫端收到的是
+    # 一句人看的話而不是 JSON，診斷會指向「輸出不是合法 JSON」而不是真正的原因
+    # （這個 range 算出來是空的）。
+    _review_maybe_stderr_log log_info "review: no changes in '$range_expr' — nothing to review" "review"
     return 0
   fi
 

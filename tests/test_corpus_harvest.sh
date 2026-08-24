@@ -261,5 +261,46 @@ case "$log_out" in
 esac
 _filter_release demo/repo 42
 
+# --- 同一個快取目錄一次只能跑一個 harvest ----------------------------------
+#
+# 主流程會把共用的「在跑權重總量」重置為 0。另一個 harvest 正在跑時，這個重置
+# 會把它已經記入的權重整個抹掉，兩邊都以為預算是空的，於是同時放行最大的那幾
+# 個 repo——而這個預算存在的唯一目的，就是不要讓好幾個 repo 的篩選峰值同時壓
+# 在同一台機器上。
+LOCK_CACHE="$TMP/instance-lock"
+mkdir -p "$LOCK_CACHE"
+if _harvest_instance_lock "$LOCK_CACHE" 2>/dev/null; then
+  ok "第一個實例取得鎖"
+else
+  fail "第一個實例該取得鎖"
+fi
+
+# 第二次呼叫：pid 檔裡是這個還活著的行程，要被擋下來。
+second_out="$(_harvest_instance_lock "$LOCK_CACHE" 2>&1)"; second_rc=$?
+if [[ "$second_rc" -ne 0 ]]; then
+  ok "另一個實例被擋下來"
+else
+  fail "另一個 harvest 正在跑時不該取得鎖"
+fi
+has "印出 HARVEST_ALREADY_RUNNING" "$second_out" "HARVEST_ALREADY_RUNNING"
+
+# 殘骸接手：pid 指向一個已經結束的行程。只看「鎖目錄在不在」的實作會把上一輪
+# 被 kill 掉留下的鎖當成有效，之後每次執行都被自己的殘骸擋住，而且看不出原因。
+dead_pid="$(bash -c 'echo $$')"
+printf '%s' "$dead_pid" > "$LOCK_CACHE/.harvest.lock/pid"
+stale_out="$(_harvest_instance_lock "$LOCK_CACHE" 2>&1)"; stale_rc=$?
+if [[ "$stale_rc" -eq 0 ]]; then
+  ok "上一輪的殘骸鎖可以接手"
+else
+  fail "pid 已經不在時該接手，不是永遠被擋住：$stale_out"
+fi
+has "接手時印出 HARVEST_STALE_LOCK" "$stale_out" "HARVEST_STALE_LOCK"
+_harvest_instance_unlock
+if [[ -e "$LOCK_CACHE/.harvest.lock" ]]; then
+  fail "unlock 之後鎖還在"
+else
+  ok "unlock 之後鎖清掉了"
+fi
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

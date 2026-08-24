@@ -232,8 +232,13 @@ OOB_BIN="$TMP/bin-oob"
 mkdir -p "$OOB_BIN"
 cat > "$OOB_BIN/gh" <<'SHIM'
 #!/usr/bin/env bash
-# 只回一個 hunk：新檔的 100 到 109 行
-printf '%s' '[{"filename":"app/x.rb","patch":"@@ -100,5 +100,10 @@\n context"}]'
+# 只回一個 hunk：新檔的 100 到 109 行。
+#
+# 外層多包一層陣列：這道檢查現在用 `gh api --paginate --slurp`（PR 可能改到
+# 超過 100 個檔案，未分頁時後面的檔案在 patch 裡根本不存在，每一條標在那裡的
+# finding 都會被誤報成 LINE_OUTSIDE_DIFF），而 --slurp 回的是「陣列的陣列」，
+# 一頁一個元素。stub 不跟著改的話，測的是一個不存在的回應形狀。
+printf '%s' '[[{"filename":"app/x.rb","patch":"@@ -100,5 +100,10 @@\n context"}]]'
 SHIM
 chmod +x "$OOB_BIN/gh"
 

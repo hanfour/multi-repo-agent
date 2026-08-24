@@ -11,9 +11,17 @@ source "$MRA_DIR/lib/corpus-filter.sh"
 source "$MRA_DIR/lib/corpus-internal.sh"
 
 ONLY_REPO=""; DO_FETCH=1; DO_FILTER=1; INTERNAL=0
+# 理由同 scripts/build-benchmark.sh：`--repo` 打在最後一個位置時，set -u 會讓
+# 腳本死在「$2: 未綁定的變數」。corpus-harvest.sh 與 corpus-refetch.sh 都會
+# shell out 到這支腳本，操作者的一個打字錯誤會變成一段指向行號的錯誤訊息。
+_require_opt_value() {
+  echo "用法：$1 需要接一個值" >&2
+  exit 1
+}
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo)        ONLY_REPO="$2"; shift 2 ;;
+    --repo)        [[ $# -ge 2 ]] || _require_opt_value "--repo"
+                   ONLY_REPO="$2"; shift 2 ;;
     --fetch-only)  DO_FILTER=0; shift ;;
     --filter-only) DO_FETCH=0; shift ;;
     --internal)    INTERNAL=1; shift ;;
@@ -40,9 +48,21 @@ _retention_lock_mtime() {
   stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
 }
 
+# 逾時判準用實際經過的秒數，不是重試次數。舊版在「清掉陳舊的鎖」那條分支上
+# 直接 continue，跳過了迴圈尾端的 waited 遞增：只要鎖一直被判定為陳舊（兩個
+# 行程加上慢速檔案系統的 mtime 就夠了），這個計數器永遠不會前進，說好的 300
+# 秒放棄門檻一次都不會觸發，迴圈可以無限轉下去。改成在迴圈開頭用起始時間算
+# 經過秒數，不管走哪條分支都會經過同一道檢查。
+# corpus-harvest.sh 的 _filter_lock 是這把鎖的複製品，同一個修法要一起套。
 _retention_lock() {
-  local lock="$RETENTION.lock" waited=0 mtime age
+  local lock="$RETENTION.lock" start_ts mtime age elapsed
+  start_ts=$(date +%s)
   while ! mkdir "$lock" 2>/dev/null; do
+    elapsed=$(( $(date +%s) - start_ts ))
+    if [[ "$elapsed" -ge 300 ]]; then
+      echo "等待留存報告的鎖超過 300 秒，放棄：$lock" >&2
+      return 1
+    fi
     # 陳舊判斷一定要看「鎖目錄本身的年齡」，不能看「自己等了多久」。
     # 後者是每個行程各自的計數器而且不會重置，一旦跨過門檻，這個行程就會把它看到的
     # 任何鎖當成陳舊的砍掉 —— 包括另一個等待者前一毫秒才合法取得的新鎖。實測過：
@@ -61,11 +81,6 @@ _retention_lock() {
       fi
     fi
     sleep 1
-    waited=$((waited + 1))
-    if [[ "$waited" -ge 300 ]]; then
-      echo "等待留存報告的鎖超過 300 秒，放棄：$lock" >&2
-      return 1
-    fi
   done
   _RETENTION_LOCK_HELD=1
 }

@@ -21,10 +21,13 @@ mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gh" <<'SHIM'
 #!/usr/bin/env bash
 case "$*" in
+  # 陣列的陣列，跟下面 commits 端點同一個道理：backtest_pr_ranges 現在用
+  # `gh api --paginate --slurp`（PR 可能改到超過 100 個檔案，未分頁時後面的
+  # 檔案在區間表裡根本不存在，fix commit 重疊在那裡就永遠比對不到）。
   *"pulls/4801/files"*)
-    printf '%s' '[{"filename":"app/a.rb","patch":"@@ -10,5 +10,5 @@ def x\n y"}]' ;;
+    printf '%s' '[[{"filename":"app/a.rb","patch":"@@ -10,5 +10,5 @@ def x\n y"}]]' ;;
   *"pulls/4802/files"*)
-    printf '%s' '[{"filename":"app/b.rb","patch":"@@ -20,5 +20,5 @@ def z\n w"}]' ;;
+    printf '%s' '[[{"filename":"app/b.rb","patch":"@@ -20,5 +20,5 @@ def z\n w"}]]' ;;
   *"commits/fix4801"*)
     printf '%s' '{"files":[{"filename":"app/a.rb","patch":"@@ -11,2 +11,4 @@ def x\n p"}]}' ;;
   *"commits/fix4802"*)

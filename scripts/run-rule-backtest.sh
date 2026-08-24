@@ -13,16 +13,22 @@
 # worktree 隔離、三點 range。只有規則不同——任何其他差異都會讓比較出來的
 # 差異可能來自條件而不是規則。這幾個值因此寫死在這裡，不開放成參數。
 #
-# MRA_PERSONAS_DIR 是真正的覆蓋點（lib/personas.sh 的 _personas_dir()，
-# Task 7 加的）。這支腳本把它指向注入完規則後的 persona 副本，不是原本的
-# agents/personas。
+# MRA_PERSONAS_DIR 是 review 流程真正的覆蓋點（lib/personas.sh 的
+# _personas_dir()，Task 7 加的）。分層之後由 run-backtest.sh 逐 PR 設定它，
+# 這支腳本交出去的是 MRA_PERSONAS_ROOT：一個底下每層各一份 persona 副本的
+# 根目錄，不是原本的 agents/personas。
 #
-# 只注入 common 層：回測涵蓋 rails／react／nestjs 三種 repo，但 persona 目錄
-# 是全域共用的，沒辦法依 repo 切換要載入哪些規則。分層注入是階段四的事。
+# 分層注入：回測涵蓋 rails／react／nestjs 三種 repo。persona 目錄是 review 流程
+# 唯一的載入點（lib/personas.sh 的 _personas_dir()），一次只能指向一個目錄，所以
+# 這裡對每一層各展開一份完整的 persona 副本（personas-<label>/<層>/），再由
+# run-backtest.sh 逐 PR 依 repo 所屬層挑要載入哪一份（見那邊的 MRA_PERSONAS_ROOT）。
+#
+# 這是階段四補上的。在此之前只注入 common 層，rails／react／vue／nestjs 四層的
+# 規則從未進過任何一次 review 的 prompt。
 #
 # agents/personas/test-architect.md 沒有 FOCUS: 錨點（它用「KENT BECK 11
-# PRINCIPLES:」取代），rule_inject_all 會原樣複製、不注入規則——這代表五個
-# persona 只有四個真的拿到規則。這是既有事實，不是這裡要修的 bug：改
+# PRINCIPLES:」取代），注入時會原樣複製、不注入規則——這代表每一層的五個
+# persona 都只有四個真的拿到規則。這是既有事實，不是這裡要修的 bug：改
 # test-architect.md 讓它能被注入的話，會改變階段二基準線 C 的條件，兩者就
 # 不可比了。這裡只把這件事在執行時明確印出來，並寫進執行條件記錄。
 set -uo pipefail
@@ -118,10 +124,18 @@ done
   exit 1
 }
 
-# --- 注入 persona ------------------------------------------------------------
+# --- 注入 persona：每一層各一份 ---------------------------------------------
+# 注入結果的根目錄，底下每層一個子目錄（personas-<label>/rails/、
+# .../react/ ...）。run-backtest.sh 收到的是這個根目錄，逐 PR 依 repo 所屬層
+# 挑要載入哪一份。
 INJECTED="${MRA_RULE_PERSONA_DIR:-${TMPDIR:-/tmp}}/personas-${LABEL}"
 
-# rule_inject_all 用 stderr 回報兩種完全不同的事：真正的硬錯誤（persona
+# 層清單用 corpus_layers()，與語料取材、規則萃取用的是同一份定義。在這裡另外
+# 寫死一份清單的話，之後新增一層時兩邊會漂移，而漂移的後果是那一層的規則
+# 靜默地不參與回測。
+LAYERS="$(corpus_layers | tr '\n' ' ')"
+
+# rule_inject_layers 用 stderr 回報兩種完全不同的事：真正的硬錯誤（persona
 # 來源目錄不存在、mv 失敗等），以及正常但值得知道的資訊（哪個 persona 因為
 # 沒有 FOCUS 被原樣複製）。兩種都不能被丟棄，但後者要被解析出「4/5」這種
 # 摘要，所以先落到暫存檔，再原樣轉印到真正的 stderr、同時解析。
@@ -130,38 +144,41 @@ inject_log="$(mktemp "${TMPDIR:-/tmp}/rule-backtest-inject.XXXXXX")" || {
   exit 1
 }
 
-n_total=""
-if [ -n "$BUDGET" ]; then
-  n_total="$(rule_inject_all "$RULES" common "$INJECTED" "" "$BUDGET" 2>"$inject_log")"
-else
-  n_total="$(rule_inject_all "$RULES" common "$INJECTED" 2>"$inject_log")"
-fi
+# 第四個參數（persona 來源目錄）給空字串表示用預設的 agents/personas，第五個
+# 是 token 預算、空字串表示不覆寫——兩個都能無條件傳，不像 rule_inject_all
+# 需要為「有沒有覆寫預算」分成兩種呼叫形式。
+layer_report="$(rule_inject_layers "$RULES" "$INJECTED" "$LAYERS" "" "$BUDGET" 2>"$inject_log")"
 inject_rc=$?
 
 [ -s "$inject_log" ] && cat "$inject_log" >&2
 
-if [ "$inject_rc" -ne 0 ] || [ -z "$n_total" ]; then
+if [ "$inject_rc" -ne 0 ] || [ -z "$layer_report" ]; then
   echo "INJECT_FAILED：規則注入失敗（見上方診斷）" >&2
   rm -f "$inject_log"
   exit 1
 fi
 
-# grep -c 在零筆匹配時退出碼是 1；這裡不是管線（沒有 pipefail 可以攪局），
-# 但 `local x="$(cmd)"` 這種寫法本身就不在這裡出現（頂層腳本不用 local），
-# 所以 $n_skipped 拿到的就是 grep 印出的數字，不受它自己退出碼影響。
-n_skipped="$(grep -c '^RULE_INJECT_SKIPPED' "$inject_log")"
+# 每層的 persona 總數與跳過數必然相同（每層都注入同一份 agents/personas），
+# 取第一行即可；逐層真正不同的是「這一層有幾條規則進了 prompt」。
+n_total="$(printf '%s\n' "$layer_report" | head -n 1 | cut -f2)"
+n_skipped="$(printf '%s\n' "$layer_report" | head -n 1 | cut -f3)"
+n_layers="$(printf '%s\n' "$layer_report" | grep -c . || true)"
 
 # 用陣列＋逐一 append 組「、」分隔的清單，不用 `tr '、' ...` 或
 # `paste -sd '、' -`：兩者都要處理一個多位元組 UTF-8 分隔字元，行為依賴呼叫
 # 環境的 locale——這支腳本沒有像 lib/rule-inject.sh 的 _rule_char_count 那樣
 # 釘死 LC_ALL，不該假設呼叫端一定是 UTF-8 aware 的 locale。純 bash 字串串接
 # 不需要「認得」UTF-8 才能正確處理位元組序列，不受 locale 影響。
+#
+# sort -u：分層之後同一個沒有 FOCUS 的 persona 會在每一層各被跳過一次，
+# 訊息因此重複五遍。這裡要的是「哪些 persona 沒拿到規則」，不是「跳過事件
+# 發生幾次」。
 skipped_names=""
 skipped_arr=()
 if [ "$n_skipped" -gt 0 ]; then
   while IFS= read -r p; do
     skipped_arr+=("$(basename "$p" .md)")
-  done < <(grep '^RULE_INJECT_SKIPPED' "$inject_log" | cut -f2)
+  done < <(grep '^RULE_INJECT_SKIPPED' "$inject_log" | cut -f2 | LC_ALL=C sort -u)
   for name in "${skipped_arr[@]}"; do
     if [ -z "$skipped_names" ]; then
       skipped_names="$name"
@@ -174,11 +191,21 @@ rm -f "$inject_log"
 
 n_injected=$((n_total - n_skipped))
 if [ "$n_skipped" -gt 0 ]; then
-  echo "注入 ${n_injected}/${n_total} 個 persona，${skipped_names} 無 FOCUS 錨點故跳過"
+  echo "每層注入 ${n_injected}/${n_total} 個 persona，共 ${n_layers} 層，${skipped_names} 無 FOCUS 錨點故跳過"
 else
-  echo "注入 ${n_injected}/${n_total} 個 persona"
+  echo "每層注入 ${n_injected}/${n_total} 個 persona，共 ${n_layers} 層"
 fi
-echo "規則 ${n_rules} 條，注入後的 persona 在 ${INJECTED}"
+
+# 規則檔數與「實際進 prompt 的條數」是兩個不同的數字，要分開印：一份 140 個
+# 檔案的規則集，每層看得到的只有自己這層加 common，token 預算還會再截斷
+# 一次，實際進 prompt 的通常是個位數。只印前者會讓人以為整份規則集都被
+# 測過了。
+echo "規則檔 ${n_rules} 個，各層實際進 prompt 的條數："
+printf '%s\n' "$layer_report" | while IFS=$'\t' read -r l _t _s r; do
+  [ -n "$l" ] || continue
+  printf '  %-8s %s 條\n' "$l" "$r"
+done
+echo "注入後的 persona 在 ${INJECTED}/<層>/"
 
 # $BUDGET 可能是使用者打錯的畸形值（非數字、0、負數）——rule_render_block
 # 自己會印 RULE_BLOCK_BUDGET_INVALID 警告並優雅退回預設值，這裡不重複那個
@@ -225,6 +252,21 @@ else
   skipped_json='[]'
 fi
 
+# 逐層的注入結果。n_rules（規則檔總數）描述的是輸入，這個陣列描述的才是
+# 「實際有多少條規則進了那一層的 prompt」——兩者差距很大（一份 140 個檔案的
+# 規則集，每層通常只進得去個位數），只記前者會讓之後重建這輪條件的人以為
+# 整份規則集都被測過了。
+if ! layers_json="$(printf '%s\n' "$layer_report" | jq -R -s '
+      split("\n") | map(select(length > 0) | split("\t") | {
+        layer: .[0],
+        persona_total: (.[1] | tonumber),
+        persona_skipped: (.[2] | tonumber),
+        rules_injected: (.[3] | tonumber)
+      })')"; then
+  echo "COND_LAYERS_FAILED：無法把逐層注入結果轉成 JSON，${COND_FILE} 未變動" >&2
+  exit 1
+fi
+
 # --recompute 且已經有一份記錄時就保留它，不覆寫。這份記錄描述的是「summary
 # 裡的數字是在什麼規則集下跑出來的」；重算容差時 review 沒有重跑，規則集卻
 # 可能已經改了，覆寫等於把記錄跟它描述的對象拆開 —— 檔案裡是新規則集、數字
@@ -246,10 +288,12 @@ else
     --argjson persona_skipped_names "$skipped_json" \
     --argjson token_budget "$EFFECTIVE_BUDGET" \
     --argjson tolerance "$TOL" \
+    --argjson layers "$layers_json" \
     '{label: $label, rules_dir: $rules_dir, n_rules: $n_rules,
       persona_dir: $persona_dir, persona_total: $persona_total,
       persona_injected: $persona_injected, persona_skipped: $persona_skipped,
       persona_skipped_names: $persona_skipped_names,
+      layers: $layers,
       token_budget: $token_budget, tolerance: $tolerance}' > "$COND_TMP"; then
     echo "COND_WRITE_FAILED：寫入執行條件記錄失敗，${COND_FILE} 未變動" >&2
     rm -f "$COND_TMP"
@@ -270,7 +314,7 @@ BACKTEST="${MRA_BACKTEST_SCRIPT:-$MRA_DIR/scripts/run-backtest.sh}"
 MRA_BACKTEST_CMD="${MRA_BACKTEST_CMD:-$MRA_DIR/scripts/backtest-review-adapter.sh}" \
 MRA_BACKTEST_REVIEW_MODE=personas \
 MRA_REVIEW_PERSONA_MAX_TURNS=20 \
-MRA_PERSONAS_DIR="$INJECTED" \
+MRA_PERSONAS_ROOT="$INJECTED" \
   bash "$BACKTEST" --label "$LABEL" --tolerance "$TOL" $RECOMPUTE_FLAG
 backtest_rc=$?
 exit "$backtest_rc"

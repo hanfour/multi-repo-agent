@@ -217,7 +217,11 @@ case "${1:---next}" in
     # 只警告不擋：標註者有可能刻意要記一個 diff 外的位置（缺陷的根源在別處，
     # PR 只是暴露了它）。擋下來會讓那種情況無法記錄。查不到 patch 時（網路
     # 失敗、權限不足）也只是跳過這道檢查，不影響 --add 本身。
-    if _pr_patch="$(gh api "repos/${resolved}/pulls/${pr}/files?per_page=100" 2>/dev/null)"; then
+    # 同樣要分頁（見 lib/backtest-groundtruth.sh 的 backtest_pr_ranges）：未分頁
+    # 時第 100 個之後的檔案在 patch 裡根本不存在，這道檢查會對每一條標在那些
+    # 檔案上的 finding 誤報 LINE_OUTSIDE_DIFF。
+    if _pr_files_raw="$(gh api --paginate --slurp "repos/${resolved}/pulls/${pr}/files?per_page=100" 2>/dev/null)" \
+       && _pr_patch="$(printf '%s' "$_pr_files_raw" | jq 'add // []')"; then
       _in_diff="$(jq -r --arg p "$path" --argjson l "$line" '
         [.[] | select(.filename == $p) | .patch // ""] | .[0] // ""
         | [scan("@@ -[0-9]+(?:,[0-9]+)? \\+([0-9]+)(?:,([0-9]+))? @@")]

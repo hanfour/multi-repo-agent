@@ -234,5 +234,39 @@ fi
 eq "續跑不補寫：筆數是 1（維持短少）或 0（檔案缺席），不是 2" "true" \
   "$([ "$n9" -le 1 ] && echo true || echo false)"
 
+# --- 算不出筆數時不能留下一個空白的 .done 標記 -----------------------------
+#
+# $total 會被寫進 .done 標記，而那個標記一旦存在，之後每次續跑都會短路（直接
+# cat 標記內容當筆數回傳）。jq 失敗時 $total 是空字串，標記就變成一個空行：
+# 這個 repo 的筆數從此永遠是空的，也再也不會重跑，而 corpus_materialize_manifest
+# 要拿它跟各 repo 應有筆數對帳。
+#
+# 觸發方式是換掉 corpus_filter_all，讓它「退出碼 0 但輸出不是 JSON」——真實
+# 世界的對應情境是寫到一半磁碟滿、輸出被截斷。
+_saved_filter_all="$(declare -f corpus_filter_all)"
+corpus_filter_all() { printf 'this is not json'; return 0; }
+
+CNT_OUT="$TMP/count-fail-out"
+mkdir -p "$CNT_OUT"
+cnt_err="$(corpus_materialize_repo nestjs/nest "$CNT_OUT" 2>&1 >/dev/null)"; cnt_rc=$?
+if [[ "$cnt_rc" -ne 0 ]]; then
+  ok "算不出筆數時退出非 0"
+else
+  fail "算不出筆數必須失敗，不能繼續往下寫標記"
+fi
+has "印出 COUNT_FAILED" "$cnt_err" "COUNT_FAILED"
+if [[ -e "$CNT_OUT/.done-nestjs__nest" ]]; then
+  fail "算不出筆數卻留下 .done 標記（下次續跑會被它短路）"
+else
+  ok "算不出筆數不留下 .done 標記"
+fi
+if [[ -e "$CNT_OUT/nestjs.jsonl" ]]; then
+  fail "算不出筆數卻已經寫進 layer.jsonl"
+else
+  ok "算不出筆數不動 layer.jsonl"
+fi
+
+eval "$_saved_filter_all"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

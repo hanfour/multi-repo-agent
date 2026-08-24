@@ -27,6 +27,25 @@ for r in acme/rails-app-1 acme/nest-monorepo-2.0 acme/react-app-1 acme/vue-app-1
   if corpus_internal_targets | cut -f1 | grep -qx "$r"; then ok "含 $r"; else fail "缺 $r"; fi
 done
 
+# corpus_internal_layer_of：分層注入靠它決定每個 PR 要讀哪一層的規則
+# （scripts/run-backtest.sh 的 MRA_PERSONAS_ROOT 那段）。查不到時必須退出
+# 非 0 而不是印出空字串——呼叫端要分得出「這個 repo 屬於通用層」與「這個
+# repo 還沒登記」，兩者的正確處置完全不同：前者照跑，後者該擋下來。
+eq "erp 是 rails 層" "rails" "$(corpus_internal_layer_of acme/rails-app-1)"
+eq "nest-monorepo-2.0 是 nestjs 層" "nestjs" "$(corpus_internal_layer_of acme/nest-monorepo-2.0)"
+eq "react-app-1 是 react 層" "react" "$(corpus_internal_layer_of acme/react-app-1)"
+eq "oss-ui-v2 是 vue 層" "vue" "$(corpus_internal_layer_of acme/vue-app-1)"
+if corpus_internal_layer_of someorg/never-registered >/dev/null 2>&1; then
+  fail "沒登記的 repo 應退出非 0"
+else
+  ok "沒登記的 repo 退出非 0"
+fi
+eq "沒登記的 repo 什麼都不印" "" "$(corpus_internal_layer_of someorg/never-registered)"
+# 比對必須是字串相等，不是正規表示式：acme/nest-monorepo-2X0 不在清單裡，把 .
+# 當萬用字元的實作會把它誤配成 nestjs 層，那個 repo 的 PR 就會讀到一份不屬於
+# 它的規則，而外觀上完全正常。
+eq "含 . 的名稱不會被當成萬用字元" "" "$(corpus_internal_layer_of acme/nest-monorepo-2X0)"
+
 # 第 2 步改用活躍留言者清單，不看 author_association。
 # fixture 裡 member1 有 4 則、member2 與 member3 各 1 則、outsider 1 則。
 active='["member1"]'

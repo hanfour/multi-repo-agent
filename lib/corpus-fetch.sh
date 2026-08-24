@@ -19,6 +19,30 @@ corpus_page_file() {
   printf '%s/%04d.json' "$(corpus_repo_dir "$repo")" "$page"
 }
 
+# 分頁抓取的排序方向。必須是 asc。
+#
+# 續抓機制把「第 N 頁」當成穩定的鍵：抓過的頁號直接跳過。這個假設只在「新資料
+# append 到最後一頁」時成立，也就是 direction=asc。
+#
+# 用 desc 的話最新的留言永遠排在第 1 頁，只要上次抓完之後有人留了新意見，每一頁
+# 的內容都會往後位移：已快取的第 1 到 N-1 頁全部被跳過（新留言因此永遠抓不到），
+# 而被擠到新末頁的那批舊留言會再抓一次存進去（因此重複）。corpus_filter_all 沒有
+# 依 .id 去重，重複的留言會一路帶進 retention.tsv、前 15 名留言者排名，以及兩條
+# 萃取路線的語料。實測 vuejs/core 有 598 頁，一天新增 40 則就是這個形狀。
+CORPUS_FETCH_DIRECTION="asc"
+
+# 抓取方向的標記檔。頁號快取只有在「跟當初抓的時候同一個排序方向」下才有意義，
+# 方向換了就得整個 repo 重抓。這裡不刪舊檔，而是讓 _corpus_page_cached 判定成
+# 未快取，續抓時自然覆寫同名檔案——刪檔會在中途失敗時留下一個比原本更糟的狀態
+# （既沒有舊資料，也沒有新資料）。
+_corpus_sort_marker() { printf '%s/.sort-direction' "$(corpus_repo_dir "$1")"; }
+
+_corpus_sort_matches() {
+  local marker; marker="$(_corpus_sort_marker "$1")"
+  [[ -s "$marker" ]] || return 1
+  [[ "$(cat "$marker")" == "$CORPUS_FETCH_DIRECTION" ]]
+}
+
 # 末頁頁數取自 Link header。沒有 Link header 代表結果只有一頁；但 gh 這次呼叫
 # 本身失敗（認證、網路）也會走到同一條「沒有 Link header」的路，兩者不能混為一談：
 # 前者是真的單頁 repo，後者是暫時性故障卻被當成「只有 1 頁」蒙混過去——一次
@@ -28,7 +52,7 @@ corpus_page_file() {
 # 失敗直接讓這個函式回傳非 0，不印任何東西；後者找不到才視為單頁。
 corpus_last_page() {
   local repo="$1" out link last
-  if ! out=$(gh api "repos/$repo/pulls/comments?per_page=100&sort=created&direction=desc" \
+  if ! out=$(gh api "repos/$repo/pulls/comments?per_page=100&sort=created&direction=$CORPUS_FETCH_DIRECTION" \
                --include 2>/dev/null); then
     return 1
   fi
@@ -43,15 +67,22 @@ corpus_last_page() {
 # 已快取的頁不該讓 resume 白付一次 gh api rate_limit 的網路來回。
 _corpus_page_cached() {
   local repo="$1" page="$2" out
+  # 沒有方向標記的，是改用 asc 之前抓下來的快取：頁號對不上現在的抓法，一律
+  # 視為未快取。這樣續抓會把整個 repo 重抓一遍並覆寫，不需要任何手動清理。
+  _corpus_sort_matches "$repo" || return 1
   out="$(corpus_page_file "$repo" "$page")"
   [[ -s "$out" ]] && jq -e 'type == "array"' "$out" >/dev/null 2>&1
 }
 
 # 退出碼：0 已抓、2 已存在跳過、1 失敗。
+#
+# 第三個參數 force=1 時忽略快取、一定重抓。asc 排序下最後一頁是「還在長」的
+# 那一頁（新留言 append 進去），已快取就跳過的話，兩次抓取之間新增的留言會卡在
+# 那一頁裡永遠抓不到。中間的頁滿了 100 筆之後不會再變，可以安全跳過。
 corpus_fetch_page() {
-  local repo="$1" page="$2" out tmp
+  local repo="$1" page="$2" force="${3:-0}" out tmp
   out="$(corpus_page_file "$repo" "$page")"
-  if _corpus_page_cached "$repo" "$page"; then
+  if [[ "$force" != "1" ]] && _corpus_page_cached "$repo" "$page"; then
     return 2
   fi
   mkdir -p "$(dirname "$out")"
@@ -59,7 +90,7 @@ corpus_fetch_page() {
   # _CS_DARWIN_USER_TEMP_DIR，完全忽略 TMPDIR（GNU 的會理），所以測試無法把暫存檔
   # 導到自己控制的目錄，「不洩漏暫存檔」那條斷言就會變成永遠 0/0 的空斷言。
   tmp="$(mktemp "${TMPDIR:-/tmp}/corpus.XXXXXX")" || return 1
-  if ! gh api "repos/$repo/pulls/comments?per_page=100&page=$page&sort=created&direction=desc" \
+  if ! gh api "repos/$repo/pulls/comments?per_page=100&page=$page&sort=created&direction=$CORPUS_FETCH_DIRECTION" \
          > "$tmp" 2>/dev/null; then
     rm -f "$tmp"; return 1
   fi
@@ -71,6 +102,14 @@ corpus_fetch_page() {
   # 但快取是空的，而且暫存檔永遠留著。
   if ! mv "$tmp" "$out"; then
     rm -f "$tmp"; return 1
+  fi
+  # 方向標記在每一頁成功之後重寫一次（內容固定，重寫沒有副作用）。寫失敗要
+  # 回報成失敗：標記沒寫成功的話，下一次執行會把這一頁判定成未快取而重抓，
+  # 那是浪費，但更糟的是 corpus_check_complete 會擋下整個 repo，而這一頁看起來
+  # 明明抓成功了。
+  if ! printf '%s\n' "$CORPUS_FETCH_DIRECTION" > "$(_corpus_sort_marker "$repo")"; then
+    printf 'SORT_MARKER_WRITE_FAILED\t%s\n' "$repo" >&2
+    return 1
   fi
   return 0
 }
@@ -102,7 +141,9 @@ corpus_fetch_repo() {
     # `gh api rate_limit`（約 0.6 秒的網路來回），resume 時 598 頁裡只缺 6 頁的話，
     # 先查額度再讓 corpus_fetch_page 內部判斷跳過，等於為那 592 頁已快取的頁
     # 各白付一次來回。這裡改成先判斷跳不跳，只有真的要抓的頁才需要查額度。
-    if _corpus_page_cached "$repo" "$page"; then
+    # 最後一頁不跳過，理由見 corpus_fetch_page 的 force 參數：asc 排序下它是
+    # 還在長的那一頁。
+    if [[ "$page" -lt "$last" ]] && _corpus_page_cached "$repo" "$page"; then
       skipped=$((skipped + 1))
       continue
     fi
@@ -119,7 +160,9 @@ corpus_fetch_repo() {
       printf 'RATE_LIMIT_STOP\t%s\t%s\t%s\n' "$repo" "$page" "$last"
       return 3
     fi
-    corpus_fetch_page "$repo" "$page"
+    local force=0
+    [[ "$page" -eq "$last" ]] && force=1
+    corpus_fetch_page "$repo" "$page" "$force"
     case $? in
       0) fetched=$((fetched + 1)) ;;
       2) skipped=$((skipped + 1)) ;;
@@ -166,6 +209,15 @@ corpus_check_complete() {
   local repo="$1" dir marker last page present missing_pages
   dir="$(corpus_repo_dir "$repo")"
   marker="$dir/.complete"
+
+  # 排序方向不符的快取不能拿去篩選：頁號是用另一種排序抓下來的，內容既有重複
+  # 也有缺漏（見 CORPUS_FETCH_DIRECTION 的說明）。頁數看起來是齊的，所以下面
+  # 那道逐頁檢查抓不到這件事，要用自己的 token 單獨擋。
+  if ! _corpus_sort_matches "$repo"; then
+    printf 'CACHE_STALE_SORT\t%s\t%s\t快取是用另一種排序方向抓的，頁號對不上，要重跑一次抓取\n' \
+      "$repo" "$(_corpus_count_page_files "$dir")"
+    return 1
+  fi
 
   last=""
   if [[ -s "$marker" ]]; then
