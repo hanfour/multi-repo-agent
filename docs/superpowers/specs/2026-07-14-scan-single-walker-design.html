@@ -276,7 +276,7 @@ input[type="checkbox"] { accent-color: var(--primary); }
 <strong>Issue:</strong> hanfour/multi-repo-agent#1 — <code>scan: collapse the 5 scanners/*.sh into a single jq/walker pipeline</code>
 <strong>Status:</strong> Approved (brainstorming)</p>
 <h2 id="profiling-result-the-gono-go-evidence-1-required">Profiling result (the go/no-go evidence #1 required)</h2>
-<p>Profiled <code>mra scan</code> on <code>~/OneAD</code> (36 projects, 351 records). Per-scanner best-of-3:</p>
+<p>Profiled <code>mra scan</code> on <code>~/workspace</code> (36 projects, 351 records). Per-scanner best-of-3:</p>
 <table>
 <thead>
 <tr>
@@ -366,7 +366,7 @@ record set</strong>. Two layers:</p>
    produced on the fixture (captured as a golden set during development, before the
    <code>.sh</code> are deleted).</li>
 <li><strong>Dev-time real-world cross-check</strong> — during implementation, run both the old 5
-   scanners and <code>walk.py</code> on <code>~/OneAD</code> (36 projects, 351 records) and diff the record
+   scanners and <code>walk.py</code> on <code>~/workspace</code> (36 projects, 351 records) and diff the record
    sets; they must match. This is a development gate, documented in the plan, not a
    committed test (it depends on external data).</li>
 </ol>
@@ -378,11 +378,11 @@ config file (<code>docker-compose.yml</code>, <code>database.yml</code>, …) bu
 <code>vendor</code> is dependency-internal noise, not the project's real dependency, so excluding
 it is a correctness improvement — but it means byte-parity does NOT hold on a
 pathological tree with real config files under those dirs. The equivalence guarantee is
-therefore <strong>"identical record set on real workspaces"</strong>, enforced by the <code>~/OneAD</code>
+therefore <strong>"identical record set on real workspaces"</strong>, enforced by the <code>~/workspace</code>
 cross-check (344 records, empty diff), not by a constructed pathological fixture. This
 divergence is documented as intentional in <code>scanners/README.md</code>.</p>
 <h2 id="performance-acceptance">Performance acceptance</h2>
-<p>Benchmark <code>walk.py</code> vs the old scanners on <code>~/OneAD</code>. Target: the full scan (walk +
+<p>Benchmark <code>walk.py</code> vs the old scanners on <code>~/workspace</code>. Target: the full scan (walk +
 merge) is <strong>≥2× faster</strong> (expected ~8.3s → ~1–2s). If it is not ≥2×, do not land the
 rewrite (fall back to the minimal node_modules-prune fix on the existing scanners).</p>
 <h2 id="files-touched">Files touched</h2>
@@ -430,8 +430,8 @@ rewrite (fall back to the minimal node_modules-prune fix on the existing scanner
 <h2 id="acceptance">Acceptance</h2>
 <ul>
 <li><code>walk.py</code> reproduces the current 5 scanners' record set exactly (fixture test +
-  ~/OneAD dev cross-check).</li>
-<li>Full scan is ≥2× faster on ~/OneAD; else do not land.</li>
+  ~/workspace dev cross-check).</li>
+<li>Full scan is ≥2× faster on ~/workspace; else do not land.</li>
 <li>Custom <code>.collab/scanners/*.sh</code> still run and contribute records.</li>
 <li><code>scanners/README.md</code> documents the custom-scanner contract.</li>
 <li><code>./test.sh</code> green; python3 requirement documented + checked.</li>

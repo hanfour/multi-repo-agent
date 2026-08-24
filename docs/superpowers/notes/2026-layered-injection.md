@@ -86,7 +86,7 @@ McNemar p ≈ 0.016。這一輪兩個方向的數字一樣大，是最徹底的�
 | acme/react-app-1 | 54 | 58 |
 | acme/nest-monorepo-2.0 | 99 | 112 |
 
-erp 一則都沒變。多出來的量集中在 nest-monorepo-2.0，也就是拿後端規則去審前端
+rails-app-1 一則都沒變。多出來的量集中在 nest-monorepo-2.0，也就是拿後端規則去審前端
 程式碼的那個 repo，而它們沒有換到任何一條命中。
 
 ## 這一輪不能回答的事

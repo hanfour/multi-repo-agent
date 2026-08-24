@@ -6,7 +6,7 @@ JSONL relationship records the legacy scanners/*.sh produced.
 Contract: one JSON object per line, {"source","target","type","confidence","scanner"}.
 
 Two intentional divergences from the legacy bash scanners (both validated
-against real data via the ~/OneAD cross-check, and both affecting only
+against real data via the ~/workspace cross-check, and both affecting only
 pathological inputs, not the fixtures):
 
 1. Host-substring resolution (see HOST_TO_SERVICE below) picks the longest

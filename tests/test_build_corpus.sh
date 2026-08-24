@@ -6,6 +6,10 @@ MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export MRA_CORPUS_DIR="$TMP/cache"
+# 自家 repo 的真實清單放在版控外，跑這支測試的機器上可能存在。不 pin 的話
+# --internal 那幾條會去讀使用者真正的清單，斷言在程式沒問題的時候轉紅。
+# 指到不存在的路徑，測的就是 corpus_internal_targets 的內建代號清單。
+export MRA_CORPUS_INTERNAL_TARGETS="$TMP/no-such-targets.tsv"
 
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gh" <<'SHIM'

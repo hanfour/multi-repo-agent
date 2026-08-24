@@ -6,7 +6,7 @@
 
 ## Profiling result (the go/no-go evidence #1 required)
 
-Profiled `mra scan` on `~/OneAD` (36 projects, 351 records). Per-scanner best-of-3:
+Profiled `mra scan` on `~/workspace` (36 projects, 351 records). Per-scanner best-of-3:
 
 | scanner | time | records |
 |---|---|---|
@@ -83,7 +83,7 @@ record set**. Two layers:
    produced on the fixture (captured as a golden set during development, before the
    `.sh` are deleted).
 2. **Dev-time real-world cross-check** — during implementation, run both the old 5
-   scanners and `walk.py` on `~/OneAD` (36 projects, 351 records) and diff the record
+   scanners and `walk.py` on `~/workspace` (36 projects, 351 records) and diff the record
    sets; they must match. This is a development gate, documented in the plan, not a
    committed test (it depends on external data).
 
@@ -96,13 +96,13 @@ config file (`docker-compose.yml`, `database.yml`, …) buried *inside* `node_mo
 `vendor` is dependency-internal noise, not the project's real dependency, so excluding
 it is a correctness improvement — but it means byte-parity does NOT hold on a
 pathological tree with real config files under those dirs. The equivalence guarantee is
-therefore **"identical record set on real workspaces"**, enforced by the `~/OneAD`
+therefore **"identical record set on real workspaces"**, enforced by the `~/workspace`
 cross-check (344 records, empty diff), not by a constructed pathological fixture. This
 divergence is documented as intentional in `scanners/README.md`.
 
 ## Performance acceptance
 
-Benchmark `walk.py` vs the old scanners on `~/OneAD`. Target: the full scan (walk +
+Benchmark `walk.py` vs the old scanners on `~/workspace`. Target: the full scan (walk +
 merge) is **≥2× faster** (expected ~8.3s → ~1–2s). If it is not ≥2×, do not land the
 rewrite (fall back to the minimal node_modules-prune fix on the existing scanners).
 
@@ -127,8 +127,8 @@ rewrite (fall back to the minimal node_modules-prune fix on the existing scanner
 ## Acceptance
 
 - `walk.py` reproduces the current 5 scanners' record set exactly (fixture test +
-  ~/OneAD dev cross-check).
-- Full scan is ≥2× faster on ~/OneAD; else do not land.
+  ~/workspace dev cross-check).
+- Full scan is ≥2× faster on ~/workspace; else do not land.
 - Custom `.collab/scanners/*.sh` still run and contribute records.
 - `scanners/README.md` documents the custom-scanner contract.
 - `./test.sh` green; python3 requirement documented + checked.

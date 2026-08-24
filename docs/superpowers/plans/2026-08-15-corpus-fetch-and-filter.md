@@ -1107,7 +1107,7 @@ ok()   { echo "PASS: $1"; pass=$((pass+1)); }
 fail() { echo "FAIL: $1"; errors=$((errors+1)); }
 eq()   { if [[ "$2" == "$3" ]]; then ok "$1"; else fail "$1 — expected [$2] got [$3]"; fi; }
 
-# 目標清單：五層都要有代表，且 PR 量最高的 erp 要在
+# 目標清單：五層都要有代表，且 PR 量最高的 rails-app-1 要在
 bad_cols=$(corpus_internal_targets | awk -F'\t' 'NF != 2' | wc -l | tr -d ' ')
 eq "每行兩欄" "0" "$bad_cols"
 for r in acme/rails-app-1 acme/nest-monorepo-2.0 acme/react-app-1 acme/vue-app-1; do
@@ -1430,7 +1430,7 @@ bash scripts/build-corpus.sh --internal --repo acme/rails-app-1
 gh auth switch --user hanfour
 ```
 
-Expected: `retention.tsv` 出現 `acme/rails-app-1` 那列。`erp` 近一年 355 個 PR，語料量應該是各自家 repo 中最大的。
+Expected: `retention.tsv` 出現 `acme/rails-app-1` 那列。`rails-app-1` 近一年 355 個 PR，語料量應該是各自家 repo 中最大的。
 
 - [ ] **Step 9: Commit**
 

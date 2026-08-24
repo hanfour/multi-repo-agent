@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A review with nothing to review must never reach the model.
 #
-# Found by running `mra review finance-system --pr 303` against a real PR from a
+# Found by running `mra review nest-app-2 --pr 303` against a real PR from a
 # checkout that did not contain the PR's head. The range is `<base>...HEAD` and
 # HEAD was the local branch, so the diff came out empty, the prompt carried
 # "(diff unavailable)" and no changed files — and the review ran anyway. The

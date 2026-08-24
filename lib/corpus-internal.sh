@@ -1,10 +1,31 @@
 #!/usr/bin/env bash
-# 自家 Acme repo 的語料取材。
+# 自家 repo 的語料取材。
 #
-# 與外部語料共用抓取與第 1、3、4 步篩選，只有第 2 步不同：Acme repo 的成員
+# 與外部語料共用抓取與第 1、3、4 步篩選，只有第 2 步不同：自家 repo 的成員
 # author_association 幾乎都是 MEMBER，分不出資深與否，改用近一年的留言數。
 
+# 自家 repo 清單。這份專案是公開的，真實的 repo 名稱不進版控：放在
+# MRA_CORPUS_INTERNAL_TARGETS 指的檔案，或預設的 .collab/
+# corpus-internal-targets.tsv（已在 .gitignore 內）。格式是每列
+# 「repo<TAB>layer」，layer 取值見 corpus_layers。
+#
+# 檔案不存在時退回底下的代號清單，讓沒有自家語料的人也跑得動、也看得懂格式。
+# 檔案存在但讀不到或格式錯時硬失敗，不退回代號清單：那會讓「設定檔壞了」跟
+# 「沒有設定檔」變成同一個外觀，而前者跑完會得到一份查無此 repo 的空語料。
 corpus_internal_targets() {
+  local f="${MRA_CORPUS_INTERNAL_TARGETS:-${MRA_DIR:-.}/.collab/corpus-internal-targets.tsv}"
+  if [[ -e "$f" ]]; then
+    if [[ ! -r "$f" || ! -s "$f" ]]; then
+      printf 'INTERNAL_TARGETS_UNUSABLE\t%s\n' "$f" >&2
+      return 1
+    fi
+    if ! awk -F'\t' 'NF != 2 || $1 == "" || $2 == "" { exit 1 }' "$f"; then
+      printf 'INTERNAL_TARGETS_MALFORMED\t%s\n' "$f" >&2
+      return 1
+    fi
+    cat "$f"
+    return 0
+  fi
   cat <<'EOF'
 acme/rails-app-1	rails
 acme/rails-app-2	rails

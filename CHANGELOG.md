@@ -26,7 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [3.4.0] - 2026-08-14
 
 A review that never ran, reported as a review that found nothing in particular.
-`onead/super-dsp-2.0#892` — 578 files, `pnpm-lock.yaml` regenerated — failed
+`acme/nest-monorepo-2.0#892` — 578 files, `pnpm-lock.yaml` regenerated — failed
 twice, and what reached the requester was `invalid or mismatched mra protocol
 artifact`. The actual message was one line of stderr that no consumer reads.
 Behind it were two separate ceilings, the second only visible once the first

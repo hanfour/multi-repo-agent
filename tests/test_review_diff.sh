@@ -33,7 +33,7 @@ case "$out" in *'+c'*) : ;; *) echo "FAIL: working mode should capture unstaged 
 
 # --- generated artifacts are summarised, not quoted ---------------------------
 # A lockfile is a derivative of a file that IS reviewed, so quoting it buys no
-# review and costs the whole budget. On 2026-08-14 onead/super-dsp-2.0#892 sent
+# review and costs the whole budget. On 2026-08-14 acme/nest-monorepo-2.0#892 sent
 # codex 1,087,072 characters against its 1,048,576 limit; pnpm-lock.yaml alone
 # was 465,442 of them (46%). Dropping it outright would be worse than quoting
 # it — the model must still learn the file changed — so the content goes and a

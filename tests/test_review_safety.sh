@@ -140,7 +140,7 @@ if _review_validate_expected_head abc abc def; then fail_test "changed remote he
 
 # --- _review_strategy_turns: defaults + env overrides ---
 unset MRA_REVIEW_STANDARD_MAX_TURNS MRA_REVIEW_LIGHT_MAX_TURNS || true
-# 6 was measured short: onead/erp#4852 exhausted at 6, 7 and 8, completing only
+# 6 was measured short: acme/rails-app-1#4852 exhausted at 6, 7 and 8, completing only
 # from 10. A truncated review costs the same tokens and returns nothing, so the
 # cap is pinned well above the observed need — and to the same value the debate
 # agents already use.

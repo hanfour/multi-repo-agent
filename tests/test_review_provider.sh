@@ -186,7 +186,7 @@ case "$rec" in *"ambient-gh-secret"*) fail "codex could read ambient gh config" 
 
 # The review prompt embeds the whole diff (lib/review-prompt.sh), and argv is
 # capped: ARG_MAX is 1 MB on macOS, counting the environment too. On 2026-08-14
-# onead/super-dsp-2.0#892 (578 files, pnpm-lock.yaml regenerated) produced a
+# acme/nest-monorepo-2.0#892 (578 files, pnpm-lock.yaml regenerated) produced a
 # 1,009,880-byte diff, execve refused the codex call with E2BIG, and the review
 # surfaced as "invalid or mismatched mra protocol artifact" with the real cause
 # buried in stderr. `codex exec` reads the prompt from stdin when the prompt

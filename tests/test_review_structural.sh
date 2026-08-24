@@ -87,7 +87,7 @@ out=$(MRA_CODEGRAPH_BIN="$BIN/codegraph" structural_review_context "$PROJ" $'lib
 [[ -z "$out" ]] && pass "no indexed changed file (incl. nodeCount=0): empty section" || fail "out-of-index diff leaked: $(echo "$out" | head -2)"
 
 # --- 5b. Large index listing must not silently break the gate ---
-# Live finding #2 (super-dsp-2.0, 12k nodes): the files listing exceeded the
+# Live finding #2 (nest-monorepo-2.0, 12k nodes): the files listing exceeded the
 # generic 64KB output cap, the truncated JSON failed to parse, and the gate
 # fail-opened on exactly the repos where scoping matters. A large but valid
 # listing that is DISJOINT from the diff must still yield an empty section.

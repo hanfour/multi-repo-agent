@@ -27,7 +27,7 @@ select_review_strategy() {
 ##   standard -> MRA_REVIEW_STANDARD_MAX_TURNS (default 6)
 # Turn caps per strategy.
 #
-# standard was 6 and truncated real reviews. Measured against onead/erp#4852
+# standard was 6 and truncated real reviews. Measured against acme/rails-app-1#4852
 # (6 files, 58KB prompt): exhausted at 6, 7 and 8; completed at 10, 12 and 20.
 # The old cap was roughly 40% short of what one ordinary PR needed, and the
 # review came back REVIEW_INCOMPLETE — having spent the tokens and produced

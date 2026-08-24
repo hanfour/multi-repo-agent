@@ -9,7 +9,7 @@
 # source and regenerates the artifact rather than reviewing the artifact.
 #
 # They also dominate the byte budget, and that budget is real. On 2026-08-14
-# onead/super-dsp-2.0#892 sent codex 1,087,072 characters against its 1,048,576
+# acme/nest-monorepo-2.0#892 sent codex 1,087,072 characters against its 1,048,576
 # limit and the review died; pnpm-lock.yaml alone accounted for 465,442 of them
 # — 46% of the diff for a file nobody reads. Omitting it puts the same PR at
 # roughly 620,000, well inside the limit, without losing a line anyone would

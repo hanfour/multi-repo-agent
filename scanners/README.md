@@ -65,7 +65,7 @@ matches this example.
 `walk.py`'s output is verified record-for-record equivalent to the five
 legacy scanners on the committed fixture (`tests/fixtures/sample-workspace`,
 golden file `tests/fixtures/expected-records.jsonl`) and was cross-checked
-against a real ~344-project workspace (`~/OneAD`) with an empty diff. A
+against a real ~344-project workspace (`~/workspace`) with an empty diff. A
 handful of behavior changes were made deliberately during the rewrite; they
 are documented here so they are never mistaken for regressions:
 
@@ -75,7 +75,7 @@ are documented here so they are never mistaken for regressions:
    that happen to live inside a vendored `node_modules`/`vendor` tree (e.g.
    a dependency's own `docker-compose.yml` or `package.json`) are
    dependency-internal noise and are intentionally excluded from scan
-   results. Validated as real-world-equivalent against `~/OneAD` — pruning
+   results. Validated as real-world-equivalent against `~/workspace` — pruning
    these directories changed zero records there.
 
 2. **Deterministic host-substring matching.** When a `.env` value's
@@ -112,5 +112,5 @@ are documented here so they are never mistaken for regressions:
    *all* fields on that file, not just the bad one. This is a
    pathological-input difference (a hand-authored, spec-violating
    `package.json`) with no observed manifestation on the fixture or
-   `~/OneAD` — flagged for completeness, not because it changed any golden
+   `~/workspace` — flagged for completeness, not because it changed any golden
    record.

@@ -583,7 +583,7 @@ _review_call_one_provider() {
       reasoning_effort=$(review_provider_codex_reasoning_effort)
       [[ -n "$reasoning_effort" ]] && args+=(-c "model_reasoning_effort=\"$reasoning_effort\"")
       # The prompt embeds the whole diff, and argv has a hard ceiling: ARG_MAX is
-      # 1 MB on macOS and counts the environment too. onead/super-dsp-2.0#892
+      # 1 MB on macOS and counts the environment too. acme/nest-monorepo-2.0#892
       # (578 files, pnpm-lock.yaml regenerated) produced a 1,009,880-byte diff —
       # 96% of the budget before a single flag or env var — and execve refused
       # the call with E2BIG. The review then surfaced as "invalid or mismatched

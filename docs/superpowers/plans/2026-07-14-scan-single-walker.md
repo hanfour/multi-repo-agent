@@ -4,17 +4,17 @@
 
 **Goal:** Replace the 5 built-in `scanners/*.sh` with one Python walker that traverses each project once (pruning `node_modules`) and reproduces every scanner's JSONL records exactly, ≥2× faster.
 
-**Architecture:** `scanners/walk.py` does ONE pruned `os.walk` of the workspace, caches every non-pruned file with its path components, then applies 5 rule functions (faithful translations of the legacy scanners) that filter the cache by name+depth and emit the same JSONL. `lib/scan.sh` calls `walk.py` for built-ins and still runs custom `.collab/scanners/*.sh` as subprocesses. Correctness is gated by an order-independent record-set match against a golden fixture (13 records) and a dev-time cross-check on `~/OneAD` (344 records); landing is gated by a ≥2× benchmark.
+**Architecture:** `scanners/walk.py` does ONE pruned `os.walk` of the workspace, caches every non-pruned file with its path components, then applies 5 rule functions (faithful translations of the legacy scanners) that filter the cache by name+depth and emit the same JSONL. `lib/scan.sh` calls `walk.py` for built-ins and still runs custom `.collab/scanners/*.sh` as subprocesses. Correctness is gated by an order-independent record-set match against a golden fixture (13 records) and a dev-time cross-check on `~/workspace` (344 records); landing is gated by a ≥2× benchmark.
 
 **Tech Stack:** Python 3 (already a scan dependency — `shared-packages.sh` shells out to `python3` to parse `package.json`), Bash, `jq`, the project's `./test.sh`.
 
 ## Global Constraints
 
-- **Exact record parity.** `walk.py`'s output must equal the legacy 5 scanners' output as an order-independent SET, both on the golden fixture and on `~/OneAD`. Any difference = rule-expressivity regression → do not land.
+- **Exact record parity.** `walk.py`'s output must equal the legacy 5 scanners' output as an order-independent SET, both on the golden fixture and on `~/workspace`. Any difference = rule-expressivity regression → do not land.
 - **JSONL contract unchanged:** each record is `{"source","target","type","confidence","scanner"}` with the scanner tag preserved (`docker-compose`/`shared-db`/`api-calls`/`shared-packages`/`gateway-routes`). `merge_scan_results` (PR #4's single-pass jq) is not touched.
 - **Prune must not change results:** pruning `node_modules`/`.git`/`vendor` is verified equivalence-preserving (already confirmed for shared-db's dominant find).
 - **Custom scanners preserved:** `$workspace/.collab/scanners/*.sh` still run as subprocesses and contribute records.
-- **≥2× faster on ~/OneAD** (expected ~8.3s → ~1–2s), else do not land (fall back to a node_modules-prune fix on the existing scanners).
+- **≥2× faster on ~/workspace** (expected ~8.3s → ~1–2s), else do not land (fall back to a node_modules-prune fix on the existing scanners).
 - **Depth semantics (from the legacy `find`):** `find <root> -maxdepth N` matches files whose path has ≤ N components below `<root>`. Reference roots differ per scanner — **docker-compose collects from the WORKSPACE root (maxdepth 3); all others from the PROJECT root.** Preserve each exactly.
 - **Project skip rules:** iterate `workspace/*/`, skip names starting with `.`; **shared-db additionally skips `ito-dev-env-setup`.** Reproduce per-rule.
 
@@ -296,7 +296,7 @@ Add near the top (after `PRUNE`):
 ```python
 PORT_TO_SERVICE = {
     "4000": "erp", "4001": "billing", "4500": "api-gateway", "5000": "catalog",
-    "3100": "finance-system", "5173": "web-ui", "3030": "oss-ui-v2",
+    "3100": "finance-system", "5173": "web-ui", "3030": "vue-app-1",
     "9443": "partner-api-gateway",
 }
 HOST_TO_SERVICE = {
@@ -406,23 +406,23 @@ Create `tests/fixtures/expected-records.jsonl` with the 13 golden records listed
 
 - [ ] **Step 2: Verify walk.py == golden BEFORE deleting legacy (dev gate)**
 
-Run (dev check, before deletion): compare walk.py to the live legacy scanners on the fixture AND on `~/OneAD`:
+Run (dev check, before deletion): compare walk.py to the live legacy scanners on the fixture AND on `~/workspace`:
 ```bash
 diff <(python3 scanners/walk.py tests/fixtures/sample-workspace | jq -cS . | sort -u) \
      <(for s in scanners/*.sh; do bash "$s" tests/fixtures/sample-workspace 2>/dev/null; done | jq -cS . | sort -u)
-diff <(python3 scanners/walk.py ~/OneAD | jq -cS . | sort -u) \
-     <(for s in scanners/*.sh; do bash "$s" ~/OneAD 2>/dev/null; done | jq -cS . | sort -u)
+diff <(python3 scanners/walk.py ~/workspace | jq -cS . | sort -u) \
+     <(for s in scanners/*.sh; do bash "$s" ~/workspace 2>/dev/null; done | jq -cS . | sort -u)
 ```
-Both diffs MUST be empty (fixture: 13 records; ~/OneAD: 344 records). If ~/OneAD is unavailable, note it and rely on the fixture. Record the result in the report. If either diff is non-empty, STOP — the translation has a parity gap.
+Both diffs MUST be empty (fixture: 13 records; ~/workspace: 344 records). If ~/workspace is unavailable, note it and rely on the fixture. Record the result in the report. If either diff is non-empty, STOP — the translation has a parity gap.
 
 - [ ] **Step 3: Benchmark (≥2× gate)**
 
-Time both on `~/OneAD` (best of 3), record in the report:
+Time both on `~/workspace` (best of 3), record in the report:
 ```bash
 # legacy
-time ( for s in scanners/*.sh; do bash "$s" ~/OneAD >/dev/null 2>&1; done )
+time ( for s in scanners/*.sh; do bash "$s" ~/workspace >/dev/null 2>&1; done )
 # walker
-time ( python3 scanners/walk.py ~/OneAD >/dev/null )
+time ( python3 scanners/walk.py ~/workspace >/dev/null )
 ```
 Expected: walker ≥2× faster (legacy ~8.3s → walker ~1–2s). If NOT ≥2×, STOP and report — the rewrite does not meet #1's acceptance.
 
@@ -467,10 +467,10 @@ git commit -m "refactor(scan): replace 5 built-in scanners with walk.py; docs + 
 
 ## Self-Review
 
-**Spec coverage:** walk.py single pruned walk + 5 rules (Tasks 1–3) → JSONL parity; lib/scan.sh wiring + custom-scanner preservation + delete legacy + scanners/README.md + python3 doc/check + fixture & ~/OneAD equivalence + ≥2× benchmark (Task 4). All spec sections mapped. ✅
+**Spec coverage:** walk.py single pruned walk + 5 rules (Tasks 1–3) → JSONL parity; lib/scan.sh wiring + custom-scanner preservation + delete legacy + scanners/README.md + python3 doc/check + fixture & ~/workspace equivalence + ≥2× benchmark (Task 4). All spec sections mapped. ✅
 
 **Placeholder scan:** Task 1 gives full `walk.py` infrastructure + docker-compose + shared-db code; the maps (Task 2) and each remaining rule are specified as exact translations of a named legacy source with the golden records as the correctness gate — not vague ("add validation"). The golden fixture set (13 records) is enumerated verbatim.
 
 **Type/name consistency:** `collect`/`emit`/`project_of`/`depth_from_project`/`depth_from_workspace` defined in Task 1 and reused by Tasks 2–3; `PORT_TO_SERVICE`/`HOST_TO_SERVICE` defined once (Task 2) and used by both api-calls and gateway-routes; rule functions wired into `main` in each task. `tests/fixtures/expected-records.jsonl` (Task 4) holds the same 13 records asserted piecewise in Tasks 1–3.
 
-**Risk note:** the deepest correctness risk is per-rule translation fidelity (regex/skip-rules/depth roots). Mitigated by the golden-fixture full-set assertion (committed) + the ~/OneAD 344-record dev cross-check (Task 4 Step 2), both order-independent — any drift fails loudly before landing.
+**Risk note:** the deepest correctness risk is per-rule translation fidelity (regex/skip-rules/depth roots). Mitigated by the golden-fixture full-set assertion (committed) + the ~/workspace 344-record dev cross-check (Task 4 Step 2), both order-independent — any drift fails loudly before landing.
