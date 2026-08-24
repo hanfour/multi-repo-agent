@@ -216,7 +216,7 @@ fi
 # docs/superpowers/notes/2026-backtest-baseline.md），但它在對應表裡只能是
 # nestjs 層，所以它的前端改動拿到的是 nestjs 層的規則。要做到更細的粒度得讓
 # 同一次 review 依檔案載入不同 persona，而 persona 目錄一次只能指向一個地方
-# ——那是 review 流程本身的結構，不是這裡能繞過的。它在基準集裡佔 43/69 個
+# ——那是 review 流程本身的結構，不是這裡能繞過的。它在基準集裡佔 22/38 個
 # PR，解讀分層回測的數字時要記得這件事。
 #
 # --recompute 例外：那個模式一次 review 都不跑，載入哪一份 persona 完全不影響
