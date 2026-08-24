@@ -27,9 +27,9 @@
 
 | 層 | 近一年 PR | 版本 | 代表 repo |
 | --- | --- | --- | --- |
-| NestJS + Prisma | 約 720 | NestJS 11、Prisma 6 | nest-monorepo-2.0（後端）、nest-app-2、nest-app-3、masa-performance |
-| Rails legacy | 約 400 | Rails 4.2 到 5.2、Ruby 2.4 到 2.5 | erp 355、api-gateway、qp |
-| React | 約 270 | React 19、TanStack Query v5 | react-app-1 206、react-app-2、awesome-dsp-ui |
+| NestJS + Prisma | 約 720 | NestJS 11、Prisma 6 | nest-monorepo-2.0（後端）、nest-app-2、nest-app-3、nest-app-4 |
+| Rails legacy | 約 400 | Rails 4.2 到 5.2、Ruby 2.4 到 2.5 | rails-app-1 355、api-gateway、qp |
+| React | 約 270 | React 19、TanStack Query v5 | react-app-1 206、react-app-2、react-app-3 |
 | Vue 2 | 約 120 | Vue 2.5 到 2.7、Vuex | vue-app-1 86、vue-app-2 31 |
 | Vue 3 | 76 | Vue 3.5、Pinia | superdsp-ui |
 | Rails modern | 54 | Rails 8.1、Ruby 3.4 | masa |
@@ -38,7 +38,7 @@
 
 規則分成通用層加四個框架層：NestJS/Prisma、Rails legacy、React 19、Vue 2。Vue 3 與 Rails modern 各只有一個 repo，先用通用層加相近框架層涵蓋，PR 量起來再拆。`moai`（18 PR、Rails 4.2.4）只需要 security 與依賴升級規則。
 
-`erp` 跑在 Rails 4.2.11 + Ruby 2.5.7，是全 org PR 量最高的 repo（355），有 6 位開發者持續開 PR 與人類 review 往返。舊框架缺少現代的防呆，規則的邊際價值最高，且有最多 PR 可回測。
+`rails-app-1` 跑在 Rails 4.2.11 + Ruby 2.5.7，是全 org PR 量最高的 repo（355），有 6 位開發者持續開 PR 與人類 review 往返。舊框架缺少現代的防呆，規則的邊際價值最高，且有最多 PR 可回測。
 
 ## 架構
 
@@ -187,7 +187,7 @@ MEDIUM：（什麼情況）
 
 `severity_default` 是這條規則沒有命中「嚴重度」章節任一條件時的落點。命中的話以該章節為準。兩者並存是因為多數規則的嚴重度取決於情況，但仍需要一個在情況判斷不出來時的預設值，避免 agent 自由心證。
 
-`frameworks` 欄位用於版本篩選。審 `erp`（Rails 4.2）時不載入 Rails 8 的規則。Rails 4.2 + Ruby 2.4 的審查重點是已知 CVE 與升級路徑，Rails 8.1 + Ruby 3.4 是新 API 用法與效能，同一個框架名稱下講的不是同一件事。
+`frameworks` 欄位用於版本篩選。審 `rails-app-1`（Rails 4.2）時不載入 Rails 8 的規則。Rails 4.2 + Ruby 2.4 的審查重點是已知 CVE 與升級路徑，Rails 8.1 + Ruby 3.4 是新 API 用法與效能，同一個框架名稱下講的不是同一件事。
 
 ## 回測
 
@@ -199,7 +199,7 @@ MEDIUM：（什麼情況）
 | 4 個 false-green PR（nest-monorepo-2.0 #145 / #152、react-app-1 #182 / #183）加 Fallow 當時的意見 | 回歸案例，不能退步的下限 | 高，樣本只有 4 個 |
 | 人類 CHANGES_REQUESTED 意見 | 只用來校準嚴重度 | 中，nit 比例高 |
 
-第一種的判定方式：取 PR 合併後 14 天內、commit message 含 `fix` / `hotfix` / `bug` 的 commit，比對它改到的檔案與行號區間是否與原 PR 的 diff 重疊。重疊的話，那個 fix commit 的內容就是「當初該抓到什麼」。全程用 git 與 GitHub API 判定不用 LLM，所以基準集本身是客觀的。`erp` 355 個 PR、`nest-monorepo-2.0` 349 個，母體足夠。
+第一種的判定方式：取 PR 合併後 14 天內、commit message 含 `fix` / `hotfix` / `bug` 的 commit，比對它改到的檔案與行號區間是否與原 PR 的 diff 重疊。重疊的話，那個 fix commit 的內容就是「當初該抓到什麼」。全程用 git 與 GitHub API 判定不用 LLM，所以基準集本身是客觀的。`rails-app-1` 355 個 PR、`nest-monorepo-2.0` 349 個，母體足夠。
 
 第三種不計入漏抓率。裡面 nit 太多，拿來算漏抓會把規則逼成挑剔的方向。
 

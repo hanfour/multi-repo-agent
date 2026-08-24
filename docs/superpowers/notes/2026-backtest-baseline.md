@@ -81,7 +81,7 @@ C 大量產出的是測試品質（mock 掉被測對象、斷言比對到錯的�
 
 | repo | A | C |
 | --- | --- | --- |
-| erp | 43% | 23% |
+| rails-app-1 | 43% | 23% |
 | react-app-1 | 約 60% | 約 30% |
 | nest-monorepo-2.0 | 100%（11/11） | 59%（10/17） |
 
@@ -130,7 +130,7 @@ expected finding。miss_rate 量的是「reviewer 有沒有抓到那些後來確
 ## 重跑需要的條件
 
 - `gh auth switch --user acme-bot`，以及有效的 Claude 登入
-- `~/workspace` 底下有 erp、nest-monorepo-2.0、react-app-1 的 clone
+- `~/workspace` 底下有 rails-app-1、nest-monorepo-2.0、react-app-1 的 clone
 - `MRA_BACKTEST_CMD` 指向 `scripts/backtest-review-adapter.sh`
 - `MRA_BACKTEST_REVIEW_MODE` 設 standard 或 personas
 - personas 模式另外設 `MRA_REVIEW_PERSONA_MAX_TURNS=20`

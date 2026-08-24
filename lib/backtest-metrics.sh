@@ -95,7 +95,7 @@ backtest_metrics() {
 #
 # 為什麼要有這個：行號容差指標對錨點高度敏感。實測 baseline-personas 全量
 # 38 個 PR 的 37 條 ±15 漏抓裡，13 條其實同一個檔案有講、只是落在幾十行外
-# (react-app-1#201 那條 CRITICAL 是典型：expected 在
+# (nest-app-2-ui#201 那條 CRITICAL 是典型：expected 在
 # settings-page.tsx:52，comment 落在 :93，離 41 行)。只報行號容差會把
 # 「錨點漂移」讀成「沒看到」，而這兩者的處置完全不同：前者要調的是 comment
 # 錨在哪一行，後者要調的是 reviewer 有沒有看那個檔案。

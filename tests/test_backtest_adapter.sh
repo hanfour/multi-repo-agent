@@ -68,7 +68,7 @@ export MRA_BACKTEST_WT_ROOT="$WT_ROOT"
 echo '{"repos":"stub"}' > "$WS/.collab/repos.json"
 echo '{"deps":"stub"}' > "$WS/.collab/dep-graph.json"
 
-R="$WS/erp"
+R="$WS/rails-app-1"
 git -C "$R" init -q -b main 2>/dev/null || { mkdir -p "$R"; git -C "$R" init -q -b main; }
 git -C "$R" config user.email t@t.t; git -C "$R" config user.name t
 printf 'one\n' > "$R/f.txt"; git -C "$R" add f.txt; git -C "$R" commit -q -m base
@@ -76,7 +76,7 @@ BASE_SHA="$(git -C "$R" rev-parse HEAD)"
 printf 'two\n' >> "$R/f.txt"; git -C "$R" add f.txt; git -C "$R" commit -q -m head
 HEAD_SHA="$(git -C "$R" rev-parse HEAD)"
 
-# 模擬使用者手邊正在做的事(真實情境：~/workspace/erp checkout 在
+# 模擬使用者手邊正在做的事(真實情境：~/workspace/rails-app-1 checkout 在
 # feature/account-management-with-estimates，有未提交的變更)：repo 目前
 # checkout 在 head_sha 之後的另一個 commit，還有未提交的變更。worktree
 # 隔離全程都不能碰這些，這支測試檔案的其他一切斷言(包含既有的)都要在這個
@@ -133,16 +133,16 @@ printf 'MRA_REVIEW_AGENT_MAX_TURNS=%s\n' "\${MRA_REVIEW_AGENT_MAX_TURNS:-<unset>
 printf 'MRA_CONFIG=%s\n' "\${MRA_CONFIG:-<unset>}" >> "$ENV_LOG"
 {
   printf 'cwd=%s\n' "\$(pwd)"
-  printf 'worktree_head=%s\n' "\$(git -C erp rev-parse HEAD 2>&1)"
+  printf 'worktree_head=%s\n' "\$(git -C rails-app-1 rev-parse HEAD 2>&1)"
   printf 'collab_files=%s\n' "\$(ls .collab 2>&1 | tr '\n' ',')"
-  if [[ -L erp/.mra ]]; then
+  if [[ -L rails-app-1/.mra ]]; then
     printf 'mra_dir=SYMLINK\n'
-  elif [[ -d erp/.mra ]]; then
+  elif [[ -d rails-app-1/.mra ]]; then
     printf 'mra_dir=REALDIR\n'
   else
     printf 'mra_dir=MISSING\n'
   fi
-  printf 'mra_pkb_files=%s\n' "\$(ls erp/.mra/pkb 2>&1 | tr '\n' ',')"
+  printf 'mra_pkb_files=%s\n' "\$(ls rails-app-1/.mra/pkb 2>&1 | tr '\n' ',')"
 } > "$WT_LOG"
 printf '%s' '$out'
 exit $rc
@@ -175,9 +175,9 @@ has ".mra/pkb 底下的內容真的被複製過去" "$wt_log" "example.json"
 wt_count_after_happy="$(git -C "$R" worktree list | wc -l | tr -d ' ')"
 eq "正常路徑跑完後 git worktree list 只剩來源 repo 自己(1 筆)" "1" "$wt_count_after_happy"
 
-# --- owner/repo 正確拆成專案名：mra.sh 收到的是 erp，不是 acme/rails-app-1 -------
+# --- owner/repo 正確拆成專案名：mra.sh 收到的是 rails-app-1，不是 acme/rails-app-1 -------
 argv="$(cat "$ARGV_LOG")"
-has "owner/repo 拆成專案名 erp 傳給 mra" "$argv" "review erp "
+has "owner/repo 拆成專案名 rails-app-1 傳給 mra" "$argv" "review rails-app-1 "
 lacks "傳給 mra 的專案名不含 owner 前綴" "$argv" "acme/rails-app-1"
 
 # --- --strategy personas --json 這些不存在的旗標不會傳給 mra --------------
@@ -261,7 +261,7 @@ PULLREF_HEAD_SHA="$(git -C "$SRC" rev-parse HEAD)"
 git -C "$SRC" push -q origin "pr-branch:refs/pull/9001/head"
 git -C "$SRC" checkout -q main
 
-PULLREF_PROJ="$PULLREF_DIR/ws/erp"
+PULLREF_PROJ="$PULLREF_DIR/ws/rails-app-1"
 git clone -q --no-local "$BARE" "$PULLREF_PROJ"
 git -C "$PULLREF_PROJ" config user.email t@t.t; git -C "$PULLREF_PROJ" config user.name t
 
@@ -574,7 +574,7 @@ fi
 # 用的 head_sha，才能明確驗出最後拿到的是重建過的、checkout 在 head_sha 的
 # 那一份，不是殘留的舊版)，模擬前一次跑到一半被中斷、trap 沒機會清乾淨的
 # 情況。
-WT_TARGET="$WT_ROOT/erp"
+WT_TARGET="$WT_ROOT/rails-app-1"
 git -C "$R" worktree add --detach "$WT_TARGET" "$BASE_SHA" >/dev/null 2>&1
 if git -C "$R" worktree list | grep -qF "$WT_TARGET"; then
   ok "測試前提成立：目標路徑已經有一個殘留 worktree(checkout 在 base_sha)"
@@ -631,7 +631,7 @@ lacks "來源沒有 .mra 時不該印出 PKB_COPY_FAILED" "$(cat "$TMP/nomra.err
 # 最後的 $TMP 清理也會失敗。
 cat > "$FAKE/bin/mra.sh" <<EOF
 #!/usr/bin/env bash
-chflags uchg erp
+chflags uchg rails-app-1
 printf '%s' '$STUB_REVIEW_JSON'
 EOF
 chmod +x "$FAKE/bin/mra.sh"
@@ -644,8 +644,8 @@ eq "清理失敗時仍印出 stub JSON 原樣(不是把清理失敗混進 review
 has "清理失敗有印出 WORKTREE_CLEANUP_FAILED 警告" \
   "$(cat "$TMP/cleanupfail.err")" "WORKTREE_CLEANUP_FAILED"
 # 驗完手動解除 flag、清掉殘留，不要留給檔案結尾的 $TMP 清理去處理。
-chflags -R nouchg "$WT_ROOT/erp" 2>/dev/null
-rm -rf "$WT_ROOT/erp"
+chflags -R nouchg "$WT_ROOT/rails-app-1" 2>/dev/null
+rm -rf "$WT_ROOT/rails-app-1"
 git -C "$R" worktree prune >/dev/null 2>&1
 
 # --- 從頭到尾，來源 repo 的 HEAD 與未提交變更都沒被動過 ---------------------

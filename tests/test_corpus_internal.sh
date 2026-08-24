@@ -11,6 +11,12 @@ trap 'rm -rf "$TMP"' EXIT
 export MRA_CORPUS_DIR="$TMP/cache"
 mkdir -p "$MRA_CORPUS_DIR"
 
+# 自家 repo 的真實清單放在版控外，路徑預設是 $MRA_DIR/.collab/
+# corpus-internal-targets.tsv。跑這支測試的機器上那個檔案可能存在，不 pin 的話
+# 底下的斷言會去讀使用者真正的清單而全部轉紅——而且是在「程式沒問題」的時候。
+# 指到一個不存在的路徑，測的就是內建代號清單那條路徑。
+export MRA_CORPUS_INTERNAL_TARGETS="$TMP/no-such-targets.tsv"
+
 source "$MRA_DIR/lib/corpus-filter.sh"
 source "$MRA_DIR/lib/corpus-internal.sh"
 FX="$MRA_DIR/tests/fixtures/corpus/sample-comments.json"
@@ -168,6 +174,41 @@ CORPUS_REPO="acme/nest-monorepo-2.0" awk -F'\t' 'NR == 1 || $1 != ENVIRON["CORPU
 eq "含 . 的名稱只刪自己那列" "1" "$(grep -c '^acme/nest-monorepo-2X0	' "$R.probe")"
 eq "自己那列有刪掉" "0" "$(grep -c '^acme/nest-monorepo-2\.0	' "$R.probe")"
 rm -f "$R.probe"
+
+# --- 版控外的真實清單 -------------------------------------------------------
+# 這份專案是公開的，真實 repo 名稱放在 MRA_CORPUS_INTERNAL_TARGETS 指的檔案。
+# 三條路徑各自要能分辨：讀得到就用它、檔案壞了硬失敗、檔案不存在退回代號清單。
+TGT="$TMP/targets.tsv"
+printf 'myorg/svc-a\trails\nmyorg/svc-b\tvue\n' > "$TGT"
+out="$(MRA_CORPUS_INTERNAL_TARGETS="$TGT" corpus_internal_targets)"; rc=$?
+eq "有檔案時退出碼 0" "0" "$rc"
+eq "有檔案時讀的是檔案內容" "myorg/svc-a	rails
+myorg/svc-b	vue" "$out"
+eq "有檔案時 layer 查得到" "vue" \
+  "$(MRA_CORPUS_INTERNAL_TARGETS="$TGT" corpus_internal_layer_of myorg/svc-b)"
+# 內建代號清單裡的 repo 不能在有檔案時還查得到：那代表兩份清單被合在一起，
+# 下游會拿到一批不存在的 repo 去打 API。
+if MRA_CORPUS_INTERNAL_TARGETS="$TGT" corpus_internal_layer_of acme/rails-app-1 >/dev/null 2>&1; then
+  fail "有檔案時仍查得到內建代號清單的 repo"
+else
+  ok "有檔案時不混入內建代號清單"
+fi
+
+# 格式錯要硬失敗，不能退回代號清單：退回去的話「設定檔壞了」跟「沒有設定檔」
+# 外觀一樣，而前者會安靜跑完一輪查無此 repo 的空語料。
+for bad in 'myorg/svc-a' 'myorg/svc-a	rails	extra' '	rails' 'myorg/svc-a	'; do
+  printf '%s\n' "$bad" > "$TMP/bad.tsv"
+  err="$(MRA_CORPUS_INTERNAL_TARGETS="$TMP/bad.tsv" corpus_internal_targets 2>&1 >/dev/null)"; rc=$?
+  if [[ "$rc" != 0 ]]; then ok "格式錯退出非 0：$bad"; else fail "格式錯卻退出 0：$bad"; fi
+  case "$err" in *INTERNAL_TARGETS_MALFORMED*) ok "格式錯有指名原因" ;;
+    *) fail "格式錯沒印 INTERNAL_TARGETS_MALFORMED：$err" ;; esac
+done
+
+: > "$TMP/empty.tsv"
+err="$(MRA_CORPUS_INTERNAL_TARGETS="$TMP/empty.tsv" corpus_internal_targets 2>&1 >/dev/null)"; rc=$?
+if [[ "$rc" != 0 ]]; then ok "空檔案退出非 0"; else fail "空檔案卻退出 0"; fi
+case "$err" in *INTERNAL_TARGETS_UNUSABLE*) ok "空檔案有指名原因" ;;
+  *) fail "空檔案沒印 INTERNAL_TARGETS_UNUSABLE：$err" ;; esac
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

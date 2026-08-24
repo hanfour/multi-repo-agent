@@ -4,7 +4,7 @@
 #   mra review <owner/repo> --pr <N> --strategy personas --json
 #
 # 真正的 mra review 不是這樣：沒有 --json；--strategy 只收 light/standard/
-# debate；<project> 要是 workspace 內的專案名(erp)不是 owner/repo(acme/rails-app-1)；
+# debate；<project> 要是 workspace 內的專案名(rails-app-1)不是 owner/repo(acme/rails-app-1)；
 # --pr N 會檢查本地 HEAD 等於 PR head，歷史上已經 merged 的 PR 一定擋下來。
 #
 # 這支腳本接住 run-backtest.sh 呼叫的那個假想形狀，轉譯成真正 mra review 吃得下

@@ -56,7 +56,7 @@
 
 行號判定砍掉 44% 的噪音，那些是 Rails controller 的日常改動，不是缺陷證據。即使收緊到行號，候選集仍要人工確認才能當 ground truth，Task 4 不是可省略的步驟。
 
-依 12.5% 推算基準集規模：四個主力 repo（`erp` 355、`nest-monorepo-2.0` 349、`react-app-1` 206、`nest-app-2` 194）近一年約 1,100 個 PR，可產出約 137 個候選。人工確認後估計留下 70 到 95 個，足以支撐 spec 要求的 30 到 40 個基準 PR。
+依 12.5% 推算基準集規模：四個主力 repo（`rails-app-1` 355、`nest-monorepo-2.0` 349、`react-app-1` 206、`nest-app-2` 194）近一年約 1,100 個 PR，可產出約 137 個候選。人工確認後估計留下 70 到 95 個，足以支撐 spec 要求的 30 到 40 個基準 PR。
 
 另一個誤差來源：團隊用 `fix(scope):` 當 PR 標題慣例，所以 PR 自己的 merge commit 會被誤判成「修這個 PR 的 commit」。判定時要排除該 PR 的 `merge_commit_sha`，以及 message 裡帶 `#<PR 編號>` 的 commit。
 

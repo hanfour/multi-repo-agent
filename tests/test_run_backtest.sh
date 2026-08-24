@@ -22,6 +22,10 @@ S="$MRA_DIR/scripts/run-backtest.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/run-backtest-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 export MRA_BENCHMARK_DIR="$TMP/bench"
+# 自家 repo 的真實清單放在版控外，跑這支測試的機器上可能存在。不 pin 的話
+# 分層注入那幾條會拿使用者真正的清單去查層，acme/* 查不到就 REPO_LAYER_UNKNOWN
+# 擋在開跑前，斷言在程式沒問題的時候轉紅。
+export MRA_CORPUS_INTERNAL_TARGETS="$TMP/no-such-targets.tsv"
 mkdir -p "$MRA_BENCHMARK_DIR" "$TMP/bin"
 export MRA_BACKTEST_CMD="mra"
 export PATH="$TMP/bin:$PATH"
