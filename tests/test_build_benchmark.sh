@@ -14,8 +14,11 @@ case "$*" in
     # 用來把 A（fix-commits 失敗）跟 B（pr-ranges 失敗）測成兩條不會互相
     # 觸發的路徑——fix_commits 失敗會在到達這裡之前就 continue 掉。
     if [[ "${MRA_TEST_PRFILES_FAIL:-0}" == "1" ]]; then exit 1; fi
-    printf '%s' '[{"filename":"app/a.rb","patch":"@@ -92,7 +92,7 @@ def update\n x"},
-                  {"filename":"app/b.rb","patch":"@@ -10,5 +10,5 @@ def x\n y"}]' ;;
+    # 陣列的陣列：真實的 `gh api --paginate --slurp` 就是這個形狀，一頁一個
+    # 元素。backtest_pr_ranges 現在要分頁（PR 可能改到超過 100 個檔案），
+    # 所以 stub 也要回這個形狀，否則測的是一個不存在的回應。
+    printf '%s' '[[{"filename":"app/a.rb","patch":"@@ -92,7 +92,7 @@ def update\n x"},
+                   {"filename":"app/b.rb","patch":"@@ -10,5 +10,5 @@ def x\n y"}]]' ;;
   *"commits/aaa111"*)
     # 第三個獨立開關：只讓單一 commit 的查詢（內層、每個 fix commit 各一次）
     # 失敗，commits 列表跟 pulls 都正常——這是目前唯一會漏收候選、卻完全
@@ -64,6 +67,45 @@ eq "未知參數結束碼非 0" "1" "$?"
 # --repo 缺值：不能吃掉下一個參數當成 repo 名稱，也不能靜默地用空字串繼續跑。
 bash "$MRA_DIR/scripts/build-benchmark.sh" --repo >/dev/null 2>&1
 eq "缺 --repo 值結束碼非 0" "1" "$?"
+
+# 其餘三個帶值的旗標也一樣不能吃掉下一個參數、也不能死在 set -u 的
+# 「$2: 未綁定的變數」——那種訊息指向行號，不指向使用者打錯的旗標。
+for _flag in --limit --days --until; do
+  _out="$(bash "$MRA_DIR/scripts/build-benchmark.sh" "$_flag" 2>&1)"; _rc=$?
+  eq "缺 ${_flag} 值結束碼非 0" "1" "$_rc"
+  case "$_out" in
+    *"需要接一個值"*) ok "缺 ${_flag} 值印出用法" ;;
+    *) fail "缺 ${_flag} 值該印用法，實際是：$_out" ;;
+  esac
+done
+
+# --limit 會變成 GitHub 的 per_page，上限 100。超過的話 API 靜默回 100 筆，
+# 分母比要求的少而且沒有任何訊號——那是一個看不出來的錯誤分母。
+limit_out="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --limit 300 2>&1)"
+eq "--limit 超過 100 結束碼非 0" "1" "$?"
+case "$limit_out" in
+  LIMIT_TOO_LARGE*) ok "--limit 超過 100 印出 LIMIT_TOO_LARGE" ;;
+  *) fail "缺 LIMIT_TOO_LARGE：$limit_out" ;;
+esac
+limit_bad="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --limit abc 2>&1)"
+eq "--limit 非數字結束碼非 0" "1" "$?"
+case "$limit_bad" in
+  LIMIT_INVALID*) ok "--limit 非數字印出 LIMIT_INVALID" ;;
+  *) fail "缺 LIMIT_INVALID：$limit_bad" ;;
+esac
+
+# --days 一路傳到 backtest_window_end 的 python3 timedelta(days=int(...))，
+# 非數字會以一段 Python traceback 收場，而不是一句講得清楚的用法錯誤。
+days_bad="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --days abc 2>&1)"
+eq "--days 非數字結束碼非 0" "1" "$?"
+case "$days_bad" in
+  DAYS_INVALID*) ok "--days 非數字印出 DAYS_INVALID" ;;
+  *) fail "缺 DAYS_INVALID：$days_bad" ;;
+esac
+case "$days_bad" in
+  *Traceback*) fail "--days 非數字不該噴 Python traceback" ;;
+  *) ok "--days 非數字不噴 Python traceback" ;;
+esac
 
 run1_out="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --limit 10 2>&1)"
 eq "退出碼 0" "0" "$?"

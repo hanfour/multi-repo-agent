@@ -52,8 +52,23 @@
 # 與 --until 都不變，抓到的 PR 集合就跟這一次完全一樣，不必知道確切的
 # PR 編號範圍，只要凍住「當時看到的世界線」。沒給的話（預設）行為與現在
 # 完全一致：不做這層過濾，抓到「現在最新建立的 N 筆」。
+# $limit 直接進 per_page，而 GitHub 的 per_page 上限是 100：給 300 的話 API
+# 靜默回 100 筆，呼叫端以為分母是 300、實際是 100，而且沒有任何訊號。這裡不
+# 自動改成分頁去湊滿——分頁會把「最近建立的 N 筆」變成一個要抓好幾頁、燒額度
+# 的操作，而目前的用法（每個 repo 取最近 100 個 PR）根本不需要。直接擋下來，
+# 讓使用者知道上限在哪，比悄悄給一個比要求少的分母好。
 backtest_merged_prs() {
   local repo="$1" limit="${2:-100}" until="${3:-}"
+  case "$limit" in
+    ''|*[!0-9]*|0)
+      printf 'LIMIT_INVALID\t%s\t--limit 必須是 1 到 100 之間的整數\n' "$limit" >&2
+      return 1 ;;
+  esac
+  if [ "$limit" -gt 100 ]; then
+    printf 'LIMIT_TOO_LARGE\t%s\tGitHub 的 per_page 上限是 100，超過的部分會被靜默丟掉\n' \
+      "$limit" >&2
+    return 1
+  fi
   gh api "repos/$repo/pulls?state=closed&per_page=$limit&sort=created&direction=desc" 2>/dev/null \
     | jq --arg until "$until" \
       '[ .[] | select(.merged_at != null)
@@ -128,9 +143,19 @@ _backtest_ranges_from_files() {
   printf '%s' "$out"
 }
 
+# PR 的檔案清單一定要分頁，理由與 backtest_fix_commits 相同：per_page 的上限
+# 是 100，一個改到 180 個檔案的 PR 只會回前 100 筆。截斷的後果不是報錯，是
+# 「這個 PR 沒有候選」——fix commit 若重疊在第 150 個檔案上，區間表裡根本沒有
+# 那個檔案，比對必然落空，而 build-benchmark.sh 會印出一個乾淨的「候選 0 筆」
+# 加結束碼 0，跟一個真的沒有後續修正的 PR 完全分不出來。
+#
+# --slurp 把每一頁的陣列包成陣列的陣列，所以要先 add 攤平。gh 與 jq 的退出碼
+# 分兩步接：寫成單一管線的話，gh 失敗時 jq 對空輸入照樣回 0，失敗會被吞掉。
 backtest_pr_ranges() {
-  local repo="$1" pr="$2" files
-  files="$(gh api "repos/$repo/pulls/$pr/files?per_page=100" 2>/dev/null)" || return 1
+  local repo="$1" pr="$2" raw files
+  raw="$(gh api --paginate --slurp "repos/$repo/pulls/$pr/files?per_page=100" 2>/dev/null)" \
+    || return 1
+  files="$(printf '%s' "$raw" | jq 'add // []')" || return 1
   _backtest_ranges_from_files "$files"
 }
 

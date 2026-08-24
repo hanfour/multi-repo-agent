@@ -72,10 +72,27 @@ else
   fail "file-set drift — CI covers [${ci_files_arr[*]}] but make lint covers [${make_files_arr[*]}]"
 fi
 
-# gate 本身要是乾淨的，不然就不算是個 gate。scripts/*.sh 要跟 Makefile／CI
-# 現在宣告的清單一致，理由見上面兩段。
+# gate 本身要是乾淨的，不然就不算是個 gate。
+#
+# 檢查的檔案集一定要用上面從 Makefile 解析出來的 make_files_arr，不能再硬寫
+# 一份：硬寫的話這裡會變成第三份事實來源，而這支測試存在的目的正是抓 Makefile
+# 與 CI 兩份清單的漂移。有人把 agents/*.sh 同時加進 Makefile 與 CI 時，上面
+# 「兩邊一致」的斷言會通過，這裡卻還在檢查舊清單——gate 悄悄少涵蓋一個目錄，
+# 而測試全綠。
 if command -v shellcheck >/dev/null 2>&1; then
-  if (cd "$SCRIPT_DIR" && shellcheck -S "${make_gate:-error}" lib/*.sh bin/*.sh scripts/*.sh tests/*.sh test.sh >/dev/null 2>&1); then
+  if (
+        cd "$SCRIPT_DIR" || exit 1
+        # Makefile 裡宣告的是 glob（lib/*.sh 之類），要在這裡展開成實際檔名。
+        # 展不出東西的 glob 直接跳過，不要把字面值當檔名餵給 shellcheck。
+        gate_files=()
+        for _glob in "${make_files_arr[@]}"; do
+          for _f in $_glob; do
+            [[ -e "$_f" ]] && gate_files+=("$_f")
+          done
+        done
+        [[ "${#gate_files[@]}" -gt 0 ]] || exit 1
+        shellcheck -S "${make_gate:-error}" "${gate_files[@]}"
+      ) >/dev/null 2>&1; then
     ok "the tree is clean at the gate severity"
   else
     fail "make lint would fail on a clean checkout"

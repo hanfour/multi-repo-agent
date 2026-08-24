@@ -19,6 +19,19 @@ acme/vue-app-2	vue
 EOF
 }
 
+# corpus_internal_layer_of <repo> — 這個 Acme repo 屬於哪一層。查不到時
+# 印不出東西、退出碼非 0，由呼叫端決定要擋下來還是退回 common：這裡不自己
+# 預設成 common，那會讓「新開的 repo 還沒登記」跟「這個 repo 真的屬於通用
+# 層」變成同一個外觀。
+#
+# repo 名稱透過 ENVIRON 傳給 awk，不用 -v，理由與 corpus_layer_of 相同
+# （awk 的 -v 會先處理反斜線跳脫，含換行的值還會讓 awk crash）。
+corpus_internal_layer_of() {
+  local repo="$1"
+  corpus_internal_targets \
+    | CORPUS_REPO="$repo" awk -F'\t' '$1 == ENVIRON["CORPUS_REPO"] { print $2; found = 1 } END { exit !found }'
+}
+
 # 近一年留言數達門檻的人。輸出是 JSON 陣列，直接餵給 corpus_filter_active。
 #
 # 三頁全部要成功才能算數，不能只看「有沒有任何一頁成功」。舊版只要 1、2 頁成功

@@ -22,6 +22,8 @@ set -uo pipefail
 
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$MRA_DIR/lib/backtest-metrics.sh"
+# repo 屬於哪一層（分層 persona 用，見下面 MRA_PERSONAS_ROOT 的說明）。
+source "$MRA_DIR/lib/corpus-internal.sh"
 
 BENCH_DIR="${MRA_BENCHMARK_DIR:-$HOME/.cache/mra-review-benchmark}"
 C="$BENCH_DIR/candidates.json"
@@ -191,6 +193,56 @@ if [[ -n "$dup_keys" ]]; then
   exit 1
 fi
 
+# --- 分層 persona：依 repo 所屬層挑要載入哪一份注入後的 persona -------------
+# MRA_PERSONAS_ROOT 指向 rule_inject_layers 的輸出根目錄（底下每層一個子目錄）。
+# 設了它，這支腳本就逐 PR 依 repo 決定 MRA_PERSONAS_DIR；沒設就完全維持原本的
+# 行為——整輪共用呼叫端給的 MRA_PERSONAS_DIR，或內建的 agents/personas。
+#
+# persona 目錄是 review 流程唯一的載入點（lib/personas.sh 的 _personas_dir()），
+# 一次只能指向一個目錄，所以「Rails PR 讀 rails 層規則、React PR 讀 react 層」
+# 只能在這裡逐 PR 切換，沒辦法在注入時一次做完。
+#
+# 對應與目錄在開跑之前一次驗完，不是跑到那個 PR 才發現：一輪回測要幾小時，
+# 跑到第 20 個 PR 才報「react 層的 persona 目錄不存在」，前面的時間就白燒了。
+#
+# 查不到所屬層的 repo 直接擋下來，不退回 common：退回去的話，那個 repo 的 PR
+# 會用一份不含自己這層規則的 prompt 跑完，summary 看起來完全正常，而「這一層
+# 到底有沒有被測到」事後查不出來——正是這支腳本一路在防的「失敗長得像一個
+# 合理的結果」。補一行到 lib/corpus-internal.sh 的對應表就能解決，不值得用一個
+# 看不見的降級去換。
+#
+# 已知限制：分層的粒度是 repo，不是檔案路徑。acme/nest-monorepo-2.0 是 turbo +
+# pnpm 的 monorepo，PR 常橫跨 apps/frontend 與 apps/backend（見
+# docs/superpowers/notes/2026-backtest-baseline.md），但它在對應表裡只能是
+# nestjs 層，所以它的前端改動拿到的是 nestjs 層的規則。要做到更細的粒度得讓
+# 同一次 review 依檔案載入不同 persona，而 persona 目錄一次只能指向一個地方
+# ——那是 review 流程本身的結構，不是這裡能繞過的。它在基準集裡佔 43/69 個
+# PR，解讀分層回測的數字時要記得這件事。
+#
+# --recompute 例外：那個模式一次 review 都不跑，載入哪一份 persona 完全不影響
+# 結果。注入後的 persona 放在 TMPDIR 底下，換容差重算時它可能早就被系統清掉
+# 了——為一個根本不會被讀到的目錄擋下重算，是拿一道防呆去擋一件不會出錯的事。
+PERSONAS_ROOT="${MRA_PERSONAS_ROOT:-}"
+if [[ "$RECOMPUTE" -eq 1 ]]; then
+  PERSONAS_ROOT=""
+fi
+if [[ -n "$PERSONAS_ROOT" ]]; then
+  [[ -d "$PERSONAS_ROOT" ]] || {
+    echo "PERSONAS_ROOT_MISSING：MRA_PERSONAS_ROOT=${PERSONAS_ROOT} 不是目錄" >&2
+    exit 1; }
+  while IFS= read -r _repo; do
+    [[ -n "$_repo" ]] || continue
+    if ! _layer="$(corpus_internal_layer_of "$_repo")"; then
+      echo "REPO_LAYER_UNKNOWN：${_repo} 不在 lib/corpus-internal.sh 的層對應表裡，無法決定要載入哪一層的規則" >&2
+      exit 1
+    fi
+    [[ -d "$PERSONAS_ROOT/$_layer" ]] || {
+      echo "PERSONAS_LAYER_MISSING：${_repo} 屬於 ${_layer} 層，但 ${PERSONAS_ROOT}/${_layer} 不存在" >&2
+      exit 1; }
+    echo "分層 persona：${_repo} → ${_layer} 層"
+  done < <(jq -r '[.[] | select(.confirmed == true) | .repo] | unique | .[]' "$C")
+fi
+
 OUT="$BENCH_DIR/runs/$LABEL"
 if ! mkdir -p "$OUT"; then
   echo "RUNDIR_MKDIR_FAILED：無法建立 ${OUT}" >&2
@@ -252,7 +304,20 @@ for ((i = 0; i < n_conf; i++)); do
     continue
   fi
   if [[ ! -s "$f" ]]; then
-    if ! MRA_BACKTEST_COND_FILE="$COND_FILE" "$MRA_CMD" review "$repo" --pr "$pr" --strategy personas --json > "$f" 2>"$errf"; then
+    # 這個 PR 要用哪一份 persona。沒開分層時就是呼叫端原本給的值（可能是
+    # 空字串，_personas_dir() 對空字串與未設定的處理相同，會用內建的
+    # agents/personas）。開了分層時，上面的預檢已經確認每個 repo 都查得到
+    # 層、每層的目錄都存在，這裡仍然接住退出碼：查表失敗時寧可整輪停下來，
+    # 也不要讓一個空字串把這個 PR 悄悄換成沒有規則的 persona。
+    persona_dir="${MRA_PERSONAS_DIR:-}"
+    if [[ -n "$PERSONAS_ROOT" ]]; then
+      if ! layer="$(corpus_internal_layer_of "$repo")"; then
+        echo "REPO_LAYER_UNKNOWN：${repo} 查不到所屬層，停止本輪回測" >&2
+        exit 1
+      fi
+      persona_dir="$PERSONAS_ROOT/$layer"
+    fi
+    if ! MRA_PERSONAS_DIR="$persona_dir" MRA_BACKTEST_COND_FILE="$COND_FILE" "$MRA_CMD" review "$repo" --pr "$pr" --strategy personas --json > "$f" 2>"$errf"; then
       echo "REVIEW_FAILED：${repo}#${pr} 的 review 失敗，詳見 ${errf}，這個 PR 不計入本次彙總" >&2
       rm -f "$f"
       n_failed=$((n_failed + 1))
@@ -304,7 +369,30 @@ for ((i = 0; i < n_conf; i++)); do
   fi
 
   review="$(cat "$f")"
-  m="$(backtest_match "$review" "$expected" "$TOL")"
+  if ! m="$(backtest_match "$review" "$expected" "$TOL")"; then
+    echo "MATCH_FAILED：配對 ${repo}#${pr} 的 expected 與 comment 失敗，這個 PR 不計入本次彙總" >&2
+    n_failed=$((n_failed + 1))
+    failed_list="$(jq -n --argjson a "$failed_list" --arg k "${repo}#${pr}" '$a + [$k]')"
+    continue
+  fi
+
+  # 檔案層級的漏抓要在攤平之前算。這一步失敗時整個 PR 都不計入彙總，而
+  # all_matches／all_comments 一旦 append 就收不回來——舊版把它放在 append
+  # 之後，失敗時的 continue 只跳過 prs 計數，那個 PR 的 match 與 comment 已經
+  # 進了彙總：expected_total 與 comments_total 含它、覆蓋率的分子不含它
+  # （可能因此誤觸 COVERAGE_TOO_LOW），anchor_drift（missed 減 file_missed）
+  # 的被減數含它、減數不含它，於是漂移數被墊高。summary.json 裡沒有任何欄位
+  # 解釋這個缺口，正是這支腳本一路在防的「數字錯得不明顯」。
+  #
+  # 退出碼要接住。寫成 `$((x + $(cmd)))` 的話，cmd 失敗時它的輸出是空字串，
+  # 算術展開把空字串當 0，於是 file_missed 保持不變、prs 照樣加一 —— 那個 PR
+  # 的檔案層級漏抓被靜默算成 0。
+  if ! _pr_file_missed="$(backtest_file_missed "$review" "$expected")"; then
+    echo "FILE_MISSED_FAILED：計算 ${repo}#${pr} 的檔案層級漏抓失敗，這個 PR 不計入本次彙總" >&2
+    n_failed=$((n_failed + 1))
+    failed_list="$(jq -n --argjson a "$failed_list" --arg k "${repo}#${pr}" '$a + [$k]')"
+    continue
+  fi
   # matched_idx 是 backtest_match 相對「這個 PR 自己的 comments 陣列」算出來的
   # 位置，不是全域位置。把好幾個 PR 的 match／comment 攤平進同一個陣列之前，
   # 要先把 matched_idx 位移攤平前已經累積的 comment 筆數(offset)——不然後面
@@ -316,20 +404,10 @@ for ((i = 0; i < n_conf; i++)); do
     'map(if .matched_idx == null then . else .matched_idx += $off end)' <<<"$m")"
   all_matches="$(jq -n --argjson a "$all_matches" --argjson b "$m" '$a + $b')"
   all_comments="$(jq -n --argjson a "$all_comments" --argjson r "$review" '$a + $r.comments')"
-  # 檔案層級的漏抓要在這裡逐 PR 累加，不能事後對攤平的陣列算一次：不同 PR
-  # 常常改到同名的檔案，攤平之後這個 PR 的 expected 會配到別的 PR 對同名檔案
-  # 的 comment，漏抓數偏低。上面 matched_idx 靠 offset 補救，這個沒有 offset
-  # 可補，只能不要攤平。
-  # 退出碼要接住。寫成 `$((x + $(cmd)))` 的話，cmd 失敗時它的輸出是空字串，
-  # 算術展開把空字串當 0，於是 file_missed 保持不變、prs 照樣加一 —— 那個 PR
-  # 的檔案層級漏抓被靜默算成 0，而 anchor_drift（missed 減 file_missed）跟著
-  # 多算。整份 summary 沒有任何地方顯示這件事發生過。
-  if ! _pr_file_missed="$(backtest_file_missed "$review" "$expected")"; then
-    echo "FILE_MISSED_FAILED：計算 ${repo}#${pr} 的檔案層級漏抓失敗，這個 PR 不計入本次彙總" >&2
-    n_failed=$((n_failed + 1))
-    failed_list="$(jq -n --argjson a "$failed_list" --arg k "${repo}#${pr}" '$a + [$k]')"
-    continue
-  fi
+  # 檔案層級的漏抓逐 PR 累加，不能事後對攤平的陣列算一次：不同 PR 常常改到
+  # 同名的檔案，攤平之後這個 PR 的 expected 會配到別的 PR 對同名檔案的
+  # comment，漏抓數偏低。上面 matched_idx 靠 offset 補救，這個沒有 offset
+  # 可補，只能不要攤平。實際的計算在 append 之前就做完了，見那邊的說明。
   file_missed=$((file_missed + _pr_file_missed))
   prs=$((prs + 1))
 done
@@ -430,9 +508,19 @@ candidates_sha="$(shasum -a 256 "$C" | cut -c1-16)"
 # 兩個都留：舊欄位讓階段二已經跑完的四份 summary 仍然可以對照，新欄位給出
 # 正確的語意。expected_findings 內部先排序再算，避免同一組 finding 因為
 # --add 的順序不同而算出不同的指紋。
+# 排序鍵對非物件的 expected finding 要有退路。candidates.json 沒有 schema，
+# 手動編輯寫得出一筆字串（而不是 {path,line,severity,note} 物件），而
+# `sort_by([.path, ...])` 對字串會直接報「Cannot index string with string」。
+#
+# 那一筆早在上面的迴圈裡就被 MATCH_FAILED 記成 failed、排除在彙總之外了；
+# 讓它在這裡把整輪的結果丟掉，等於為了算一個指紋而把幾小時的 review 全部
+# 作廢。全是物件時排序鍵與原本逐字元相同，所以既有的 sha 不會變動。
 candidates_effective_sha="$(jq -S -c '
   [ .[] | select(.confirmed == true)
-    | {repo, pr, expected_findings: (.expected_findings | sort_by([.path, .line, .severity, .note])) } ]
+    | {repo, pr,
+       expected_findings: (.expected_findings
+         | sort_by(if type == "object" then [.path, .line, .severity, .note]
+                   else [tojson] end)) } ]
   | sort_by([.repo, .pr])' "$C" | shasum -a 256 | cut -c1-16)" || {
   echo "SHA_FAILED：計算 candidates_effective_sha 失敗" >&2
   exit 1

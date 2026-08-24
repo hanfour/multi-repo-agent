@@ -1160,5 +1160,168 @@ order2="$(run_esha esha6)"
 eq "expected_findings 的順序不影響 effective sha" \
   "$(cut -d' ' -f2 <<<"$order1")" "$(cut -d' ' -f2 <<<"$order2")"
 
+
+# --- 分層 persona：逐 PR 依 repo 所屬層切換 MRA_PERSONAS_DIR -----------------
+# 這是分層注入在 review 端的另一半。注入產出的是「每層一份 persona 目錄」
+# （lib/rule-inject.sh 的 rule_inject_layers），要有人在跑的時候依 repo 把
+# MRA_PERSONAS_DIR 指到對的那一份，rails 層的規則才會真的進到 Rails PR 的
+# prompt。
+#
+# 兩個 repo 刻意分屬不同層（acme/rails-app-1 是 rails、acme/react-app-1 是
+# react，見 lib/corpus-internal.sh 的對應表）：只用一個 repo 的話，一個把
+# 每個 PR 都指到同一個固定目錄的退化實作也會通過，而那等於沒有分層。
+LAYER_DIR="$TMP/layer-bench"
+mkdir -p "$LAYER_DIR"
+cat > "$LAYER_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":9001,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/a.rb","line":10,"severity":"HIGH","note":"a"}]},
+ {"repo":"acme/react-app-1","pr":9002,"merged_at":"2026-08-02T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"src/a.tsx","line":10,"severity":"HIGH","note":"b"}]}
+]
+J
+
+PERSONAS_ROOT_DIR="$TMP/layer-personas"
+mkdir -p "$PERSONAS_ROOT_DIR/common" "$PERSONAS_ROOT_DIR/rails" \
+         "$PERSONAS_ROOT_DIR/react" "$PERSONAS_ROOT_DIR/vue" "$PERSONAS_ROOT_DIR/nestjs"
+
+# 這個 shim 把每次 review 收到的 MRA_PERSONAS_DIR 連同 argv 一起記下來，
+# 才斷言得出「哪個 PR 用了哪一層」，不是只看「有沒有設過這個變數」。
+cat > "$TMP/bin/mra-layer" <<SHIM
+#!/usr/bin/env bash
+printf '%s\t%s\n' "\$*" "\${MRA_PERSONAS_DIR:-<unset>}" >> "$TMP/persona-usage.log"
+printf '%s' '{"status":"APPROVED","summary":"x","comments":[]}'
+SHIM
+chmod +x "$TMP/bin/mra-layer"
+
+: > "$TMP/persona-usage.log"
+layer_out="$(MRA_BENCHMARK_DIR="$LAYER_DIR" MRA_BACKTEST_CMD="mra-layer" \
+  MRA_PERSONAS_ROOT="$PERSONAS_ROOT_DIR" bash "$S" --label layered 2>&1)"
+layer_rc=$?
+eq "分層回測退出碼 0" "0" "$layer_rc"
+eq "Rails repo 的 PR 讀 rails 層的 persona" "$PERSONAS_ROOT_DIR/rails" \
+  "$(grep -- '--pr 9001' "$TMP/persona-usage.log" | cut -f2)"
+eq "React repo 的 PR 讀 react 層的 persona" "$PERSONAS_ROOT_DIR/react" \
+  "$(grep -- '--pr 9002' "$TMP/persona-usage.log" | cut -f2)"
+has "開跑前印出 repo 與層的對應" "$layer_out" "acme/rails-app-1 → rails 層"
+
+# 沒設 MRA_PERSONAS_ROOT 時完全不碰 MRA_PERSONAS_DIR：分層是可選的，既有的
+# 呼叫方式（整輪共用一個 MRA_PERSONAS_DIR，或用內建 agents/personas）必須
+# 一個字元都不變，否則階段二的基準線就不能拿來比了。
+: > "$TMP/persona-usage.log"
+MRA_BENCHMARK_DIR="$LAYER_DIR" MRA_BACKTEST_CMD="mra-layer" \
+  bash "$S" --label unlayered >/dev/null 2>&1
+eq "沒開分層時 MRA_PERSONAS_DIR 維持未設定" "<unset>" \
+  "$(grep -- '--pr 9001' "$TMP/persona-usage.log" | cut -f2)"
+
+# 查不到所屬層的 repo 要在開跑之前擋下來，不是退回 common 跑完：退回去的話
+# 那個 repo 的 PR 會用一份不含自己這層規則的 prompt 跑完，而 summary 看起來
+# 完全正常——事後查不出來那一層到底有沒有被測到。
+UNKNOWN_DIR="$TMP/layer-unknown"
+mkdir -p "$UNKNOWN_DIR"
+jq '[.[0] | .repo = "someorg/not-registered"]' "$LAYER_DIR/candidates.json" \
+  > "$UNKNOWN_DIR/candidates.json"
+: > "$TMP/persona-usage.log"
+unknown_out="$(MRA_BENCHMARK_DIR="$UNKNOWN_DIR" MRA_BACKTEST_CMD="mra-layer" \
+  MRA_PERSONAS_ROOT="$PERSONAS_ROOT_DIR" bash "$S" --label unknown-layer 2>&1)"
+unknown_rc=$?
+if [[ "$unknown_rc" -ne 0 ]]; then
+  ok "查不到層的 repo 讓回測退出碼非 0"
+else
+  fail "查不到層的 repo 必須擋下來，不能照跑：rc=$unknown_rc"
+fi
+has "印出 REPO_LAYER_UNKNOWN" "$unknown_out" "REPO_LAYER_UNKNOWN"
+eq "擋下來時一次 review 都沒跑" "" "$(cat "$TMP/persona-usage.log")"
+
+# 某一層的目錄不存在同樣要在開跑之前擋下來。一輪回測要幾小時，跑到第 20 個
+# PR 才發現 react 層的目錄不存在，前面的時間就白燒了。
+MISSING_ROOT="$TMP/layer-personas-missing"
+mkdir -p "$MISSING_ROOT/rails"
+: > "$TMP/persona-usage.log"
+missing_out="$(MRA_BENCHMARK_DIR="$LAYER_DIR" MRA_BACKTEST_CMD="mra-layer" \
+  MRA_PERSONAS_ROOT="$MISSING_ROOT" bash "$S" --label missing-layer 2>&1)"
+missing_rc=$?
+if [[ "$missing_rc" -ne 0 ]]; then
+  ok "缺一層的 persona 目錄讓回測退出碼非 0"
+else
+  fail "缺一層的 persona 目錄必須擋下來：rc=$missing_rc"
+fi
+has "印出 PERSONAS_LAYER_MISSING" "$missing_out" "PERSONAS_LAYER_MISSING"
+eq "缺目錄時一次 review 都沒跑" "" "$(cat "$TMP/persona-usage.log")"
+
+# MRA_PERSONAS_ROOT 指到一個根本不存在的路徑：同樣是硬失敗，不是退回內建
+# persona 靜默跑完。
+nonroot_out="$(MRA_BENCHMARK_DIR="$LAYER_DIR" MRA_BACKTEST_CMD="mra-layer" \
+  MRA_PERSONAS_ROOT="$TMP/does-not-exist-root" bash "$S" --label no-root 2>&1)"
+nonroot_rc=$?
+if [[ "$nonroot_rc" -ne 0 ]]; then
+  ok "MRA_PERSONAS_ROOT 不是目錄時退出碼非 0"
+else
+  fail "MRA_PERSONAS_ROOT 不是目錄必須擋下來：rc=$nonroot_rc"
+fi
+has "印出 PERSONAS_ROOT_MISSING" "$nonroot_out" "PERSONAS_ROOT_MISSING"
+
+# --recompute 一次 review 都不跑，載入哪一份 persona 完全不影響結果。注入後的
+# persona 放在 TMPDIR 底下，換容差重算時它可能早就被系統清掉了——為一個根本
+# 不會被讀到的目錄擋下重算是誤擋。label layered 上面已經跑完，這裡直接重算。
+recompute_out="$(MRA_BENCHMARK_DIR="$LAYER_DIR" MRA_BACKTEST_CMD="mra-layer" \
+  MRA_PERSONAS_ROOT="$TMP/does-not-exist-root" bash "$S" --label layered --recompute 2>&1)"
+recompute_rc=$?
+eq "--recompute 不因為 persona 目錄不見而被擋下" "0" "$recompute_rc"
+lacks "--recompute 不做分層預檢" "$recompute_out" "PERSONAS_ROOT_MISSING"
+
+# --- 算不出指標的 PR 不能污染彙總 ------------------------------------------
+#
+# expected_findings 裡混進一個字串（不是 {path,line,severity,note} 物件）時，
+# backtest_match 的 `.value.path` 會對字串報錯。這種畸形資料真的寫得出來：
+# candidates.json 沒有 schema，review-benchmark.sh --add 以外的手動編輯就會。
+#
+# 舊版兩件事都沒做對：backtest_match 的退出碼完全沒接（$m 變成空字串，之後
+# 每一個 --argjson 連鎖失敗，整輪回測報廢），backtest_file_missed 又放在
+# all_matches／all_comments 攤平之後（那個 PR 的 match 與 comment 已經進了
+# 彙總，continue 只跳過 prs 計數，於是 expected_total 含它、覆蓋率的分子不含
+# 它，anchor_drift 也跟著多算）。修好之後那一筆只記成 failed，其餘照常。
+BAD_DIR="$TMP/bad-expected"
+mkdir -p "$BAD_DIR"
+cat > "$BAD_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":9201,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[{"path":"app/a.rb","line":10,"severity":"HIGH","note":"a"}]},
+ {"repo":"acme/rails-app-1","pr":9202,"merged_at":"2026-08-02T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":["這一筆是字串，不是物件"]}
+]
+J
+
+cat > "$TMP/bin/mra-bad" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"--pr 9201"*)
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+     {"path":"app/a.rb","line":11,"body":"x","severity":"HIGH"}]}' ;;
+  *"--pr 9202"*)
+    printf '%s' '{"status":"CHANGES_REQUESTED","summary":"x","comments":[
+     {"path":"app/z.rb","line":1,"body":"x","severity":"LOW"},
+     {"path":"app/z2.rb","line":2,"body":"x","severity":"LOW"}]}' ;;
+esac
+SHIM
+chmod +x "$TMP/bin/mra-bad"
+
+bad_out="$(MRA_BENCHMARK_DIR="$BAD_DIR" MRA_BACKTEST_CMD="mra-bad" \
+  MRA_BACKTEST_MIN_COVERAGE=0.5 bash "$S" --label bad-expected 2>&1)"
+bad_rc=$?
+eq "一筆畸形 expected 不會讓整輪回測報廢" "0" "$bad_rc"
+BAD_SUM="$BAD_DIR/runs/bad-expected/summary.json"
+if [[ -s "$BAD_SUM" ]]; then ok "仍然產出 summary.json"; else fail "沒有 summary.json：$bad_out"; fi
+eq "只有好的那筆計入 prs" "1" "$(jq -r '.prs' "$BAD_SUM")"
+eq "畸形的那筆記成 failed" "1" "$(jq -r '.failed_count' "$BAD_SUM")"
+eq "failed 清單點名 9202" "acme/rails-app-1#9202" "$(jq -r '.failed_prs[0]' "$BAD_SUM")"
+# 這兩條是關鍵：畸形的那筆有 2 則 comment，它們絕對不能出現在彙總裡。
+eq "expected_total 只含好的那筆" "1" "$(jq -r '.expected_total' "$BAD_SUM")"
+eq "comments_total 只含好的那筆" "1" "$(jq -r '.comments_total' "$BAD_SUM")"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

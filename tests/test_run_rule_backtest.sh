@@ -58,6 +58,7 @@ write_backtest_stub() {
 printf '%s\n' "\$*" > "$STUB/argv.log"
 {
   printf 'MRA_PERSONAS_DIR=%s\n' "\${MRA_PERSONAS_DIR:-<unset>}"
+  printf 'MRA_PERSONAS_ROOT=%s\n' "\${MRA_PERSONAS_ROOT:-<unset>}"
   printf 'MRA_REVIEW_PERSONA_MAX_TURNS=%s\n' "\${MRA_REVIEW_PERSONA_MAX_TURNS:-<unset>}"
   printf 'MRA_BACKTEST_REVIEW_MODE=%s\n' "\${MRA_BACKTEST_REVIEW_MODE:-<unset>}"
   printf 'MRA_BACKTEST_CMD=%s\n' "\${MRA_BACKTEST_CMD:-<unset>}"
@@ -72,9 +73,9 @@ reset_stub_logs() {
 }
 
 # write_common_rule <dir> <id> <n_sources> — 一份格式合格、layer=common、
-# 出處數可控的規則檔，給 token 預算覆寫測試用（run-rule-backtest.sh 一律用
-# common 層注入，所以這裡固定 layer=common，不像 test_rule_inject.sh 的
-# write_rank_rule 需要支援任意層）。
+# 出處數可控的規則檔，給 token 預算覆寫測試用。固定 layer=common 是因為
+# common 層對每一層都可見，任選一層的注入結果都看得到它；分層本身另有
+# 一組測試（見「分層注入」那一節），不靠這個 helper。
 write_common_rule() {
   local dir="$1" id="$2" n="$3"
   mkdir -p "$dir"
@@ -106,15 +107,72 @@ test_injects_before_running_backtest() {
   reset_stub_logs
   MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
     bash "$S" --rules "$FIX/rules" --label rules-test >/dev/null 2>&1
-  local injected="$TMP/personas-rules-test/security-auditor.md"
+  local injected="$TMP/personas-rules-test/common/security-auditor.md"
   [ -f "$injected" ] && ok "產出了注入後的 persona" || fail "沒有注入後的 persona"
   has "注入後含 RULESET" "$(cat "$injected")" "BEGIN RULESET"
 }
 
-test_points_persona_dir_at_injected_copy() {
-  has "MRA_PERSONAS_DIR 指向注入後的目錄" "$(cat "$STUB/env.log")" "personas-rules-test"
-  lacks "MRA_PERSONAS_DIR 不是原本的 agents/personas" \
-    "$(cat "$STUB/env.log")" "MRA_PERSONAS_DIR=$MRA_DIR/agents/personas"
+test_points_persona_root_at_injected_copy() {
+  local env_log; env_log="$(cat "$STUB/env.log")"
+  has "MRA_PERSONAS_ROOT 指向注入後的根目錄" "$env_log" "MRA_PERSONAS_ROOT=$TMP/personas-rules-test"
+  lacks "不是原本的 agents/personas" "$env_log" "$MRA_DIR/agents/personas"
+  # 逐 PR 決定要載入哪一層是 run-backtest.sh 的事。這支腳本自己先釘死一個
+  # MRA_PERSONAS_DIR 的話，每個 PR 都會讀到同一層，分層等於沒做——而且外觀
+  # 上完全正常，summary 照樣跑得出來。
+  has "不自己釘死 MRA_PERSONAS_DIR" "$env_log" "MRA_PERSONAS_DIR=<unset>"
+}
+
+# ---------------------------------------------------------------------------
+# 分層注入：每層各一份 persona 副本
+# ---------------------------------------------------------------------------
+
+test_injects_one_persona_dir_per_layer() {
+  write_backtest_stub
+  reset_stub_logs
+  MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
+    bash "$S" --rules "$FIX/rules" --label layered >/dev/null 2>&1
+  local l
+  for l in $(corpus_layers); do
+    if [ -f "$TMP/personas-layered/$l/security-auditor.md" ]; then
+      ok "$l 層有自己的 persona 副本"
+    else
+      fail "$l 層沒有 persona 副本：$TMP/personas-layered/$l/"
+    fi
+  done
+}
+
+# 這是分層注入要解決的問題本身：在此之前只注入 common 層，nestjs 與 react
+# 層的規則從來不會出現在任何一次 review 的 prompt 裡。兩個方向都要驗——
+# 只驗「nestjs 層有 nestjs 規則」的話，一個把所有層的規則全部塞進每一層的
+# 退化實作也會通過，而那等於沒有分層。
+test_layer_rules_reach_the_matching_layer_only() {
+  local nest react
+  nest="$(cat "$TMP/personas-layered/nestjs/security-auditor.md")"
+  react="$(cat "$TMP/personas-layered/react/security-auditor.md")"
+  has "nestjs 層的 persona 含 nestjs 規則" "$nest" "nestjs-injectable-scope"
+  lacks "nestjs 層的 persona 不含 react 規則" "$nest" "react-effect-cleanup"
+  has "react 層的 persona 含 react 規則" "$react" "react-effect-cleanup"
+  lacks "react 層的 persona 不含 nestjs 規則" "$react" "nestjs-injectable-scope"
+  has "每層都仍然含 common 層規則" "$nest" "common-debug-artifact"
+}
+
+# 執行條件記錄要能回答「這一層實際有幾條規則進了 prompt」。規則檔總數
+# （n_rules）回答不了這件事：每層看得到的只有自己這層加 common，token 預算
+# 還會再截斷一次。只記檔案總數的話，之後重建這輪條件的人會以為整份規則集
+# 都被測過了。
+test_condition_record_captures_per_layer_rule_counts() {
+  local cond="$MRA_BENCHMARK_DIR/runs/layered/rule-inject-conditions.json"
+  [ -f "$cond" ] && ok "分層執行條件記錄產生了" || fail "沒有執行條件記錄：$cond"
+  eq "layers 陣列涵蓋每一層" "$(corpus_layers | grep -c .)" \
+    "$(jq -r '.layers | length' "$cond")"
+  # fixture 是 common、nestjs、react 各一條。nestjs 層看得到自己那條加
+  # common，所以是 2；vue 層沒有自己的規則，只剩 common 那 1 條。
+  eq "nestjs 層記錄注入 2 條" "2" \
+    "$(jq -r '.layers[] | select(.layer == "nestjs") | .rules_injected' "$cond")"
+  eq "vue 層只有 common 那 1 條" "1" \
+    "$(jq -r '.layers[] | select(.layer == "vue") | .rules_injected' "$cond")"
+  eq "每層的 persona 總數仍是 5" "5" \
+    "$(jq -r '.layers[] | select(.layer == "rails") | .persona_total' "$cond")"
 }
 
 test_passes_persona_turns_20() {
@@ -265,7 +323,7 @@ test_token_budget_flag_overrides_and_is_forwarded() {
   tiny_budget=$(( $(_rule_char_count "$(_rule_entry_text "$dir/budget-cli-many.md")") / 2 ))
   MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
     bash "$S" --rules "$dir" --label budget-cli --token-budget "$tiny_budget" >/dev/null 2>&1
-  local body; body="$(cat "$TMP/personas-budget-cli/security-auditor.md")"
+  local body; body="$(cat "$TMP/personas-budget-cli/common/security-auditor.md")"
   has "出處數最高的規則入選（--token-budget 生效）" "$body" "[budget-cli-many]"
   lacks "出處數較低的規則被排除（超過轉傳的小預算）" "$body" "[budget-cli-few]"
 }
@@ -336,7 +394,10 @@ test_script_never_discards_stderr_with_dev_null() {
 }
 
 test_injects_before_running_backtest
-test_points_persona_dir_at_injected_copy
+test_points_persona_root_at_injected_copy
+test_injects_one_persona_dir_per_layer
+test_layer_rules_reach_the_matching_layer_only
+test_condition_record_captures_per_layer_rule_counts
 test_passes_persona_turns_20
 test_passes_review_mode_personas
 test_defaults_backtest_cmd_to_adapter_when_unset

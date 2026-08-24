@@ -206,7 +206,11 @@ ${summary}"
   # --- Get valid diff lines from GitHub ---
   local diff_lines_file
   diff_lines_file=$(mktemp)
-  gh api "repos/$repo_slug/pulls/$pr_number/files" --jq '
+  # 分頁與 per_page 都要給。原本兩個都沒有，等於只拿前 30 個檔案的 hunk：
+  # 超過那個範圍的 comment 會因為「不在合法行號表裡」被靜默過濾掉，PR 上就
+  # 少了那些意見，而 review 本身回報成功。--paginate 搭配 --jq 時 gh 會對每一
+  # 頁各套一次 filter 再串接，輸出仍是這裡要的逐行 JSON 物件。
+  gh api --paginate "repos/$repo_slug/pulls/$pr_number/files?per_page=100" --jq '
     .[] | .filename as $f | .patch // "" |
     split("\n") | to_entries[] |
     select(.value | test("^@@")) |

@@ -116,6 +116,14 @@ _filter_lock() {
   retry_secs="$(_corpus_lock_retry_secs)"
   start_ts=$(date +%s)
   while ! mkdir "$lock" 2>/dev/null; do
+    # 逾時檢查放在迴圈開頭，不是尾端：放尾端的話，下面「清掉陳舊的鎖」那條
+    # 分支的 continue 會把它整個跳過，鎖一直被判定為陳舊時這個迴圈就永遠不會
+    # 放棄。build-corpus.sh 的 _retention_lock 是同一個形狀，一起修的。
+    elapsed=$(( $(date +%s) - start_ts ))
+    if [[ "$elapsed" -ge 300 ]]; then
+      printf 'FILTER_SCHED_LOCK_TIMEOUT\t%s\n' "$lock" >&2
+      return 1
+    fi
     mtime="$(_filter_lock_mtime "$lock")"
     if [[ -n "${mtime:-}" ]]; then
       age=$(( $(date +%s) - mtime ))
@@ -130,18 +138,24 @@ _filter_lock() {
         continue
       fi
     fi
-    sleep "$retry_secs"
     # 逾時判準用實際經過的秒數，不是重試次數：重試間隔可覆寫之後，「重試
     # 300 次」在間隔 1 秒時是 300 秒，但間隔 0.05 秒時只剩 15 秒——同一個
-    # 「等太久就放棄」的門檻不該因為重試間隔變快就跟著縮水。
-    elapsed=$(( $(date +%s) - start_ts ))
-    if [[ "$elapsed" -ge 300 ]]; then
-      printf 'FILTER_SCHED_LOCK_TIMEOUT\t%s\n' "$lock" >&2
-      return 1
-    fi
+    # 「等太久就放棄」的門檻不該因為重試間隔變快就跟著縮水。檢查本身在迴圈
+    # 開頭，見那邊的說明。
+    sleep "$retry_secs"
   done
+  _FILTER_LOCK_HELD=1
 }
-_filter_unlock() { rm -rf "$(_filter_lock_path)"; }
+# 只釋放自己持有的鎖。無條件 rm -rf 的話，取鎖逾時放棄的那個行程（_filter_lock
+# 回 1，呼叫端接著走失敗路徑）如果在收尾時呼叫到這裡，會把另一個行程正在持有
+# 的鎖刪掉，兩邊同時進臨界區改同一個權重檔。build-corpus.sh 的
+# _retention_unlock 早就是這個形狀，這裡漏了。
+_FILTER_LOCK_HELD=0
+_filter_unlock() {
+  [[ "$_FILTER_LOCK_HELD" == 1 ]] || return 0
+  rm -rf "$(_filter_lock_path)"
+  _FILTER_LOCK_HELD=0
+}
 
 _filter_inflight_read() {
   local f v
@@ -282,6 +296,42 @@ _harvest_repo() {
   return "$rc"
 }
 
+# 同一個快取目錄一次只能跑一個 harvest。
+#
+# 下面的主流程會把共用的「在跑權重總量」重置為 0。另一個 harvest 正在跑時，
+# 這個重置會把它已經記入的權重整個抹掉，兩邊都以為預算是空的，於是同時放行
+# 最大的那幾個 repo——而這個預算存在的唯一目的，就是不要讓好幾個 repo 的篩選
+# 峰值同時壓在同一台機器上。
+#
+# 判斷「另一個是不是還活著」用 pid 檔加 kill -0，不只看鎖目錄在不在：被 kill
+# 掉的上一輪會留下鎖，只看目錄存在的話，之後每一次執行都會被自己的殘骸擋住，
+# 而且看不出原因。
+_HARVEST_LOCK_DIR=""
+_harvest_instance_lock() {
+  local dir="$1/.harvest.lock" pid=""
+  if mkdir "$dir" 2>/dev/null; then
+    printf '%s' "$$" > "$dir/pid" || { rm -rf "$dir"; return 1; }
+    _HARVEST_LOCK_DIR="$dir"
+    return 0
+  fi
+  [[ -r "$dir/pid" ]] && pid="$(cat "$dir/pid")"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    printf 'HARVEST_ALREADY_RUNNING\t%s\tpid=%s\t同一個快取目錄一次只能跑一個 harvest\n' \
+      "$dir" "$pid" >&2
+    return 1
+  fi
+  printf 'HARVEST_STALE_LOCK\t%s\t前一次執行沒有正常結束，接手\n' "$dir" >&2
+  rm -rf "$dir"
+  mkdir "$dir" 2>/dev/null || { printf 'HARVEST_LOCK_FAILED\t%s\n' "$dir" >&2; return 1; }
+  printf '%s' "$$" > "$dir/pid" || { rm -rf "$dir"; return 1; }
+  _HARVEST_LOCK_DIR="$dir"
+}
+_harvest_instance_unlock() {
+  [[ -n "$_HARVEST_LOCK_DIR" ]] || return 0
+  rm -rf "$_HARVEST_LOCK_DIR"
+  _HARVEST_LOCK_DIR=""
+}
+
 _corpus_harvest_main() {
   local fetch_jobs budget_mb admit_timeout
   fetch_jobs="$(_corpus_fetch_jobs)"
@@ -301,6 +351,12 @@ _corpus_harvest_main() {
 
   corpus_targets | cut -f1 > "$repos_file"
   : > "$log"
+
+  # 取實例鎖一定要在重置權重總量之前：重置本身就是會傷到另一個 harvest 的
+  # 那個動作。Ctrl-C 與任何提早離開的路徑都要放鎖，不然下一次執行會被殘骸
+  # 擋住（雖然 pid 檢查會接手，但那會多印一行沒必要的 STALE 警告）。
+  _harvest_instance_lock "$cache_dir" || exit 1
+  trap '_harvest_instance_unlock' EXIT
 
   _fetch_sem_init "$fetch_jobs" || { echo "FETCH_SEM_INIT_FAILED" >&2; exit 1; }
   _filter_inflight_write 0 || { echo "FILTER_STATE_INIT_FAILED" >&2; exit 1; }

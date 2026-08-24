@@ -224,6 +224,14 @@ def main():
         if after_n != before_n:
             print(f"SAMPLED\t{args.input}\t{before_n} 則 → 等距抽樣 → {after_n} 則",
                   file=sys.stderr)
+        elif before_n > args.sample_cap:
+            # 超過上限、但等距間隔算出來是 1（cap 與 2*cap 之間的區段，見
+            # sample_evenly 的說明），所以一則都沒減。這種情況不能跟「本來就
+            # 沒超過上限」印同一句話：上限存在的目的是擋住 O(n^3) 的平均連結
+            # 分群，而這裡實際餵進去的筆數比上限多，操作者要知道。
+            print(f"SAMPLED\t{args.input}\t{before_n} 則超過上限 {args.sample_cap}，"
+                  f"但等距間隔算出來是 1，實際未減量",
+                  file=sys.stderr)
         else:
             print(f"SAMPLED\t{args.input}\t{before_n} 則，未超過上限 {args.sample_cap}，未抽樣",
                   file=sys.stderr)

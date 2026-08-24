@@ -84,13 +84,22 @@ for p in 1 2 3; do
   printf '%s' "$(cat "$FIXTURE")" > "$cached_dir/$(printf '%04d' "$p").json"
 done
 printf '3\n' > "$cached_dir/.complete"
+# 方向標記：手工造的快取沒跑過 fetch，少了它每一頁都會被判定成未快取
+# （見 lib/corpus-fetch.sh 的 CORPUS_FETCH_DIRECTION）。
+printf 'asc\n' > "$cached_dir/.sort-direction"
 export GH_FAKE_LAST=3
 rate_calls_before=$(grep -c 'rate_limit' "$GH_CALL_LOG")
 _harvest_repo "$cached_repo" 1000 >/dev/null 2>&1
 rc=$?
 rate_calls_after=$(grep -c 'rate_limit' "$GH_CALL_LOG")
 eq "完整快取 repo 的 _harvest_repo 退出 0" "0" "$rc"
-eq "完整快取 repo 全程零次 rate_limit 呼叫" "0" "$((rate_calls_after - rate_calls_before))"
+# 只有最後一頁會重抓，所以額度查詢正好一次。
+#
+# 這條斷言原本要求零次，防的是「為每個已快取的頁各白付一次 rate_limit 網路
+# 來回」（598 頁只缺 6 頁時就是 592 次白付）。改成 asc 排序之後，最後一頁是
+# 還在長的那一頁：跳過它的話，兩次抓取之間新增、但還沒把那頁填滿的留言會永遠
+# 抓不到。一次額度查詢換這個正確性是划算的，跟原本要防的量級也不同。
+eq "完整快取 repo 只為最後一頁付一次 rate_limit" "1" "$((rate_calls_after - rate_calls_before))"
 if [[ -s "$cached_dir/filtered.json" ]]; then
   ok "完整快取 repo 仍然跑完篩選，產出 filtered.json"
 else

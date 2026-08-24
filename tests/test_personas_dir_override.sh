@@ -30,14 +30,37 @@ test_env_override_takes_effect() {
   eq "env 覆蓋生效" "$TMP/custom" "$d"
 }
 
-# 指到不存在的目錄時要退回預設，不是讓 load_persona 噴 not found ——
-# 打錯路徑會讓整輪回測跑在沒有規則的 persona 上，而且看起來像正常執行。
-test_nonexistent_override_falls_back_with_warning() {
-  local out d
+# 指到不存在的目錄時要硬失敗，不是退回內建的 agents/personas：退回去的話，
+# 一輪帶規則的回測會用沒有注入規則的 persona 跑完，summary 一切正常，然後被
+# 拿去跟基準線比較——比的其實是同一組 persona。警告攔不住這件事，回測把每個
+# PR 的 stderr 導進各自的 .err 檔，沒有東西在解析它。
+test_nonexistent_override_fails_hard() {
+  local out d rc
   d="$(MRA_PERSONAS_DIR="$TMP/does-not-exist" _personas_dir 2>"$TMP/warn")"
+  rc=$?
   out="$(cat "$TMP/warn")"
-  has "退回預設路徑" "$d" "agents/personas"
-  has "印出警告" "$out" "PERSONAS_DIR_INVALID"
+  [ "$rc" -ne 0 ] && ok "指不到目錄時退出碼非 0" || fail "必須硬失敗，不能退回預設"
+  eq "不印出任何路徑（不讓呼叫端誤用）" "" "$d"
+  has "印出 PERSONAS_DIR_INVALID" "$out" "PERSONAS_DIR_INVALID"
+}
+
+# load_persona 要把這個失敗傳出去，不能自己吞掉再去讀內建的那一份。
+test_load_persona_propagates_invalid_dir() {
+  local rc
+  MRA_PERSONAS_DIR="$TMP/does-not-exist" load_persona security-auditor \
+    >/dev/null 2>"$TMP/warn-load"
+  rc=$?
+  [ "$rc" -ne 0 ] && ok "load_persona 在覆蓋無效時退出碼非 0" || fail "load_persona 必須傳出失敗"
+  has "印出 PERSONAS_DIR_INVALID" "$(cat "$TMP/warn-load")" "PERSONAS_DIR_INVALID"
+}
+
+# list_personas 同理。它回 0 加空清單的話，呼叫端會以為「這個目錄裡沒有
+# persona」，跟「路徑根本不對」分不出來。
+test_list_personas_propagates_invalid_dir() {
+  local rc
+  MRA_PERSONAS_DIR="$TMP/does-not-exist" list_personas >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -ne 0 ] && ok "list_personas 在覆蓋無效時退出碼非 0" || fail "list_personas 必須傳出失敗"
 }
 
 test_load_persona_reads_from_override() {
@@ -47,15 +70,17 @@ test_load_persona_reads_from_override() {
   has "讀到覆蓋目錄的內容" "$body" "ROLE: Custom"
 }
 
-# 畸形輸入：override 是檔案而不是目錄，一樣要退回預設並警告，不是把
+# 畸形輸入：override 是檔案而不是目錄，跟指不到一樣要硬失敗，不是把
 # load_persona 拖去對著一個檔案做 dirname 之類的意外行為。
-test_override_pointing_at_a_file_falls_back() {
+test_override_pointing_at_a_file_fails_hard() {
   printf 'not a directory\n' > "$TMP/not-a-dir"
-  local out d
+  local out d rc
   d="$(MRA_PERSONAS_DIR="$TMP/not-a-dir" _personas_dir 2>"$TMP/warn2")"
+  rc=$?
   out="$(cat "$TMP/warn2")"
-  has "退回預設路徑" "$d" "agents/personas"
-  has "印出警告" "$out" "PERSONAS_DIR_INVALID"
+  [ "$rc" -ne 0 ] && ok "指向檔案時退出碼非 0" || fail "必須硬失敗，不能退回預設"
+  eq "不印出任何路徑" "" "$d"
+  has "印出 PERSONAS_DIR_INVALID" "$out" "PERSONAS_DIR_INVALID"
 }
 
 # 畸形輸入：override 顯式設成空字串，跟「沒設」等價，不該印警告（不是打錯
@@ -90,9 +115,11 @@ test_lib_never_discards_stderr_with_dev_null() {
 
 test_default_unchanged
 test_env_override_takes_effect
-test_nonexistent_override_falls_back_with_warning
+test_nonexistent_override_fails_hard
+test_load_persona_propagates_invalid_dir
+test_list_personas_propagates_invalid_dir
 test_load_persona_reads_from_override
-test_override_pointing_at_a_file_falls_back
+test_override_pointing_at_a_file_fails_hard
 test_empty_override_is_treated_as_unset
 test_load_persona_missing_file_in_override_still_fails_loudly
 test_lib_never_discards_stderr_with_dev_null

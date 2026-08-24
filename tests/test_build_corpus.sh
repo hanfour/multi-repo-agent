@@ -158,6 +158,11 @@ rm -f "$rate_count_file"
 # corpus_filter_all 已經會在壞輸入時退出 1，這裡驗 CLI 有沒有接住。
 bad_dir="$TMP/cache/TanStack__query"
 mkdir -p "$bad_dir"
+# 方向標記也要補，理由同 .complete：這個 fixture 是手工造的、從沒真的跑過
+# fetch，而 corpus_check_complete 現在會擋下「用另一種排序方向抓的快取」
+# （頁號在 desc 底下不是穩定的鍵，見 lib/corpus-fetch.sh 的
+# CORPUS_FETCH_DIRECTION）。少了它，下面每一條斷言都會先撞上 CACHE_STALE_SORT。
+printf 'asc\n' > "$bad_dir/.sort-direction"
 # .complete 要先補上：這個 fixture 是手工造的、從沒真的跑過 fetch，Fix 1(c) 的
 # 完整性檢查會在合併之前擋下沒有 .complete 的快取，這裡要測的是「合併階段本身」
 # 壞掉（FILTER_INPUT_INVALID），不是完整性檢查那一層，兩層各自有各自的測試。

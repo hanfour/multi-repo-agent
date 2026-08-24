@@ -38,6 +38,44 @@ setup_fake_layer() {
 setup_fake_layer
 
 # =============================================================================
+# 抽樣回報：cap 與 2*cap 之間，等距間隔算出來是 1，一則都沒減
+#
+# k = total // cap 是整數除法，所以 cap < total < 2*cap 的整個區段 k 都是 1，
+# rows[::1] 就是原本那份。這是 sample_evenly 檔頭寫明的取捨（不強行湊出恰好
+# cap 筆的整數解），不是 bug；但訊息把它印成「未超過上限，未抽樣」就是說反
+# 話——上限存在的目的是擋住 O(n^3) 的平均連結分群，而這裡實際餵進去的筆數
+# 比上限多（最壞情況接近兩倍，也就是八倍的計算量），操作者要看得出來。
+# =============================================================================
+
+test_sampling_reports_cap_exceeded_when_stride_is_one() {
+  local out
+  out="$(python3 "$MRA_DIR/scripts/cluster-tfidf.py" --input "$IN/nestjs.jsonl" \
+    --output "$OUT/stride-one.jsonl" --min-clusters 3 --max-clusters 5 \
+    --sample-cap 10 2>&1)"
+  has "點明超過上限" "$out" "18 則超過上限 10"
+  lacks "不能說成沒超過上限" "$out" "未超過上限"
+}
+
+# 真的沒超過上限時，訊息維持原樣——上面那條斷言才不會只是「換了一句話」。
+test_sampling_reports_under_cap_unchanged() {
+  local out
+  out="$(python3 "$MRA_DIR/scripts/cluster-tfidf.py" --input "$IN/nestjs.jsonl" \
+    --output "$OUT/under-cap.jsonl" --min-clusters 3 --max-clusters 5 \
+    --sample-cap 100 2>&1)"
+  has "沒超過上限時照舊回報" "$out" "未超過上限 100"
+}
+
+# 真的有減量時走第三種訊息，三條路徑各自分得開。
+test_sampling_reports_actual_reduction() {
+  local out
+  out="$(python3 "$MRA_DIR/scripts/cluster-tfidf.py" --input "$IN/nestjs.jsonl" \
+    --output "$OUT/reduced.jsonl" --min-clusters 3 --max-clusters 5 \
+    --sample-cap 6 2>&1)"
+  has "有減量時印出等距抽樣" "$out" "等距抽樣"
+  lacks "有減量時不能說未減量" "$out" "實際未減量"
+}
+
+# =============================================================================
 # 案例 1-7：brief 指定的正常路徑與已點名的邊界
 # =============================================================================
 
@@ -452,6 +490,9 @@ test_stale_output_deleted_on_failure() {
     || ok "失敗時清掉了舊輸出檔"
 }
 
+test_sampling_reports_cap_exceeded_when_stride_is_one
+test_sampling_reports_under_cap_unchanged
+test_sampling_reports_actual_reduction
 test_separates_distinct_topics
 test_members_stay_within_topic
 test_deterministic

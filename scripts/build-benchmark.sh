@@ -10,16 +10,28 @@ source "$MRA_DIR/lib/backtest-hunks.sh"
 source "$MRA_DIR/lib/backtest-groundtruth.sh"
 
 REPO=""; LIMIT=100; DAYS=14; UNTIL=""
+# 每個帶值的旗標都要先確認後面真的還有一個參數。少了這道，`--repo` 打在最後
+# 一個位置時 set -u 會讓腳本死在「$2: 未綁定的變數」，訊息指向行號而不是使用者
+# 打錯的那個旗標。這個專案的其他腳本（run-backtest.sh、review-benchmark.sh、
+# rule-repair.sh、兩支 extract-rules）都已經補過同一道，只有這裡漏了。
+_require_opt_value() {
+  echo "用法：$1 需要接一個值" >&2
+  exit 1
+}
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo)  REPO="$2"; shift 2 ;;
-    --limit) LIMIT="$2"; shift 2 ;;
-    --days)  DAYS="$2"; shift 2 ;;
+    --repo)  [[ $# -ge 2 ]] || _require_opt_value "--repo"
+             REPO="$2"; shift 2 ;;
+    --limit) [[ $# -ge 2 ]] || _require_opt_value "--limit"
+             LIMIT="$2"; shift 2 ;;
+    --days)  [[ $# -ge 2 ]] || _require_opt_value "--days"
+             DAYS="$2"; shift 2 ;;
     # 可選，見 lib/backtest-groundtruth.sh 的 backtest_merged_prs 對這個
     # 參數的說明（Ruling 27）：凍住「當時看到的世界線」，讓同一個
     # --limit／--until 組合在任何時間點重跑都抓到同一批 PR。沒給的話
     # （預設）行為與現在完全一致。
-    --until) UNTIL="$2"; shift 2 ;;
+    --until) [[ $# -ge 2 ]] || _require_opt_value "--until"
+             UNTIL="$2"; shift 2 ;;
     -h|--help)
       echo "用法: build-benchmark.sh --repo <owner/name> [--limit N] [--days N] [--until <ISO8601>]"
       exit 0 ;;
@@ -27,6 +39,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -z "$REPO" ]] && { echo "缺 --repo" >&2; exit 1; }
+# --limit 會變成 GitHub 的 per_page，上限是 100。超過的話 API 靜默回 100 筆，
+# 分母比要求的少而且沒有任何訊號（見 lib/backtest-groundtruth.sh 的
+# backtest_merged_prs）。那邊也有同一道守衛，這裡先擋是為了讓訊息指向使用者
+# 打錯的旗標本身。
+case "$LIMIT" in
+  ''|*[!0-9]*|0) echo "LIMIT_INVALID：--limit 的值「${LIMIT}」不是正整數" >&2; exit 1 ;;
+esac
+if [[ "$LIMIT" -gt 100 ]]; then
+  echo "LIMIT_TOO_LARGE：--limit 的上限是 100（GitHub per_page 的上限），給了 ${LIMIT}" >&2
+  exit 1
+fi
+# --days 一路傳到 backtest_window_end 的 python3 datetime.timedelta(days=int(...))，
+# 非數字會讓它以一段 Python traceback 收場，而不是一句講得清楚的用法錯誤。
+case "$DAYS" in
+  ''|*[!0-9]*) echo "DAYS_INVALID：--days 的值「${DAYS}」不是非負整數" >&2; exit 1 ;;
+esac
 
 BENCH_DIR="${MRA_BENCHMARK_DIR:-$HOME/.cache/mra-review-benchmark}"
 if ! mkdir -p "$BENCH_DIR"; then
@@ -92,7 +120,13 @@ for ((i = 0; i < n_pr; i++)); do
     n_failed_pr=$((n_failed_pr + 1))
     continue
   fi
-  [[ "$(printf '%s' "$fixes" | jq 'length' 2>/dev/null)" -eq 0 ]] 2>/dev/null && continue
+  # 同上：長度算不出來時不能當成「沒有 fix commit」，而且 jq 自己的診斷不能
+  # 丟進 /dev/null —— 這個專案已經為丟掉診斷這個模式付過四次代價。
+  if ! n_fix_found="$(printf '%s' "$fixes" | jq 'length')"; then
+    n_failed_pr=$((n_failed_pr + 1))
+    continue
+  fi
+  [[ "$n_fix_found" -eq 0 ]] && continue
 
   if ! pr_ranges="$(backtest_pr_ranges "$REPO" "$pr")"; then
     n_failed_pr=$((n_failed_pr + 1))
@@ -118,9 +152,20 @@ for ((i = 0; i < n_pr; i++)); do
       n_failed_commit=$((n_failed_commit + 1))
       continue
     fi
-    ov="$(backtest_overlap "$pr_ranges" "$fix_ranges")"
+    # backtest_overlap 的退出碼跟它上面三個 lookup 一樣要接住。丟掉的話，
+    # jq 失敗時 $ov 是空字串，`jq 'length'` 什麼都不印，而 bash 的算術比較
+    # 把空字串當 0 —— 一筆真正的候選會被當成「沒有重疊」悄悄消失，沒有任何
+    # 計數器增加，結束碼還是 0。
+    if ! ov="$(backtest_overlap "$pr_ranges" "$fix_ranges")"; then
+      n_failed_commit=$((n_failed_commit + 1))
+      continue
+    fi
+    if ! ov_len="$(printf '%s' "$ov" | jq 'length')"; then
+      n_failed_commit=$((n_failed_commit + 1))
+      continue
+    fi
     # 沒有重疊的 fix commit 不能算候選，寧可漏收也不能無中生有一筆假重疊。
-    [[ "$(printf '%s' "$ov" | jq 'length')" -eq 0 ]] && continue
+    [[ "$ov_len" -eq 0 ]] && continue
     hits="$(printf '%s' "$hits" | jq --arg s "$sha" --arg m "$msg" --argjson o "$ov" \
       '. + [{sha: $s, message: $m, overlaps: $o}]')"
   done

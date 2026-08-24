@@ -555,6 +555,137 @@ test_inject_all_omitted_budget_does_not_warn() {
 }
 
 # =============================================================================
+# 預算配額：層規則保底半數，兩邊用不完的額度互相退還
+#
+# 這組測試針對分層注入真正的失敗形狀。把層規則與 common 規則混在一起照出處
+# 數排的話，common 規則的出處數普遍較高（它們在多個 repo 都被講過），層規則
+# 會被整批擠掉——實測 tfidf 路線的 react／vue／nestjs 三層在 5000 預算下層
+# 規則 0 條進得去。那時「分層注入」是個假動作：layer 參數換成 rails 了，
+# prompt 裡卻還是只有 common，而且外觀上完全看不出來。
+# =============================================================================
+
+test_layer_rules_survive_even_when_common_ranks_higher() {
+  local dir="$OUT/quota"
+  write_rank_rule "$dir" common-top-1 common 50
+  write_rank_rule "$dir" common-top-2 common 40
+  write_rank_rule "$dir" nestjs-low nestjs 1
+  # 預算只夠兩條。混排的話出處數 50 與 40 的兩條 common 會把出處數 1 的層
+  # 規則擠掉；有保底配額時層規則一定拿得到位置。
+  local one two
+  one=$(( $(_rule_char_count "$(_rule_entry_text "$dir/common-top-1.md")") / 2 ))
+  two=$((one * 2))
+  local block; block="$(rule_render_block "$dir" nestjs "$two")"
+  has "出處數最低的層規則仍然入選（層規則保底半數預算）" "$block" "[nestjs-low]"
+  has "common 拿走剩下的額度" "$block" "[common-top-1]"
+  lacks "第二條 common 被擋在預算外（總量沒有因為配額而膨脹）" "$block" "[common-top-2]"
+}
+
+test_unused_layer_quota_goes_back_to_common() {
+  local dir="$OUT/quota-refund-common"
+  write_rank_rule "$dir" common-a common 50
+  write_rank_rule "$dir" common-b common 40
+  write_rank_rule "$dir" common-c common 30
+  # 這一層沒有自己的規則：整個預算都該給 common，不是只給一半。少了這道，
+  # 一個只有 common 規則的規則集會平白損失一半預算。
+  local one; one=$(( $(_rule_char_count "$(_rule_entry_text "$dir/common-a.md")") / 2 ))
+  local block; block="$(rule_render_block "$dir" nestjs $((one * 3)))"
+  has "第三條 common 也入選（層規則沒用到的額度退還）" "$block" "[common-c]"
+}
+
+test_unused_common_quota_goes_back_to_layer_rules() {
+  local dir="$OUT/quota-refund-layer"
+  write_rank_rule "$dir" nestjs-a nestjs 50
+  write_rank_rule "$dir" nestjs-b nestjs 40
+  write_rank_rule "$dir" nestjs-c nestjs 30
+  # 沒有 common 規則：三條層規則該全部進得去。只做「層規則拿一半」而沒有
+  # 第三輪補收的話，這裡只會進得去一條。
+  local one; one=$(( $(_rule_char_count "$(_rule_entry_text "$dir/nestjs-a.md")") / 2 ))
+  local block; block="$(rule_render_block "$dir" nestjs $((one * 3)))"
+  has "第二條層規則入選" "$block" "[nestjs-b]"
+  has "第三條層規則也入選（common 沒用到的額度退還）" "$block" "[nestjs-c]"
+}
+
+# layer 傳 common 時沒有「層規則」這個分組（common 規則歸在 common 那一份，
+# 不會同時算成層規則），整段要退化成「用全部預算收 common」——階段二的基準線
+# 就是這樣跑出來的，行為變了就不能拿來比。
+test_common_layer_still_gets_the_whole_budget() {
+  local dir="$OUT/quota-common-layer"
+  write_rank_rule "$dir" common-x common 50
+  write_rank_rule "$dir" common-y common 40
+  write_rank_rule "$dir" common-z common 30
+  local one; one=$(( $(_rule_char_count "$(_rule_entry_text "$dir/common-x.md")") / 2 ))
+  local block; block="$(rule_render_block "$dir" common $((one * 3)))"
+  has "第三條也入選（layer=common 時預算沒有被對半切）" "$block" "[common-z]"
+}
+
+# =============================================================================
+# rule_inject_layers：每層各一份 persona 副本
+# =============================================================================
+
+test_inject_layers_creates_one_dir_per_layer() {
+  local out="$OUT/layers-out" report
+  report="$(rule_inject_layers "$FIX/rules" "$out" "nestjs react vue" "" "" \
+    2>"$OUT/layers.warn")"
+  eq "每層各一行報告" "3" "$(printf '%s\n' "$report" | grep -c . || true)"
+  if [ -f "$out/nestjs/security-auditor.md" ] && [ -f "$out/react/security-auditor.md" ] \
+     && [ -f "$out/vue/security-auditor.md" ]; then
+    ok "三層各有一份完整的 persona 副本"
+  else
+    fail "缺少某一層的 persona 副本：$out"
+  fi
+  local nest; nest="$(cat "$out/nestjs/security-auditor.md")"
+  has "nestjs 層含 nestjs 規則" "$nest" "nestjs-injectable-scope"
+  lacks "nestjs 層不含 react 規則" "$nest" "react-effect-cleanup"
+  has "nestjs 層仍含 common 規則" "$nest" "common-debug-artifact"
+}
+
+test_inject_layers_report_has_four_columns() {
+  local out="$OUT/layers-cols" report
+  report="$(rule_inject_layers "$FIX/rules" "$out" "vue" "" "" 2>"$OUT/layers-cols.warn")"
+  eq "第一欄是層名" "vue" "$(printf '%s' "$report" | cut -f1)"
+  eq "第二欄是 persona 總數" "5" "$(printf '%s' "$report" | cut -f2)"
+  eq "第三欄是沒有 FOCUS 而跳過的數量" "1" "$(printf '%s' "$report" | cut -f3)"
+  # 這份 fixture 只有 common、nestjs、react 各一條，vue 層看得到的只有
+  # common 那一條。這一欄要回答的正是「這一層實際有幾條規則進了 prompt」，
+  # 規則檔總數回答不了。
+  eq "第四欄是實際注入的規則條數" "1" "$(printf '%s' "$report" | cut -f4)"
+}
+
+# 層名會直接組成輸出路徑。清單來源是 corpus_layers()、不是模型輸出，但一個
+# 帶 ../ 的層名會讓注入結果寫到 out_root 之外，而外觀上跟正常執行沒有差別。
+test_inject_layers_rejects_unsafe_layer_name() {
+  local rc
+  rule_inject_layers "$FIX/rules" "$OUT/layers-unsafe" "../escape" "" "" \
+    2>"$OUT/layers-unsafe.warn"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then ok "不安全的層名讓注入失敗"; else fail "不安全的層名必須擋下來"; fi
+  has "印出 RULE_INJECT_LAYER_UNSAFE" "$(cat "$OUT/layers-unsafe.warn")" \
+    "RULE_INJECT_LAYER_UNSAFE"
+}
+
+# 空的層清單多半是呼叫端把 corpus_layers() 的輸出接壞了。悄悄回傳 0 的話，
+# 呼叫端會拿到一個空的注入根目錄，而每個 PR 都會落回沒有規則的 persona。
+test_inject_layers_rejects_empty_layer_list() {
+  local rc
+  rule_inject_layers "$FIX/rules" "$OUT/layers-empty" "" "" "" \
+    2>"$OUT/layers-empty.warn"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then ok "空的層清單讓注入失敗"; else fail "空的層清單必須擋下來"; fi
+  has "印出 RULE_INJECT_NO_LAYERS" "$(cat "$OUT/layers-empty.warn")" "RULE_INJECT_NO_LAYERS"
+}
+
+test_inject_layers_forwards_token_budget() {
+  local dir="$OUT/layers-budget" out="$OUT/layers-budget-out"
+  write_rank_rule "$dir" budget-many nestjs 10
+  write_rank_rule "$dir" budget-few nestjs 3
+  local one; one=$(( $(_rule_char_count "$(_rule_entry_text "$dir/budget-many.md")") / 2 ))
+  rule_inject_layers "$dir" "$out" "nestjs" "" "$one" 2>"$OUT/layers-budget.warn"
+  local body; body="$(cat "$out/nestjs/security-auditor.md")"
+  has "出處數最高的規則入選（預算有轉傳到 rule_render_block）" "$body" "[budget-many]"
+  lacks "出處數較低的規則被排除" "$body" "[budget-few]"
+}
+
+# =============================================================================
 # 靜態檢查：這個專案已經為「2>/dev/null 吞掉診斷」付過四次代價，鎖住
 # lib/rule-inject.sh 裡不會出現這個模式。
 # =============================================================================
@@ -592,6 +723,15 @@ test_inject_all_skips_no_focus_persona_without_aborting_batch
 test_inject_all_fails_loudly_when_persona_src_missing
 test_inject_all_forwards_explicit_token_budget_to_render_block
 test_inject_all_omitted_budget_does_not_warn
+test_layer_rules_survive_even_when_common_ranks_higher
+test_unused_layer_quota_goes_back_to_common
+test_unused_common_quota_goes_back_to_layer_rules
+test_common_layer_still_gets_the_whole_budget
+test_inject_layers_creates_one_dir_per_layer
+test_inject_layers_report_has_four_columns
+test_inject_layers_rejects_unsafe_layer_name
+test_inject_layers_rejects_empty_layer_list
+test_inject_layers_forwards_token_budget
 test_lib_never_discards_stderr_with_dev_null
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"

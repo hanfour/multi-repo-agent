@@ -26,6 +26,11 @@
 # 即使第一條本身就超過預算：預算設太小時如果連一條都不收，產出的是空
 # 區塊，跟「這層真的沒有規則」外觀上無法分辨。
 #
+# 預算在「這一層自己的規則」與「common 層規則」之間分配，不是把兩者混在
+# 一起排：混排下 common 規則的出處數普遍高於層規則，會把層規則整批擠掉，
+# 分層注入因此變成假動作（參數換成 rails 了，prompt 裡卻還是只有 common）。
+# 分配方式見 rule_render_block 自己的說明。
+#
 # token 用「字元數 / 2」粗估，不引入 tokenizer 相依：這是刻意的粗糙估法，
 # 目的是讓兩條路線用同一把尺比較，不是產出對任何一個真實 LLM tokenizer
 # 都準的數字。兩條路線的規則本文都是同一種語言（中文為主）、同一種格式
@@ -67,13 +72,34 @@ _rule_char_count() {
   printf '%s' "${n//[[:space:]]/}"
 }
 
-# rule_render_block <rules_dir> <layer> [token_budget] — 把某層（含
-# common，對每層都適用）的規則渲染成一段可插入 persona 的文字，依出處數
-# 由大到小逐條累加，直到加上下一條會超過 <token_budget>（預設 5000，粗估
-# 見上）就停；至少收一條，即使第一條就超過預算。規則集是空的、目錄不
-# 存在、或這層沒有任何規則時回傳空字串——不是回傳一個沒有內容的 BEGIN/END
-# 區塊，那樣會讓 rule_inject_persona 在 persona 裡插入一段看起來像壞掉的
-# 空注入。
+# rule_render_block <rules_dir> <layer> [token_budget] — 把某層的規則（該層
+# 自己的規則，加上對每層都適用的 common 層）渲染成一段可插入 persona 的
+# 文字，總量受 <token_budget> 限制（預設 5000，粗估見上）。
+#
+# 預算在「層規則」與「common 規則」之間分三輪切，不是把兩者混在一起照出處
+# 數排：混排下 common 層規則的出處數普遍高於層規則，實測 tfidf 路線的
+# react／vue／nestjs 三層在 5000 預算下層規則 0 條進得去、rails 只進 2 條，
+# 分層注入會變成一個假動作——參數換成 rails 了，prompt 裡卻還是只有 common。
+#
+#   第一輪  層規則先拿預算的一半（保底），照出處數收到裝不下為止。
+#   第二輪  common 規則拿「總預算減掉第一輪實際用掉的」，同樣照出處數收。
+#   第三輪  層規則還有沒收完的，用前兩輪剩下的額度繼續收。
+#
+# 保底是雙向的：第三輪的存在讓「層規則沒吃滿的額度退還給 common」與
+# 「common 沒吃滿的額度退還給層規則」兩件事同時成立。少了第三輪，一個只有
+# 層規則、沒有 common 規則的規則集會平白損失一半預算。
+#
+# layer 傳 common 時第一輪的候選是空的（common 層規則歸在 common 那一份，
+# 不會同時算成層規則），整段退化成「用全部預算收 common」，與分層之前的
+# 行為逐字元相同——階段二的基準線因此仍然可比。
+#
+# 三輪都用 break 而不是 continue：跳過裝不下的、改收後面比較短的規則會變成
+# 貪心裝箱，讓入選集合不再是「出處數排名的前綴」，同樣的規則集換一個預算就
+# 可能收到完全不同的組合，兩條萃取路線的比較也就不再只反映規則本身。
+#
+# 規則集是空的、目錄不存在、或這層沒有任何規則時回傳空字串——不是回傳一個
+# 沒有內容的 BEGIN/END 區塊，那樣會讓 rule_inject_persona 在 persona 裡插入
+# 一段看起來像壞掉的空注入。
 rule_render_block() {
   local dir="$1" layer="$2" budget="${3:-$RULE_INJECT_DEFAULT_TOKEN_BUDGET}"
   if [ ! -d "$dir" ]; then
@@ -96,17 +122,23 @@ rule_render_block() {
       ;;
   esac
 
-  # 先湊成「出處數<TAB>id<TAB>檔案路徑」清單再排序：出處數由大到小
-  # （-k1,1nr），同分用 id 字典序（-k2,2）。LC_ALL=C 讓排序結果不受執行
-  # 環境的 locale 影響，兩條萃取路線（TF-IDF／taxonomy）比較時才公平。
-  # 不在這裡截斷——token 預算要逐條累加著看才知道在哪裡停，不像純條數
-  # 上限可以先 head -n 再處理。
-  local ranked f
-  ranked="$(
+  # 掃一次目錄，湊成「分組<TAB>出處數<TAB>id<TAB>token 數<TAB>檔案路徑」，
+  # 分組是 layer（這層自己的規則）或 common。token 數在這裡就算好，讓下面
+  # 三輪累加不用對同一條規則重複量測——第一輪與第三輪會走過同一份清單，
+  # 兩次算出不同的數字會讓「收了幾條」與「用掉多少預算」對不起來。
+  local scanned f
+  scanned="$(
     for f in "$dir"/*.md; do
       [ -e "$f" ] || continue
       local l; l="$(rule_field "$f" layer)"
-      [ "$l" = "$layer" ] || [ "$l" = "common" ] || continue
+      local bucket
+      if [ "$l" = "common" ]; then
+        bucket=common
+      elif [ "$l" = "$layer" ]; then
+        bucket=layer
+      else
+        continue
+      fi
       local id; id="$(rule_field "$f" id)"
       if [ -z "$id" ]; then
         printf 'RULE_RENDER_SKIP_NO_ID\t%s\t沒有 id，略過不注入\n' "$f" >&2
@@ -122,26 +154,88 @@ rule_render_block() {
         printf 'RULE_RENDER_SKIP_UNSAFE_ID\t%s\t%s\tid 含不安全字元，略過不注入\n' "$f" "$id" >&2
         continue
       fi
-      local cnt; cnt="$(rule_source_count "$f")"
-      printf '%s\t%s\t%s\n' "$cnt" "$id" "$f"
-    done | LC_ALL=C sort -t $'\t' -k1,1nr -k2,2
+      local cnt tok
+      cnt="$(rule_source_count "$f")"
+      tok=$(( $(_rule_char_count "$(_rule_entry_text "$f")") / 2 ))
+      printf '%s\t%s\t%s\t%s\t%s\n' "$bucket" "$cnt" "$id" "$tok" "$f"
+    done
   )"
-  [ -n "$ranked" ] || return 0
+  [ -n "$scanned" ] || return 0
 
-  local out="" cnt id file entry entry_tokens tokens_used=0 taken=0
-  while IFS=$'\t' read -r cnt id file; do
+  # 兩份清單各自排序：出處數由大到小（-k2,2nr），同分用 id 字典序
+  # （-k3,3）。LC_ALL=C 讓排序結果不受執行環境的 locale 影響，兩條萃取
+  # 路線（TF-IDF／taxonomy）比較時才公平。用 awk 分流而不是 grep：grep 在
+  # 零筆匹配時退出碼是 1，這裡兩份清單本來就可能是空的（只有 common 規則、
+  # 或只有層規則），那是正常狀態，不該讓呼叫端的 set -e 因此中止。
+  local layer_ranked common_ranked
+  layer_ranked="$(printf '%s\n' "$scanned" \
+    | awk -F'\t' '$1 == "layer"' | LC_ALL=C sort -t $'\t' -k2,2nr -k3,3)"
+  common_ranked="$(printf '%s\n' "$scanned" \
+    | awk -F'\t' '$1 == "common"' | LC_ALL=C sort -t $'\t' -k2,2nr -k3,3)"
+
+  local half=$((budget / 2))
+  local used=0 taken=0 n_layer=0 n_common=0
+  local bucket cnt id tok file idx
+
+  # 第一輪：層規則保底半數。不管 N 是多少都固定「至少收一條」，即使第一條
+  # 本身就超過預算：預算設太小時如果連一條都不收，產出的是空區塊，跟「這層
+  # 真的沒有規則」外觀上無法分辨。
+  while IFS=$'\t' read -r bucket cnt id tok file; do
     [ -n "$file" ] || continue
-    entry="$(_rule_entry_text "$file")"
-    entry_tokens=$(( $(_rule_char_count "$entry") / 2 ))
-    # 只有已經收過至少一條之後，才會因為「加上這條會超預算」而停；第一條
-    # 永遠收，不管它自己有多長——見上面「至少收一條」的說明。
-    if [ "$taken" -gt 0 ] && [ $((tokens_used + entry_tokens)) -gt "$budget" ]; then
+    if [ "$taken" -gt 0 ] && [ $((used + tok)) -gt "$half" ]; then
       break
     fi
-    out="${out}${entry}"
-    tokens_used=$((tokens_used + entry_tokens))
-    taken=$((taken + 1))
-  done < <(printf '%s\n' "$ranked")
+    used=$((used + tok)); taken=$((taken + 1)); n_layer=$((n_layer + 1))
+  done < <(printf '%s\n' "$layer_ranked")
+
+  # 第二輪：common 規則拿總預算扣掉第一輪實際用量之後的額度。「至少收一條」
+  # 在這裡的條件是 taken 仍為 0，也就是這層根本沒有層規則——層規則已經收了
+  # 東西時就不再無條件塞 common 進來，否則預算會被突破兩次。
+  while IFS=$'\t' read -r bucket cnt id tok file; do
+    [ -n "$file" ] || continue
+    if [ "$taken" -gt 0 ] && [ $((used + tok)) -gt "$budget" ]; then
+      break
+    fi
+    used=$((used + tok)); taken=$((taken + 1)); n_common=$((n_common + 1))
+  done < <(printf '%s\n' "$common_ranked")
+
+  # 第三輪：common 沒吃滿的額度退還給層規則。跳過的筆數用序號算，不是比對
+  # id：第一輪收的一定是排序清單的前綴（它用 break 停），所以「第
+  # first_pass_taken 條之後」就是還沒收的那些，不需要另外維護一個已收集合。
+  #
+  # 門檻先存進 first_pass_taken 再用，不直接讀 n_layer：n_layer 在這個迴圈裡
+  # 會被自己更新，拿它當跳過條件雖然目前算出同樣的結果（idx 與 n_layer 同步
+  # 遞增），但那是巧合，不是這段程式碼想表達的意思。
+  local first_pass_taken=$n_layer
+  idx=0
+  while IFS=$'\t' read -r bucket cnt id tok file; do
+    [ -n "$file" ] || continue
+    idx=$((idx + 1))
+    [ "$idx" -gt "$first_pass_taken" ] || continue
+    if [ $((used + tok)) -gt "$budget" ]; then
+      break
+    fi
+    used=$((used + tok)); taken=$((taken + 1)); n_layer=$((n_layer + 1))
+  done < <(printf '%s\n' "$layer_ranked")
+
+  [ "$taken" -gt 0 ] || return 0
+
+  # 層規則印在前面、common 在後面：兩者都是同一個 FOCUS 區塊的補充，順序
+  # 不影響語意，但把針對這個 repo 的那幾條放在前面比較好讀。各自都是排序
+  # 清單的前綴，所以 head -n 取出來的順序就是出處數排名。
+  local out=""
+  if [ "$n_layer" -gt 0 ]; then
+    while IFS=$'\t' read -r bucket cnt id tok file; do
+      [ -n "$file" ] || continue
+      out="${out}$(_rule_entry_text "$file")"
+    done < <(printf '%s\n' "$layer_ranked" | head -n "$n_layer")
+  fi
+  if [ "$n_common" -gt 0 ]; then
+    while IFS=$'\t' read -r bucket cnt id tok file; do
+      [ -n "$file" ] || continue
+      out="${out}$(_rule_entry_text "$file")"
+    done < <(printf '%s\n' "$common_ranked" | head -n "$n_common")
+  fi
 
   [ -n "$(printf '%s' "$out" | tr -d '[:space:]')" ] || return 0
   printf '%s\n%s\n%s\n' "$RULE_BLOCK_BEGIN" \
@@ -233,6 +327,59 @@ rule_inject_persona() {
   fi
 }
 
+# _rule_inject_personas_with_block <block> <persona_src_dir> <out_dir> — 把
+# 一段已經渲染好的規則區塊注入 <persona_src_dir> 底下每個 persona，寫到
+# <out_dir>。stdout 一行「<處理總數><TAB><沒有 FOCUS 而原樣複製的數量>」。
+#
+# 抽成獨立函式是為了讓 rule_inject_all（單層）與 rule_inject_layers（分層，
+# 每層各一份 persona 目錄）共用同一份「列 persona、跳過 README、處理沒有
+# FOCUS 的情況」的邏輯。分層注入如果自己重寫一份，兩份會漂移；如果改成
+# 反覆呼叫 rule_inject_all，同一層的規則會被渲染兩次（一次拿來數條數、
+# 一次拿來注入），而渲染是這支 lib 裡最貴的動作。
+#
+# 遇到「persona 沒有 FOCUS」（rule_inject_persona 回傳 2）不中止整批：這是
+# persona 本身的既有結構（例如 test-architect.md 用「KENT BECK 11
+# PRINCIPLES:」取代 FOCUS，是真實存在於 agents/personas/ 的檔案，不是壞掉
+# 的輸入），原樣複製過去讓它仍然能被 load_persona 讀到，只是少了注入的規
+# 則區塊，並在 stderr 印出警告。其他錯誤（persona 不存在、mv 失敗等）仍然
+# 視為硬錯誤，整批中止——那些是真正需要人介入的問題，不該被吞掉繼續跑，
+# 讓輸出目錄裡缺東西又看不出來哪裡出錯。
+_rule_inject_personas_with_block() {
+  local block="$1" src="$2" out_dir="$3"
+  local p n=0 skipped=0
+  for p in "$src"/*.md; do
+    [ -e "$p" ] || continue
+    [ "$(basename "$p")" = "README.md" ] && continue
+
+    local dest
+    dest="$out_dir/$(basename "$p")"
+    rule_inject_persona "$p" "$block" "$dest"
+    local rc=$?
+    if [ "$rc" -eq 2 ]; then
+      cp "$p" "$dest"
+      local cp_rc=$?
+      if [ "$cp_rc" -ne 0 ]; then
+        printf 'RULE_INJECT_COPY_FAILED\t%s\n' "$dest" >&2
+        return 1
+      fi
+      printf 'RULE_INJECT_SKIPPED\t%s\t沒有 FOCUS 區塊，原樣複製、未注入規則\n' "$p" >&2
+      skipped=$((skipped + 1))
+    elif [ "$rc" -ne 0 ]; then
+      return 1
+    fi
+    n=$((n + 1))
+  done
+  printf '%s\t%s\n' "$n" "$skipped"
+}
+
+# _rule_block_rule_count <block> — 一段渲染好的區塊裡有幾條規則。每條規則
+# 固定由 `- [<id>] 預設嚴重度 ...` 這一行開起，所以數這種行即可。空區塊
+# （這層沒有規則）回傳 0，不是空字串：呼叫端會把它塞進 JSON 的數字欄位。
+_rule_block_rule_count() {
+  [ -n "$1" ] || { printf '0'; return 0; }
+  printf '%s\n' "$1" | grep -c '^- \[' || true
+}
+
 # rule_inject_all <rules_dir> <layer> <out_persona_dir> [persona_src_dir]
 # [token_budget] — 對每個 persona 各做一次注入。<persona_src_dir> 預設是這支
 # lib 所在 repo 的 agents/personas（用 BASH_SOURCE 自己算 repo 根目錄，跟
@@ -250,13 +397,8 @@ rule_inject_persona() {
 # 「列 persona、跳過 README、處理沒有 FOCUS 的情況」的邏輯，那樣兩份邏輯會
 # 漂移。
 #
-# 遇到「persona 沒有 FOCUS」（rule_inject_persona 回傳 2）不中止整批：這是
-# persona 本身的既有結構（例如 test-architect.md 用「KENT BECK 11
-# PRINCIPLES:」取代 FOCUS，是真實存在於 agents/personas/ 的檔案，不是壞掉
-# 的輸入），原樣複製過去讓它仍然能被 load_persona 讀到，只是少了注入的規
-# 則區塊，並在 stderr 印出警告。其他錯誤（persona 不存在、mv 失敗等）仍然
-# 視為硬錯誤，整批中止——那些是真正需要人介入的問題，不該被吞掉繼續跑，
-# 讓輸出目錄裡缺東西又看不出來哪裡出錯。
+# stdout 仍然只印處理的 persona 數量（一個數字）。跳過的數量走 stderr 的
+# RULE_INJECT_SKIPPED，這是既有呼叫端在解析的形狀，不改。
 rule_inject_all() {
   local rules_dir="$1" layer="$2" out_dir="$3"
   local this_dir; this_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -275,27 +417,64 @@ rule_inject_all() {
     block="$(rule_render_block "$rules_dir" "$layer")"
   fi
 
-  local p n=0
-  for p in "$src"/*.md; do
-    [ -e "$p" ] || continue
-    [ "$(basename "$p")" = "README.md" ] && continue
+  local counts
+  counts="$(_rule_inject_personas_with_block "$block" "$src" "$out_dir")" || return 1
+  printf '%s\n' "${counts%%$'\t'*}"
+}
 
-    local dest
-    dest="$out_dir/$(basename "$p")"
-    rule_inject_persona "$p" "$block" "$dest"
-    local rc=$?
-    if [ "$rc" -eq 2 ]; then
-      cp "$p" "$dest"
-      local cp_rc=$?
-      if [ "$cp_rc" -ne 0 ]; then
-        printf 'RULE_INJECT_COPY_FAILED\t%s\n' "$dest" >&2
-        return 1
-      fi
-      printf 'RULE_INJECT_SKIPPED\t%s\t沒有 FOCUS 區塊，原樣複製、未注入規則\n' "$p" >&2
-    elif [ "$rc" -ne 0 ]; then
-      return 1
+# rule_inject_layers <rules_dir> <out_root> <layers> [persona_src_dir]
+# [token_budget] — 對 <layers>（空白分隔的層名清單）裡的每一層各注入一份
+# persona 副本，輸出到 <out_root>/<layer>/。stdout 每層一行：
+#
+#   <layer><TAB><persona 總數><TAB><沒有 FOCUS 而跳過的數量><TAB><注入的規則條數>
+#
+# 為什麼要每層一份而不是一份共用的：persona 目錄是 review 流程唯一的載入
+# 點（lib/personas.sh 的 _personas_dir()），一次只能指向一個目錄。回測涵蓋
+# rails／react／nestjs 三種 repo，要讓 Rails PR 讀到 rails 層的規則、React
+# PR 讀到 react 層的，只能先把每層各展開成一份完整的 persona 目錄，再由呼
+# 叫端逐 PR 決定 MRA_PERSONAS_DIR 指向哪一份。
+#
+# 規則條數逐層回報，不是回報 <rules_dir> 底下的檔案總數：那個數字與實際進
+# prompt 的內容無關（規則分屬五層，每層只看得到自己這層加 common，而且
+# token 預算還會再截斷一次）。記錄一個看起來有意義、實際上不適用的數字，
+# 會讓之後重建這輪條件的人以為整份規則集都被測過了。
+#
+# 任何一層硬失敗就整批中止：分層注入的產出是一組互相對應的目錄，缺一層的
+# 話，那一層的 PR 會靜默落回沒有規則的 persona，而回測的 summary 看起來
+# 完全正常。
+rule_inject_layers() {
+  local rules_dir="$1" out_root="$2" layers="$3"
+  local this_dir; this_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  local src="${4:-$this_dir/agents/personas}"
+  local budget="${5:-}"
+
+  [ -n "$layers" ] || { printf 'RULE_INJECT_NO_LAYERS\t沒有指定任何層\n' >&2; return 1; }
+  [ -d "$src" ] || { printf 'RULE_INJECT_PERSONA_SRC_MISSING\t%s\n' "$src" >&2; return 1; }
+  mkdir -p "$out_root" || return 1
+
+  local layer
+  for layer in $layers; do
+    # 層名會直接組成輸出路徑。它的來源是呼叫端的層清單（corpus_layers()），
+    # 不是模型輸出，但一個帶 ../ 或 / 的層名會讓注入結果寫到 out_root 之外，
+    # 而外觀上跟正常執行沒有差別，所以還是擋在這裡。
+    case "$layer" in
+      *[!a-z0-9_-]*|'')
+        printf 'RULE_INJECT_LAYER_UNSAFE\t%s\t層名只允許小寫英數與 - _\n' "$layer" >&2
+        return 1 ;;
+    esac
+
+    local out_dir="$out_root/$layer"
+    mkdir -p "$out_dir" || return 1
+
+    local block
+    if [ -n "$budget" ]; then
+      block="$(rule_render_block "$rules_dir" "$layer" "$budget")"
+    else
+      block="$(rule_render_block "$rules_dir" "$layer")"
     fi
-    n=$((n + 1))
+
+    local counts
+    counts="$(_rule_inject_personas_with_block "$block" "$src" "$out_dir")" || return 1
+    printf '%s\t%s\t%s\n' "$layer" "$counts" "$(_rule_block_rule_count "$block")"
   done
-  printf '%s\n' "$n"
 }

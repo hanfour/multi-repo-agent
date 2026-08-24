@@ -121,7 +121,15 @@ corpus_materialize_repo() {
     fi
     rm -f "$diag"
 
-    total="$(jq 'length' "$filtered_file")"
+    # 退出碼一定要接住。$total 會被寫進 .done 標記，而那個標記一旦存在，之後
+    # 每次續跑都會短路（直接印出標記內容當筆數）。jq 失敗時 $total 是空字串，
+    # 標記就變成一個空行，這個 repo 的筆數從此永遠是空的，也再也不會重跑——
+    # 而 corpus_materialize_manifest 要拿它跟各 repo 應有筆數對帳。
+    if ! total="$(jq 'length' "$filtered_file")"; then
+      printf 'COUNT_FAILED\t%s\t算不出篩選後的筆數\n' "$repo" >&2
+      rm -f "$tmp" "$filtered_file"
+      return 1
+    fi
 
     # corpus_filter_all 的輸出已經被 lib/corpus-filter.sh 的 corpus_project
     # 投影過一次：.user.login 已經改名成 .reviewer、.author_association 已經
