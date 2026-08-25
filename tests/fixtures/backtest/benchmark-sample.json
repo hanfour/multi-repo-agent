@@ -1,0 +1,189 @@
+[
+  {
+    "repo": "acme/web",
+    "pr": 100,
+    "merged_at": "2026-03-10T07:00:18Z",
+    "fix_commits": [
+      {
+        "sha": "ddda18e99ab6bc37c3f622e9ef1ecfe7fcea0869",
+        "message": "fix(export): 修正匯出流程的欄位對應",
+        "overlaps": [
+          {
+            "path": "src/feature/export.ts",
+            "pr_range": [
+              1,
+              292
+            ],
+            "fix_range": [
+              90,
+              96
+            ]
+          },
+          {
+            "path": "src/feature/export.ts",
+            "pr_range": [
+              1,
+              292
+            ],
+            "fix_range": [
+              112,
+              139
+            ]
+          },
+          {
+            "path": "src/feature/export.ts",
+            "pr_range": [
+              1,
+              292
+            ],
+            "fix_range": [
+              152,
+              169
+            ]
+          },
+          {
+            "path": "src/feature/export.ts",
+            "pr_range": [
+              1,
+              292
+            ],
+            "fix_range": [
+              185,
+              196
+            ]
+          }
+        ]
+      },
+      {
+        "sha": "37e96e9ccc0781ed088f153920d26978db9308e5",
+        "message": "fix(export): 修正匯出流程的欄位對應",
+        "overlaps": [
+          {
+            "path": "src/feature/export.ts",
+            "pr_range": [
+              1,
+              103
+            ],
+            "fix_range": [
+              27,
+              41
+            ]
+          },
+          {
+            "path": "src/feature/export.ts",
+            "pr_range": [
+              1,
+              292
+            ],
+            "fix_range": [
+              1,
+              25
+            ]
+          },
+          {
+            "path": "src/feature/export.ts",
+            "pr_range": [
+              1,
+              292
+            ],
+            "fix_range": [
+              48,
+              84
+            ]
+          }
+        ]
+      },
+      {
+        "sha": "e7a697c1f7e33f53de2f6bd3f202e480335e335e",
+        "message": "fix(export): 修正匯出流程的欄位對應",
+        "overlaps": [
+          {
+            "path": "src/feature/export.ts",
+            "pr_range": [
+              1,
+              292
+            ],
+            "fix_range": [
+              33,
+              66
+            ]
+          }
+        ]
+      }
+    ],
+    "confirmed": true,
+    "expected_findings": [
+      {
+        "path": "src/feature/export.ts",
+        "line": 118,
+        "severity": "HIGH",
+        "note": "示例：這個位置當初該被指出的問題"
+      },
+      {
+        "path": "src/feature/export.ts",
+        "line": 48,
+        "severity": "HIGH",
+        "note": "示例：這個位置當初該被指出的問題"
+      }
+    ]
+  },
+  {
+    "repo": "acme/web",
+    "pr": 101,
+    "merged_at": "2026-03-10T08:29:31Z",
+    "fix_commits": [
+      {
+        "sha": "37e96e9ccc0781ed088f153920d26978db9308e5",
+        "message": "fix(export): 修正匯出流程的欄位對應",
+        "overlaps": [
+          {
+            "path": "src/feature/export.ts",
+            "pr_range": [
+              33,
+              66
+            ],
+            "fix_range": [
+              48,
+              84
+            ]
+          }
+        ]
+      }
+    ],
+    "confirmed": true,
+    "expected_findings": [
+      {
+        "path": "src/feature/export.ts",
+        "line": 51,
+        "severity": "HIGH",
+        "note": "示例：這個位置當初該被指出的問題"
+      }
+    ]
+  },
+  {
+    "repo": "acme/web",
+    "pr": 102,
+    "merged_at": "2026-04-23T06:22:34Z",
+    "fix_commits": [
+      {
+        "sha": "8ce77a58e96f64db984588d96ab12f64816b6de9",
+        "message": "fix(export): 修正匯出流程的欄位對應",
+        "overlaps": [
+          {
+            "path": "src/feature/export.ts",
+            "pr_range": [
+              11,
+              17
+            ],
+            "fix_range": [
+              11,
+              17
+            ]
+          }
+        ]
+      }
+    ],
+    "confirmed": false,
+    "expected_findings": []
+  }
+]

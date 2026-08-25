@@ -302,7 +302,7 @@ PORT_TO_SERVICE = {
 HOST_TO_SERVICE = {
     "erp": "erp", "billing": "billing", "catalog": "catalog",
     "api-gateway": "api-gateway", "api_gateway": "api-gateway",
-    "nest-app-2": "nest-app-2", "finance_system": "nest-app-2",
+    "nest-app-2": "nest-app-2", "nest_app_2": "nest-app-2",
     "web-ui": "web-ui",
 }
 ```

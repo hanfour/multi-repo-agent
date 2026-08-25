@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+# 語料取材 CLI：抓取目標 repo 的 PR review comment 並套用五步篩選。
+#
+# 可重複執行。已抓過的頁面會跳過，所以 rate limit 中斷後直接重跑即可續抓。
+set -uo pipefail
+
+MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$MRA_DIR/lib/corpus-targets.sh"
+source "$MRA_DIR/lib/corpus-fetch.sh"
+source "$MRA_DIR/lib/corpus-filter.sh"
+source "$MRA_DIR/lib/corpus-internal.sh"
+
+ONLY_REPO=""; DO_FETCH=1; DO_FILTER=1; INTERNAL=0
+# 理由同 scripts/build-benchmark.sh：`--repo` 打在最後一個位置時，set -u 會讓
+# 腳本死在「$2: 未綁定的變數」。corpus-harvest.sh 與 corpus-refetch.sh 都會
+# shell out 到這支腳本，操作者的一個打字錯誤會變成一段指向行號的錯誤訊息。
+_require_opt_value() {
+  echo "用法：$1 需要接一個值" >&2
+  exit 1
+}
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo)        [[ $# -ge 2 ]] || _require_opt_value "--repo"
+                   ONLY_REPO="$2"; shift 2 ;;
+    --fetch-only)  DO_FILTER=0; shift ;;
+    --filter-only) DO_FETCH=0; shift ;;
+    --internal)    INTERNAL=1; shift ;;
+    -h|--help)
+      echo "用法: build-corpus.sh [--repo <owner/name>] [--fetch-only] [--filter-only] [--internal]"
+      exit 0 ;;
+    *) echo "未知參數：$1" >&2; exit 1 ;;
+  esac
+done
+
+RETENTION="$(corpus_cache_dir)/retention.tsv"
+mkdir -p "$(corpus_cache_dir)"
+# 用 -s 不用 -f：0 位元組的 retention.tsv 檔案存在但沒有表頭，-f 判斷會誤判
+# 成「已經有表頭」而跳過補寫，這個檔案的第一行就會是資料列。retention.tsv 是
+# Task 5 的驗收依據，第一行格式錯了下游會整份誤讀。
+[[ -s "$RETENTION" ]] || printf 'repo\tn0_raw\tn1_nobot\tn2_senior\tn3_quality\tn4_prose\n' > "$RETENTION"
+
+# 留存報告的讀改寫要互斥。--internal 讓外部與自家兩種模式共用同一份
+# retention.tsv：外部語料 10 個 repo、自家語料 10 個，同時開兩個視窗各跑一種
+# 是很自然的加速做法。去重是「讀全檔 → 濾掉自己那列 → 寫回」，兩個行程交錯
+# 執行會丟掉對方剛寫的列，且不會有任何錯誤訊息。mkdir 在 POSIX 上是原子操作，
+# 成功的那一個行程拿到鎖；macOS 預設沒有 flock 指令，所以不用 flock。
+# `stat -f` 在兩個平台上意思相反：BSD／macOS 是「格式字串」，GNU／Linux 是
+# 「檔案系統狀態」。所以 BSD 形式在 Linux 上不會乾淨地失敗，它會把整段檔案系統
+# 資訊印到 stdout（開頭就是 `File: "..."`）之後才回非 0，`||` 的第二個 stat 再
+# 把真正的秒數接在後面，呼叫端拿到的是一大段文字。
+#
+# 下游是 `age=$(( $(date +%s) - mtime ))`。算術展開會把那段文字裡的 File 當成
+# 變數名，set -u 讓整個行程當場中止——不是回傳錯的值，是這一輪剩下的 repo 全部
+# 沒有機會寫留存列。實測 Linux 上兩個行程並行時，20 列只寫進 16 到 17 列，而且
+# 每一輪的數字都不一樣。macOS 上 BSD 形式正確，所以本機永遠測不出來。
+#
+# GNU 形式放前面在兩個平台都安全：macOS 的 stat 直接拒絕 -c、什麼都不印。
+# 再加一道純數字檢查，任何一種形式吐出非預期的東西都當成查不到而不是當成秒數。
+_retention_lock_mtime() {
+  local out
+  out="$(stat -c %Y "$1" 2>/dev/null)"
+  case "$out" in ""|*[!0-9]*) ;; *) printf '%s' "$out"; return 0 ;; esac
+  out="$(stat -f %m "$1" 2>/dev/null)"
+  case "$out" in ""|*[!0-9]*) ;; *) printf '%s' "$out"; return 0 ;; esac
+  return 1
+}
+
+# 逾時判準用實際經過的秒數，不是重試次數。舊版在「清掉陳舊的鎖」那條分支上
+# 直接 continue，跳過了迴圈尾端的 waited 遞增：只要鎖一直被判定為陳舊（兩個
+# 行程加上慢速檔案系統的 mtime 就夠了），這個計數器永遠不會前進，說好的 300
+# 秒放棄門檻一次都不會觸發，迴圈可以無限轉下去。改成在迴圈開頭用起始時間算
+# 經過秒數，不管走哪條分支都會經過同一道檢查。
+# corpus-harvest.sh 的 _filter_lock 是這把鎖的複製品，同一個修法要一起套。
+_retention_lock() {
+  local lock="$RETENTION.lock" start_ts mtime age elapsed
+  start_ts=$(date +%s)
+  while ! mkdir "$lock" 2>/dev/null; do
+    elapsed=$(( $(date +%s) - start_ts ))
+    if [[ "$elapsed" -ge 300 ]]; then
+      echo "等待留存報告的鎖超過 300 秒，放棄：$lock" >&2
+      return 1
+    fi
+    # 陳舊判斷一定要看「鎖目錄本身的年齡」，不能看「自己等了多久」。
+    # 後者是每個行程各自的計數器而且不會重置，一旦跨過門檻，這個行程就會把它看到的
+    # 任何鎖當成陳舊的砍掉 —— 包括另一個等待者前一毫秒才合法取得的新鎖。實測過：
+    # 三個行程競爭時，W2 取得鎖之後 W1 立刻把它砍掉再自己取得，兩個同時進臨界區，
+    # 而且沒有任何錯誤訊息。
+    mtime="$(_retention_lock_mtime "$lock")"
+    if [[ -n "$mtime" ]]; then
+      age=$(( $(date +%s) - mtime ))
+      if [[ "$age" -ge 60 ]]; then
+        echo "留存報告的鎖已存在 ${age} 秒，視為陳舊並清除：$lock" >&2
+        rm -rf "$lock"
+        # 清完先睡一下再重試。讓贏得 mkdir 競爭的那個行程有時間建立鎖，
+        # 否則同時判定陳舊的另一個行程會立刻把它的新鎖再砍掉。
+        sleep 1
+        continue
+      fi
+    fi
+    sleep 1
+  done
+  _RETENTION_LOCK_HELD=1
+}
+# 只釋放自己持有的鎖。無條件 rm -rf 會製造出跟陳舊判斷一樣的問題：等 300 秒放棄的
+# 行程並沒有取得鎖，但它結束時 trap 一樣會觸發，把別人正在持有的鎖刪掉，兩個行程
+# 又同時進臨界區。Ctrl-C、set -e 中止、任何提早離開的路徑都會走到這個 trap。
+_RETENTION_LOCK_HELD=0
+_retention_unlock() {
+  [[ "$_RETENTION_LOCK_HELD" == 1 ]] || return 0
+  rm -rf "$RETENTION.lock"
+  _RETENTION_LOCK_HELD=0
+}
+# Ctrl-C 或其他中途中斷都要放鎖，不然下一次執行會卡在 60 秒的陳舊逾時上。
+trap '_retention_unlock' EXIT
+
+if [[ -n "$ONLY_REPO" ]]; then
+  if [[ "$INTERNAL" == 1 ]]; then
+    # ENVIRON 而非 awk -v，理由同 lib/corpus-targets.sh 的 corpus_layer_of：
+    # -v 會先處理反斜線跳脫，把 rails\/rails 收合成 rails/rails 而誤配成功，
+    # 含換行的 repo 名稱還會讓 awk crash。
+    layer="$(corpus_internal_targets | CORPUS_REPO="$ONLY_REPO" awk -F'\t' \
+      '$1 == ENVIRON["CORPUS_REPO"] { print $2; f = 1 } END { exit !f }')" || {
+      echo "不在自家目標清單中的 repo：$ONLY_REPO" >&2; exit 1; }
+  elif ! layer="$(corpus_layer_of "$ONLY_REPO")"; then
+    echo "不在目標清單中的 repo：$ONLY_REPO" >&2
+    exit 1
+  fi
+  targets="$(printf '%s\t%s\n' "$ONLY_REPO" "$layer")"
+elif [[ "$INTERNAL" == 1 ]]; then
+  targets="$(corpus_internal_targets)"
+else
+  targets="$(corpus_targets)"
+fi
+
+# 用陣列 + 索引而不是 `while read <<< "$targets"`：exit 3 之前要能點名「還沒被
+# 嘗試過的 repo」，那些就是目前索引之後的所有列，heredoc 版的 while-read 迴圈
+# 一旦離開就再也拿不到剩下的行。
+mapfile -t target_lines <<< "$targets"
+
+rc=0
+target_idx=0
+for target_line in "${target_lines[@]}"; do
+  target_idx=$((target_idx + 1))
+  IFS=$'\t' read -r repo layer <<< "$target_line"
+  [[ -z "$repo" ]] && continue
+
+  if [[ "$DO_FETCH" == 1 ]]; then
+    # 用 `if out=$(...)` 而不是 `if ! out=$(...)`：`!` 會連 $? 一起取反，
+    # then 分支裡拿到的 status 永遠是 0，rate limit 的退出碼 3 就分辨不出來了。
+    if out="$(corpus_fetch_repo "$repo")"; then
+      echo "$out"
+    else
+      status=$?
+      echo "$out" >&2
+      if [[ "$status" == 3 ]]; then
+        # exit 3 之前要把還沒被嘗試過的 repo 點名清楚：不然它們既沒被印出來也
+        # 沒被計進任何統計，操作者無從知道還差哪些 repo。target_idx 是目前這個
+        # repo 的 1-based 序號，target_lines[target_idx..] 就是還沒輪到的那些。
+        not_attempted=()
+        for ((na_i = target_idx; na_i < ${#target_lines[@]}; na_i++)); do
+          IFS=$'\t' read -r na_repo _ <<< "${target_lines[$na_i]}"
+          [[ -n "$na_repo" ]] && not_attempted+=("$na_repo")
+        done
+        if [[ "${#not_attempted[@]}" -gt 0 ]]; then
+          not_attempted_joined="$(IFS=,; printf '%s' "${not_attempted[*]}")"
+          printf 'NOT_ATTEMPTED\t%s\t%s\n' "${#not_attempted[@]}" "$not_attempted_joined" >&2
+        fi
+        # rc 已經是 1 代表前面有 repo 是永久失敗（不是額度問題）。直接 exit 3
+        # 會把這件事蓋掉：這次的失敗形狀（額度用盡）看起來只要等額度重置、
+        # 重跑就會全綠，但那個永久失敗的 repo 不會因為重跑而自己變好。
+        if [[ "$rc" == 1 ]]; then
+          echo "已有 repo 在本次執行中永久失敗（非額度問題），重跑無法修正該 repo，需要先排查上方非 RATE_LIMIT_STOP／RATE_CHECK_FAILED／LAST_PAGE_UNKNOWN 開頭的訊息" >&2
+        fi
+        exit 3
+      fi
+      rc=1
+      continue
+    fi
+  fi
+
+  if [[ "$DO_FILTER" == 1 ]]; then
+    dir="$(corpus_repo_dir "$repo")"
+
+    # 合併前一定要先驗快取完整性：.complete 存在且 1..last 每一頁都要在。
+    # 這裡取代了原本只檢查「有沒有任何頁檔」的判斷——有頁檔不代表頁碼是連續的，
+    # 一次實跑漏了 10 頁但那個 repo 底下仍有其他頁檔，舊的檢查完全看不出來，
+    # DONE 那行照樣印、篩選照樣跑、留存列照樣寫，語料缺頁卻沒有任何痕跡。
+    if ! complete_out="$(corpus_check_complete "$repo")"; then
+      echo "$complete_out" >&2
+      rc=1; continue
+    fi
+
+    pages=("$dir"/[0-9]*.json)
+    # 合併與篩選分開跑。寫成單一 pipeline 的話，jq -s 的失敗會被管線最後一個
+    # 指令的退出碼蓋掉，而 corpus_filter_all 的失敗又會被重導向吃掉。
+    # 給 mktemp 明確 template，理由同 lib/corpus-fetch.sh：macOS 的 bare mktemp
+    # 忽略 TMPDIR，會讓任何「不洩漏暫存檔」的測試變成永遠不會失敗的空斷言。
+    merged="$(mktemp "${TMPDIR:-/tmp}/corpus-merge.XXXXXX")"
+    if ! jq -s 'add' "${pages[@]}" > "$merged" 2>/dev/null; then
+      # 快取頁檔本身壞掉（不是合法 JSON）也算輸入無效，用同一個 FILTER_INPUT_INVALID
+      # token，呼叫端不用分辨「合併失敗」跟「corpus_filter_all 自己驗出壞輸入」。
+      printf 'FILTER_INPUT_INVALID\t%s\tmerge\n' "$repo" >&2
+      # 舊的 filtered.json 一樣要清掉，理由跟下面篩選失敗分支一致：留著會讓
+      # 這次失敗的合併看起來像是延用上一次成功的結果。
+      rm -f "$merged" "$dir/filtered.json.tmp" "$dir/filtered.json"
+      rc=1; continue
+    fi
+
+    err="$(mktemp "${TMPDIR:-/tmp}/corpus-err.XXXXXX")"
+    # --internal 的第 2 步不是 corpus_filter_senior，改用近一年活躍留言者清單，
+    # 所以要先問 gh 拿名單，再走 corpus_filter_all_internal 而不是 corpus_filter_all。
+    if [[ "$INTERNAL" == 1 ]]; then
+      # corpus_active_reviewers 的退出碼一定要檢查。它三頁裡任何一頁失敗都會回 1
+      # 並把 ACTIVE_REVIEWERS_FETCH_FAILED／ACTIVE_REVIEWERS_PARTIAL 印到 stderr，
+      # 不檢查的話 $reviewers 會是空字串或截斷的清單，餵給
+      # corpus_filter_all_internal 之後篩選照樣「成功」跑完，只是活躍 reviewer
+      # 悄悄變少，語料缺人卻沒有任何痕跡——跟 CACHE_INCOMPLETE 要擋的是同一類問題。
+      if ! reviewers="$(corpus_active_reviewers "$repo" 10)"; then
+        rm -f "$merged" "$err"
+        rc=1; continue
+      fi
+      filter_rc=0
+      corpus_filter_all_internal "$repo" "$layer" "$reviewers" \
+        < "$merged" > "$dir/filtered.json.tmp" 2>"$err" || filter_rc=$?
+    else
+      filter_rc=0
+      corpus_filter_all "$repo" "$layer" \
+        < "$merged" > "$dir/filtered.json.tmp" 2>"$err" || filter_rc=$?
+    fi
+    if [[ "$filter_rc" != 0 ]]; then
+      echo "篩選失敗：$repo" >&2
+      cat "$err" >&2
+      # 舊的 filtered.json 要一併刪掉。留著會讓上一次成功的輸出看起來像這次的結果。
+      rm -f "$merged" "$err" "$dir/filtered.json.tmp" "$dir/filtered.json"
+      rc=1; continue
+    fi
+    # mv 的退出碼一定要檢查，理由跟 lib/corpus-fetch.sh 的 corpus_fetch_page 同一個
+    # mv 一樣：TMPDIR 與快取目錄常在不同檔案系統上，mv 會退化成 copy + unlink，
+    # 磁碟滿、配額、權限都可能讓它失敗。這個模式在這個分支已經判過兩次 Critical
+    # （corpus_fetch_page 的 mv、retention.tsv 的 mv），這是第三個，不能再無檢查出貨：
+    # 不檢查的話這裡退出 0、留存列照樣寫出「留了 N 則」，但 filtered.json 其實
+    # 還是上一次成功執行留下的舊輸出，看起來像是這次跑出來的結果。
+    if ! mv "$dir/filtered.json.tmp" "$dir/filtered.json"; then
+      printf 'FILTER_PROMOTE_FAILED\t%s\n' "$repo" >&2
+      # 舊的 filtered.json 一樣要清掉，理由跟上面篩選失敗分支一致：留著會讓這次
+      # 失敗的 promote 看起來像是延用上一次成功的結果。
+      rm -f "$merged" "$err" "$dir/filtered.json.tmp" "$dir/filtered.json"
+      rc=1; continue
+    fi
+    rm -f "$merged"
+
+    # 只有成功時才寫留存列。失敗時 stderr 是 FILTER_INPUT_INVALID 或
+    # FILTER_STAGE_FAILED，直接 sed 進去會在報告裡留下一行垃圾。
+    #
+    # 讀改寫要互斥：--internal 讓外部與自家兩種模式共用同一份 retention.tsv，
+    # 兩個行程交錯執行「讀全檔 → 濾掉自己那列 → 寫回」會丟掉對方剛寫的列，
+    # 而且不會有任何錯誤訊息。取鎖之後才能動 retention.tsv。
+    # 取鎖失敗（等超過 300 秒，_retention_lock 已經印過原因並回 1）算這個
+    # repo 失敗，不能略過鎖直接寫，也不能假裝成功。
+    if ! _retention_lock; then
+      rm -f "$err"
+      rc=1; continue
+    fi
+    # 鎖內也補一次表頭：拿到鎖之前檔案有可能被其他行程清空過。
+    [[ -s "$RETENTION" ]] || printf 'repo\tn0_raw\tn1_nobot\tn2_senior\tn3_quality\tn4_prose\n' > "$RETENTION"
+    # ret_tmp 每個行程要唯一，不能沿用固定路徑：兩個並行行程都寫
+    # $RETENTION.tmp 的話，即使去重本身有鎖保護，也還是會互相蓋掉對方的暫存檔。
+    ret_tmp="$(mktemp "${TMPDIR:-/tmp}/corpus-ret.XXXXXX")"
+    # 重跑時先移除舊列，避免同一個 repo 累積多列。用 awk 的字串比對而不是
+    # `grep -v "^$repo\t"`：repo 名稱會被當成正規表示式，`acme/nest-monorepo-2.0`
+    # 的那個點會匹配任意字元，連 `acme/nest-monorepo-2X0` 的列一起刪掉。那個名字
+    # 就在 Task 6 的自家清單裡。ENVIRON 的理由同 corpus_layer_of。
+    # mv 前一定要檢查 awk 的退出碼。跟 corpus_fetch_page 的 mv 是同一個道理：
+    # awk 失敗（檔案消失、I/O 錯誤）會讓 ret_tmp 是截斷或空的，不檢查
+    # 直接 mv 的話，一份寫壞的暫存檔會蓋掉原本正常的 retention.tsv，且不留痕跡。
+    if CORPUS_REPO="$repo" awk -F'\t' 'NR == 1 || $1 != ENVIRON["CORPUS_REPO"]' \
+         "$RETENTION" > "$ret_tmp"; then
+      mv "$ret_tmp" "$RETENTION"
+    else
+      echo "留存報告去重失敗，保留原檔：$repo" >&2
+      rm -f "$ret_tmp" "$err"
+      _retention_unlock
+      rc=1; continue
+    fi
+    sed 's/^RETENTION\t//' "$err" >> "$RETENTION"
+    _retention_unlock
+    rm -f "$err"
+  fi
+done
+
+exit "$rc"

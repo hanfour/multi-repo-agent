@@ -9,3 +9,10 @@ site/node_modules/
 site/.vitepress/dist/
 site/.vitepress/cache/
 .mra-test-logs/
+
+# superpowers SDD 工作區(ledger / brief / review package),不進版控
+.superpowers/
+
+# 自家 repo 的真實清單(repo<TAB>layer)。這份專案是公開的,清單不進版控,
+# 見 lib/corpus-internal.sh 的 corpus_internal_targets。
+.collab/corpus-internal-targets.tsv

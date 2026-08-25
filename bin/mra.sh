@@ -11,7 +11,8 @@ MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # what pushed this file over the project's 800-line ceiling (#39).
 # tests/test_lib_loader.sh fails if a lib/*.sh exists that this list omits.
 MRA_LIBS=(
-  colors claude-invoke review-verdict args security-log
+  colors claude-invoke review-verdict args security-log backtest-hunks
+  backtest-groundtruth backtest-metrics
   project-path url-policy validate config project-memory
   preflight detect-type sync branch branch-ops
   review-select pr-ops deps repos init
@@ -24,6 +25,8 @@ MRA_LIBS=(
   review-prompt review-context review-provider review-json review-strategy
   review-pr-discussion review-pr-threads review-adjudication review-premise review-refute review-post review review-protocol review-debate
   review-debate-agents personas review-personas plan-council model-provider
+  corpus-targets corpus-fetch corpus-filter corpus-internal corpus-materialize
+  rule-schema taxonomy-classes rule-inject
   test-audit pkb pkb-cache pkb-query pkb-prompts
   eval eval-probe eval-ablation dev-agent dev
   prd prd-issues prd-scaffold
