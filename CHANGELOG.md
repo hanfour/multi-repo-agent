@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **The scanner's port and host maps are a workspace's own configuration, not a
+  built-in list of somebody's services.** `PORT_TO_SERVICE` and
+  `HOST_TO_SERVICE` carried entries that only ever meant anything in one
+  workspace, and a scan elsewhere resolved those ports to project names that
+  did not exist there. The built-in tables now hold conventions only; a
+  workspace supplies the rest at `<workspace>/.collab/service-map.json`, or at
+  the path in `MRA_SCAN_SERVICE_MAP`. Both `ports` and `hosts` are required
+  when the file exists, and the file replaces the defaults rather than merging
+  into them — merging leaves "did my entry override an existing one or add to
+  it?" unanswerable from the output. A file that cannot be read or parsed is a
+  hard failure, not a fall back to the defaults: the two produce identical
+  records, so falling back would make a broken config indistinguishable from no
+  config. Workspaces with no such file scan exactly as before.
+
+### Removed
+- **The dedicated migration warning for the retired `oneAD` lint profile.** It
+  now takes the same path as any other unrecognised profile: fall back to
+  `default`, and name the profile in the warning. Configurations still setting
+  it keep working and keep warning; they lose the sentence naming `ts-strict`
+  as the replacement.
+
 ## [3.4.1] - 2026-08-14
 
 ### Fixed

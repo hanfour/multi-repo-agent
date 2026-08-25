@@ -33,11 +33,7 @@ lint_load_profile() {
       jq -c '.rules // []' "$bundled"
       return
     fi
-    if [[ "$profile_name" == "oneAD" ]]; then
-      log_warn "lint profile 'oneAD' was renamed to 'ts-strict' — update .collab/lint-profile.json to {\"profile\": \"ts-strict\"}; using default until then" "lint" >&2
-    else
-      log_warn "lint-profile.json references unknown profile '$profile_name', using default" "lint" >&2
-    fi
+    log_warn "lint-profile.json references unknown profile '$profile_name', using default" "lint" >&2
   fi
 
   local default_profile="$mra_dir/templates/lint-profiles/default.json"
