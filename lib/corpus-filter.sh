@@ -52,6 +52,11 @@ corpus_filter_prose()   { jq "$_CORPUS_JQ_DEFS [ .[] | select(has_prose) ]"; }
 # 是依留言數由多到少排序的前 n 名 login 陣列，n 預設 15。沿用既有的 has_login／
 # is_bot 定義排掉無法歸屬（.user 是 null）與機器人的留言，bot 因此永遠不可能佔到
 # 前 n 名的名額。留言數並列時取 login 字母序在前的，同一份輸入重跑排序都一樣。
+#
+# n 是選用參數，這個檔案裡唯一的呼叫端不傳它，傳的是 tests/test_corpus_filter.sh
+# （`corpus_top_commenters 1`、`3`）。shellcheck 逐檔分析看不到那些呼叫端，就會
+# 判定「宣告了參數但沒有人傳」。
+# shellcheck disable=SC2120
 corpus_top_commenters() {
   local n="${1:-15}"
   jq --argjson n "$n" "$_CORPUS_JQ_DEFS

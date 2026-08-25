@@ -96,21 +96,29 @@ fi
 # 無條件失敗的話，_fetch_sem_release 印錯誤訊息那次 printf 也會被打斷，
 # 斷言就驗不到訊息內容。closing 這個 fd 來逼真的寫入失敗也試過，但 macOS
 # 上的行為不穩定（關閉後寫入仍然「成功」），不如直接蓋 printf 可靠。
+#
+# 覆寫定義在命令替換的 subshell 裡，不放檔案的最上層。放最上層的話這個名字從
+# 定義點起就蓋住 builtin，要靠後面的 unset -f 收回；漏掉一次或中途早退，後面
+# 每一個 printf 都會走進這個假的版本。subshell 版本沒有這個時間窗，也讓靜態
+# 檢查不再把檔案前面那些正常的 printf 呼叫指成「用了後面才定義的函式」
+# （SC2218，0.9 會擋、0.11 不會，CI 裝的是前者）。
 _fetch_sem_init 1
-printf() { [[ "$1" == "x" ]] && return 1; command printf "$@"; }
-sem_write_err="$(_fetch_sem_release 2>&1 1>/dev/null)"
+sem_write_err="$(
+  printf() { [[ "$1" == "x" ]] && return 1; command printf "$@"; }
+  _fetch_sem_release 2>&1 1>/dev/null
+)"
 sem_write_rc=$?
-unset -f printf
 eq "release 寫 token 失敗時退出非 0" "1" "$sem_write_rc"
 case "$sem_write_err" in
   *FETCH_SEM_WRITE_FAILED*release*) ok "release 寫入失敗印出 FETCH_SEM_WRITE_FAILED" ;;
   *) fail "release 寫入失敗缺 token：$sem_write_err" ;;
 esac
 
-printf() { [[ "$1" == "x" ]] && return 1; command printf "$@"; }
-sem_init_err="$(_fetch_sem_init 4 2>&1 1>/dev/null)"
+sem_init_err="$(
+  printf() { [[ "$1" == "x" ]] && return 1; command printf "$@"; }
+  _fetch_sem_init 4 2>&1 1>/dev/null
+)"
 sem_init_rc=$?
-unset -f printf
 eq "init 寫 token 失敗時退出非 0" "1" "$sem_init_rc"
 case "$sem_init_err" in
   *FETCH_SEM_WRITE_FAILED*init*) ok "init 寫入失敗印出 FETCH_SEM_WRITE_FAILED" ;;

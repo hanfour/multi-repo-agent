@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # PKB cache: dir/meta/freshness, doc validity, and file-mtime tracking.
 
+# `stat -f` is a format flag on BSD/macOS and filesystem status on GNU/Linux, so
+# the two platforms need different arguments. The `-exec stat ... {} +` calls
+# below cannot fall back per file — a wrong flag there does not fail, it feeds
+# `sort -rn | head -1` a block of filesystem text and every directory then reads
+# as changed. Decide the form once, here, by asking stat what it accepts.
+# stat-probe
+if stat -c %Y . >/dev/null 2>&1; then
+  _PKB_STAT_MTIME=(-c %Y)
+else
+  _PKB_STAT_MTIME=(-f %m)
+fi
+
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
@@ -237,7 +249,7 @@ _pkb_record_mtimes() {
       # -exec must be inside \( \) or it binds to the last -o branch only.
       newest_mtime=$(find "$full_dir" \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \
         -o -name '*.rb' -o -name '*.go' -o -name '*.py' \) \
-        -exec stat -f %m {} + 2>/dev/null | sort -rn | head -1 || echo "0")
+        -exec stat "${_PKB_STAT_MTIME[@]}" {} + 2>/dev/null | sort -rn | head -1 || echo "0")
       [[ -z "$newest_mtime" ]] && newest_mtime=0
       mtimes=$(echo "$mtimes" | jq --arg k "$d" --arg v "$newest_mtime" '. + {($k): ($v | tonumber)}')
     fi
@@ -287,7 +299,7 @@ _pkb_check_mtimes() {
       # -exec must be inside \( \) or it binds to the last -o branch only.
       current_mtime=$(find "$full_dir" \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \
         -o -name '*.rb' -o -name '*.go' -o -name '*.py' \) \
-        -exec stat -f %m {} + 2>/dev/null | sort -rn | head -1 || echo "0")
+        -exec stat "${_PKB_STAT_MTIME[@]}" {} + 2>/dev/null | sort -rn | head -1 || echo "0")
       [[ -z "$current_mtime" ]] && current_mtime=0
       stored_mtime=$(echo "$stored_mtimes" | jq -r --arg k "$d" '.[$k] // 0')
       if [[ "$current_mtime" != "$stored_mtime" ]]; then

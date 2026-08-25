@@ -44,8 +44,25 @@ mkdir -p "$(corpus_cache_dir)"
 # 是很自然的加速做法。去重是「讀全檔 → 濾掉自己那列 → 寫回」，兩個行程交錯
 # 執行會丟掉對方剛寫的列，且不會有任何錯誤訊息。mkdir 在 POSIX 上是原子操作，
 # 成功的那一個行程拿到鎖；macOS 預設沒有 flock 指令，所以不用 flock。
+# `stat -f` 在兩個平台上意思相反：BSD／macOS 是「格式字串」，GNU／Linux 是
+# 「檔案系統狀態」。所以 BSD 形式在 Linux 上不會乾淨地失敗，它會把整段檔案系統
+# 資訊印到 stdout（開頭就是 `File: "..."`）之後才回非 0，`||` 的第二個 stat 再
+# 把真正的秒數接在後面，呼叫端拿到的是一大段文字。
+#
+# 下游是 `age=$(( $(date +%s) - mtime ))`。算術展開會把那段文字裡的 File 當成
+# 變數名，set -u 讓整個行程當場中止——不是回傳錯的值，是這一輪剩下的 repo 全部
+# 沒有機會寫留存列。實測 Linux 上兩個行程並行時，20 列只寫進 16 到 17 列，而且
+# 每一輪的數字都不一樣。macOS 上 BSD 形式正確，所以本機永遠測不出來。
+#
+# GNU 形式放前面在兩個平台都安全：macOS 的 stat 直接拒絕 -c、什麼都不印。
+# 再加一道純數字檢查，任何一種形式吐出非預期的東西都當成查不到而不是當成秒數。
 _retention_lock_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+  local out
+  out="$(stat -c %Y "$1" 2>/dev/null)"
+  case "$out" in ""|*[!0-9]*) ;; *) printf '%s' "$out"; return 0 ;; esac
+  out="$(stat -f %m "$1" 2>/dev/null)"
+  case "$out" in ""|*[!0-9]*) ;; *) printf '%s' "$out"; return 0 ;; esac
+  return 1
 }
 
 # 逾時判準用實際經過的秒數，不是重試次數。舊版在「清掉陳舊的鎖」那條分支上

@@ -89,6 +89,13 @@ ORIG_STATUS_LINES="$(git -C "$R" status --porcelain | wc -l | tr -d ' ')"
 
 # PKB：真實 repo 裡 .mra 被 gitignore，worktree 不會自動有，要驗證這裡的
 # 內容真的被實體複製過去（不是 symlink）。
+#
+# 這個 repo 自己要寫一次排除規則，不能靠開發者的全域 gitignore。.mra 是在
+# ORIG_STATUS_LINES 取完之後才建的，沒有排除規則的話它會是第三筆未追蹤變更，
+# 檔案最後那條「來源 repo 未提交變更的筆數全程沒有被動過」就會 2 對 3 而紅。
+# 我的機器上 ~/.config/git/ignore 有 .mra/，所以一直是綠的；CI 的 Linux runner
+# 沒有，所以一直是紅的。測試的前提要寫在測試裡，靠環境提供的前提等於沒有前提。
+printf '.mra/\n' >> "$R/.git/info/exclude"
 mkdir -p "$R/.mra/pkb"
 echo '{"convention":"stub"}' > "$R/.mra/pkb/example.json"
 
@@ -623,30 +630,41 @@ has "來源沒有 .mra 時 worktree 裡也確實沒有 .mra(沒有憑空生出�
 lacks "來源沒有 .mra 時不該印出 PKB_COPY_FAILED" "$(cat "$TMP/nomra.err")" "PKB_COPY_FAILED"
 
 # --- 清理失敗只印警告，不改變退出碼 -----------------------------------------
-# 讓 mra stub 在還活著的時候(worktree 還存在)把 worktree 目錄整個標成
-# uchg(macOS 的 user-immutable flag)：這樣 review 本身照樣成功(stub 正常吐
-# 出合法 JSON、exit 0)，但事後 adapter 的清理(git worktree remove --force
-# 與 rm -rf 兩條路徑)都會因為這個 flag 而失敗，藉此驗證「清理失敗不會讓一次
-# 成功的 review 變成回報失敗」。測完要自己解除 flag，不然這支測試檔案自己
-# 最後的 $TMP 清理也會失敗。
-cat > "$FAKE/bin/mra.sh" <<EOF
+# 讓 mra stub 在還活著的時候(worktree 還存在)把 worktree 的父目錄改成不可寫：
+# 刪掉一個目錄項目要的是父目錄的寫入權限，所以 review 本身照樣成功(stub 正常
+# 吐出合法 JSON、exit 0)，而事後 adapter 的清理(git worktree remove --force
+# 與 rm -rf 兩條路徑)都會失敗，藉此驗證「清理失敗不會讓一次成功的 review 變成
+# 回報失敗」。測完要自己把權限改回來，不然這支測試檔案自己最後的 $TMP 清理也
+# 會失敗。
+#
+# 這裡原本用 chflags uchg(macOS 的 user-immutable flag)，Linux 沒有這個指令，
+# CI 上 stub 直接 command not found，兩條斷言連同後面「來源 repo 未提交變更的
+# 筆數」一起紅。權限是 POSIX 語意，兩個平台一致。
+#
+# root 不受權限限制，這一段對 root 沒有意義。以 root 跑時明說跳過，不要讓它
+# 看起來像通過——恆真的斷言比沒有斷言更糟。
+if [[ "$(id -u)" == "0" ]]; then
+  echo "SKIP: 清理失敗那三條以 root 執行時無法構造(權限對 root 無效)"
+else
+  cat > "$FAKE/bin/mra.sh" <<EOF
 #!/usr/bin/env bash
-chflags uchg rails-app-1
+chmod a-w .
 printf '%s' '$STUB_REVIEW_JSON'
 EOF
-chmod +x "$FAKE/bin/mra.sh"
-write_gh_stub "$BASE_SHA" 0
-out_cleanupfail="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cleanupfail.err")"
-rc_cleanupfail=$?
-eq "清理失敗不影響退出碼，review 本身成功仍是 0" "0" "$rc_cleanupfail"
-eq "清理失敗時仍印出 stub JSON 原樣(不是把清理失敗混進 review 結果)" \
-  "$STUB_REVIEW_JSON" "$out_cleanupfail"
-has "清理失敗有印出 WORKTREE_CLEANUP_FAILED 警告" \
-  "$(cat "$TMP/cleanupfail.err")" "WORKTREE_CLEANUP_FAILED"
-# 驗完手動解除 flag、清掉殘留，不要留給檔案結尾的 $TMP 清理去處理。
-chflags -R nouchg "$WT_ROOT/rails-app-1" 2>/dev/null
-rm -rf "$WT_ROOT/rails-app-1"
-git -C "$R" worktree prune >/dev/null 2>&1
+  chmod +x "$FAKE/bin/mra.sh"
+  write_gh_stub "$BASE_SHA" 0
+  out_cleanupfail="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/cleanupfail.err")"
+  rc_cleanupfail=$?
+  eq "清理失敗不影響退出碼，review 本身成功仍是 0" "0" "$rc_cleanupfail"
+  eq "清理失敗時仍印出 stub JSON 原樣(不是把清理失敗混進 review 結果)" \
+    "$STUB_REVIEW_JSON" "$out_cleanupfail"
+  has "清理失敗有印出 WORKTREE_CLEANUP_FAILED 警告" \
+    "$(cat "$TMP/cleanupfail.err")" "WORKTREE_CLEANUP_FAILED"
+  # 驗完把權限改回來、清掉殘留，不要留給檔案結尾的 $TMP 清理去處理。
+  chmod u+w "$WT_ROOT"
+  rm -rf "$WT_ROOT/rails-app-1"
+  git -C "$R" worktree prune >/dev/null 2>&1
+fi
 
 # --- 從頭到尾，來源 repo 的 HEAD 與未提交變更都沒被動過 ---------------------
 # 這支測試檔案跑到這裡已經呼叫過 adapter 十幾次，每一次都會建、清一次

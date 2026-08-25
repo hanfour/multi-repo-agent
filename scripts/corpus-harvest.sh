@@ -108,7 +108,17 @@ _fetch_sem_release() {
 _filter_state_file() { printf '%s/.filter-inflight-mb' "$(corpus_cache_dir)"; }
 _filter_lock_path()  { printf '%s.lock' "$(_filter_state_file)"; }
 
-_filter_lock_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+# GNU 形式在前，並且驗過是純數字才採用。理由與 scripts/build-corpus.sh 的
+# _retention_lock_mtime 完全相同（BSD 形式在 Linux 上會先印一段檔案系統資訊到
+# stdout 才失敗，污染的值進到算術展開會讓 set -u 中止整個行程），那邊有完整說明。
+_filter_lock_mtime() {
+  local out
+  out="$(stat -c %Y "$1" 2>/dev/null)"
+  case "$out" in ""|*[!0-9]*) ;; *) printf '%s' "$out"; return 0 ;; esac
+  out="$(stat -f %m "$1" 2>/dev/null)"
+  case "$out" in ""|*[!0-9]*) ;; *) printf '%s' "$out"; return 0 ;; esac
+  return 1
+}
 
 _filter_lock() {
   local lock retry_secs start_ts mtime age elapsed
