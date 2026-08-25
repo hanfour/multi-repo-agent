@@ -57,14 +57,17 @@ else
   fail_test "unknown profile should fall back to default"
 fi
 
-# 5. Legacy 'legacy' profile -> default, with a migration warning naming ts-strict.
-echo '{"profile":"legacy"}' > "$WS/.collab/lint-profile.json"
+# 5. A retired profile name is now just an unknown one: falls back to default
+# and the warning names the profile it could not find. The dedicated migration
+# hint for the old name was dropped along with the name itself.
+echo '{"profile":"retired-profile"}' > "$WS/.collab/lint-profile.json"
 warn=$(lint_load_profile "$WS" 2>&1 >/dev/null)
 rules=$(lint_load_profile "$WS" 2>/dev/null)
-if [[ "$(echo "$rules" | jq 'length')" == "0" ]] && echo "$warn" | grep -q "ts-strict"; then
-  pass_test "legacy 'legacy' profile warns and points to ts-strict"
+if [[ "$(echo "$rules" | jq 'length')" == "0" ]] \
+   && echo "$warn" | grep -q "unknown profile 'retired-profile'"; then
+  pass_test "retired profile name falls back to default and is named in the warning"
 else
-  fail_test "expected migration warning naming ts-strict; got rules=$rules warn=$warn"
+  fail_test "expected unknown-profile warning naming it; got rules=$rules warn=$warn"
 fi
 
 rm -rf "$WS"

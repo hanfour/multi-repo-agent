@@ -35,4 +35,59 @@ else
   fail "walk.py differs from golden"
 fi
 
+# --- service map ------------------------------------------------------------
+# The port/host maps are conventions, not a description of any one workspace,
+# so a workspace supplies its own at <workspace>/.collab/service-map.json.
+# Every assertion below pins MRA_SCAN_SERVICE_MAP: the fixture has no .collab
+# of its own today, but if one is ever added these would start reading it and
+# fail while the code is fine.
+SM_TMP="$(mktemp -d)"
+trap 'rm -rf "$SM_TMP"' EXIT
+
+# No file at all: the defaults still apply, so the golden set is unchanged.
+if diff <(MRA_SCAN_SERVICE_MAP="$SM_TMP/absent.json" python3 "$MRA_DIR/scanners/walk.py" "$FIX" | jq -cS . | sort -u) \
+        <(jq -cS . < "$GOLD" | sort -u) >/dev/null; then
+  pass "service map 不存在時走內建預設，輸出與 golden 相同"
+else
+  fail "service map 不存在時輸出與 golden 不同"
+fi
+
+# A file present replaces the defaults wholesale. erp is mapped to 4000 by the
+# defaults; a map that omits it must stop resolving that port, otherwise the
+# file is merging rather than replacing.
+cat > "$SM_TMP/map.json" <<'JSON'
+{"ports": {"9999": "nowhere"}, "hosts": {"nowhere": "nowhere"}}
+JSON
+sm_out="$(MRA_SCAN_SERVICE_MAP="$SM_TMP/map.json" python3 "$MRA_DIR/scanners/walk.py" "$FIX")"
+if echo "$sm_out" | jq -e 'select(.target=="api-gateway" and .scanner=="api-calls")' >/dev/null 2>&1; then
+  fail "有 service map 時仍混入內建預設(api-gateway 還在解析)"
+else
+  pass "有 service map 時不混入內建預設"
+fi
+
+# Malformed maps are a hard failure, never a quiet fall back to the defaults:
+# both outcomes would emit the same records, so falling back makes a broken
+# config indistinguishable from no config.
+sm_bad(){
+  local desc="$1" body="$2" want="$3"
+  printf '%s' "$body" > "$SM_TMP/bad.json"
+  local err rc
+  err="$(MRA_SCAN_SERVICE_MAP="$SM_TMP/bad.json" python3 "$MRA_DIR/scanners/walk.py" "$FIX" 2>&1 >/dev/null)" && rc=0 || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    fail "$desc — 應該非 0 退出，卻是 0"
+  elif [[ "$err" != *"$want"* ]]; then
+    fail "$desc — stderr 沒有 $want：$err"
+  else
+    pass "$desc"
+  fi
+}
+sm_bad "壞掉的 JSON 硬失敗"       '{"ports":'                       SERVICE_MAP_UNREADABLE
+sm_bad "頂層不是物件硬失敗"        '[]'                              SERVICE_MAP_INVALID
+sm_bad "缺 hosts 硬失敗"          '{"ports":{}}'                    SERVICE_MAP_INVALID
+sm_bad "缺 ports 硬失敗"          '{"hosts":{}}'                    SERVICE_MAP_INVALID
+sm_bad "多餘的鍵硬失敗"           '{"ports":{},"hosts":{},"prots":{}}' SERVICE_MAP_INVALID
+sm_bad "ports 不是物件硬失敗"      '{"ports":[],"hosts":{}}'         SERVICE_MAP_INVALID
+sm_bad "值不是字串硬失敗"          '{"ports":{"1":2},"hosts":{}}'    SERVICE_MAP_INVALID
+sm_bad "值是空字串硬失敗"          '{"ports":{"1":""},"hosts":{}}'   SERVICE_MAP_INVALID
+
 [[ "$errors" -eq 0 ]] && echo "walk.py infra tests passed" || { echo "$errors failures"; exit 1; }

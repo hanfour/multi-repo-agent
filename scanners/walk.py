@@ -26,11 +26,10 @@ import json
 PRUNE = {"node_modules", ".git", "vendor"}
 MAX_DEPTH = 4  # deepest any rule needs (nginx/apisix at project depth 4)
 
-# Known port -> service mappings (from docker-compose conventions)
-PORT_TO_SERVICE = {
+# Known port -> service mappings (from docker-compose conventions).
+DEFAULT_PORT_TO_SERVICE = {
     "4000": "erp", "4001": "billing", "4500": "api-gateway", "5000": "catalog",
-    "3100": "nest-app-2", "5173": "web-ui", "3030": "vue-app-1",
-    "9443": "partner-api-gateway",
+    "5173": "web-ui", "9443": "partner-api-gateway",
 }
 # Known hostname -> service mappings (service name patterns).
 #
@@ -43,12 +42,85 @@ PORT_TO_SERVICE = {
 # behavior on a value matching multiple host keys was never a well-defined
 # target to replicate; longest-match-wins is a principled, deterministic
 # replacement rather than an attempt to mirror bash's arbitrary tie-breaking.
-HOST_TO_SERVICE = {
+DEFAULT_HOST_TO_SERVICE = {
     "erp": "erp", "billing": "billing", "catalog": "catalog",
     "api-gateway": "api-gateway", "api_gateway": "api-gateway",
-    "nest-app-2": "nest-app-2", "finance_system": "nest-app-2",
     "web-ui": "web-ui",
 }
+
+# The defaults above are conventions, not a description of any one workspace.
+# A workspace whose services differ supplies its own map at
+# <workspace>/.collab/service-map.json (or the path in MRA_SCAN_SERVICE_MAP):
+#
+#   {"ports": {"3030": "storefront"}, "hosts": {"storefront": "storefront"}}
+#
+# Both keys are required when the file exists, and the file REPLACES the
+# defaults rather than merging into them. Merging would create a third state —
+# "did my entry override an existing one or add to it?" — that nothing in the
+# output distinguishes. Requiring both keys removes the same ambiguity for a
+# file that supplies only one of them.
+SERVICE_MAP_ENV = "MRA_SCAN_SERVICE_MAP"
+SERVICE_MAP_REL = os.path.join(".collab", "service-map.json")
+
+PORT_TO_SERVICE = dict(DEFAULT_PORT_TO_SERVICE)
+HOST_TO_SERVICE = dict(DEFAULT_HOST_TO_SERVICE)
+
+
+def _service_map_section(data, key, path):
+    """Validate one section of a service map. Exits non-zero on any problem.
+
+    A malformed map is not worth degrading past: every rule that consults these
+    maps would silently emit relationships pointing at the wrong project, and
+    the JSONL gives the reader nothing to notice it by.
+    """
+    if key not in data:
+        sys.stderr.write(
+            "SERVICE_MAP_INVALID\t%s\tmissing required key %r\n" % (path, key))
+        sys.exit(1)
+    section = data[key]
+    if not isinstance(section, dict):
+        sys.stderr.write(
+            "SERVICE_MAP_INVALID\t%s\t%r must be an object\n" % (path, key))
+        sys.exit(1)
+    for k, v in section.items():
+        if not isinstance(v, str) or not v:
+            sys.stderr.write(
+                "SERVICE_MAP_INVALID\t%s\t%s[%r] must be a non-empty string\n"
+                % (path, key, k))
+            sys.exit(1)
+    return dict(section)
+
+
+def load_service_map(workspace):
+    """Return (ports, hosts) for this workspace.
+
+    No file means the built-in defaults. A file that exists but cannot be read
+    or parsed is a hard failure rather than a fall back to the defaults: those
+    two outcomes produce the same relationship records, so falling back would
+    make a broken config indistinguishable from no config at all.
+    """
+    path = os.environ.get(SERVICE_MAP_ENV) or os.path.join(
+        workspace, SERVICE_MAP_REL)
+    if not os.path.exists(path):
+        return dict(DEFAULT_PORT_TO_SERVICE), dict(DEFAULT_HOST_TO_SERVICE)
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write("SERVICE_MAP_UNREADABLE\t%s\t%s\n" % (path, exc))
+        sys.exit(1)
+    if not isinstance(data, dict):
+        sys.stderr.write(
+            "SERVICE_MAP_INVALID\t%s\ttop level must be an object\n" % path)
+        sys.exit(1)
+    unknown = sorted(set(data) - {"ports", "hosts"})
+    if unknown:
+        sys.stderr.write(
+            "SERVICE_MAP_INVALID\t%s\tunknown key(s): %s\n"
+            % (path, ", ".join(unknown)))
+        sys.exit(1)
+    return (_service_map_section(data, "ports", path),
+            _service_map_section(data, "hosts", path))
 
 
 def emit(source, target, type_, confidence, scanner):
@@ -375,6 +447,8 @@ def main():
         sys.stderr.write("usage: walk.py <workspace>\n")
         sys.exit(1)
     workspace = sys.argv[1]
+    global PORT_TO_SERVICE, HOST_TO_SERVICE
+    PORT_TO_SERVICE, HOST_TO_SERVICE = load_service_map(workspace)
     files, projects = collect(workspace)
     rule_docker_compose(files)
     rule_shared_db(files)

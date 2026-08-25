@@ -29,6 +29,34 @@ line —
 record (kept as the historical rule/script names above for continuity with
 existing dep-graph data and reporting).
 
+## Service map
+
+Two rules resolve a port or a hostname found in `.env` / compose files to a
+project name. The tables built into `walk.py` are conventions (`4000` → `erp`,
+`5173` → `web-ui`, and a handful more); they are not a description of any
+particular workspace, and a port they do not know is simply left unresolved.
+
+A workspace whose services differ supplies its own map at
+`<workspace>/.collab/service-map.json`, or at the path in
+`MRA_SCAN_SERVICE_MAP`:
+
+```json
+{
+  "ports": {"3030": "storefront", "3100": "ledger"},
+  "hosts": {"storefront": "storefront", "ledger": "ledger"}
+}
+```
+
+Both keys are required when the file exists, and the file **replaces** the
+built-in tables rather than merging into them. Merging would leave "did my
+entry override an existing one or add to it?" unanswerable from the output;
+requiring both keys removes the same ambiguity for a file supplying only one.
+
+A file that cannot be read or parsed, or whose shape is wrong, fails the scan
+with `SERVICE_MAP_UNREADABLE` / `SERVICE_MAP_INVALID` on stderr. It does not
+fall back to the defaults: a broken map and no map produce identical records,
+so falling back would leave nothing in the output to notice the breakage by.
+
 ## Custom-scanner contract
 
 Workspaces can add their own scanners without touching `mra` itself. Any
