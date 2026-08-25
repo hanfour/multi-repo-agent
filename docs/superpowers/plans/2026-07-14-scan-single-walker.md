@@ -296,13 +296,13 @@ Add near the top (after `PRUNE`):
 ```python
 PORT_TO_SERVICE = {
     "4000": "erp", "4001": "billing", "4500": "api-gateway", "5000": "catalog",
-    "3100": "finance-system", "5173": "web-ui", "3030": "vue-app-1",
+    "3100": "nest-app-2", "5173": "web-ui", "3030": "vue-app-1",
     "9443": "partner-api-gateway",
 }
 HOST_TO_SERVICE = {
     "erp": "erp", "billing": "billing", "catalog": "catalog",
     "api-gateway": "api-gateway", "api_gateway": "api-gateway",
-    "finance-system": "finance-system", "finance_system": "finance-system",
+    "nest-app-2": "nest-app-2", "nest_app_2": "nest-app-2",
     "web-ui": "web-ui",
 }
 ```

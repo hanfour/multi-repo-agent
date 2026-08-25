@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   config. Workspaces with no such file scan exactly as before.
 
 ### Removed
-- **The dedicated migration warning for the retired `oneAD` lint profile.** It
+- **The dedicated migration warning for the retired `legacy` lint profile.** It
   now takes the same path as any other unrecognised profile: fall back to
   `default`, and name the profile in the warning. Configurations still setting
   it keep working and keep warning; they lose the sentence naming `ts-strict`
@@ -330,7 +330,7 @@ Three fixes change what an existing caller sees, and all three are deliberate:
 - `mra prd-scaffold` now adopts a pre-existing planned repo after a per-repo `[y/N]` confirm (clone + register, seed only if empty) instead of aborting. An existing repo never reaches `gh repo create`.
 
 ### Breaking
-- **BREAKING** lint profile `oneAD` renamed to `ts-strict`; update any `.collab/lint-profile.json` using `{"profile":"oneAD"}` to `{"profile":"ts-strict"}`.
+- **BREAKING** lint profile `legacy` renamed to `ts-strict`; update any `.collab/lint-profile.json` using `{"profile":"legacy"}` to `{"profile":"ts-strict"}`.
 - **BREAKING** `mra scan` now requires `python3` (the built-in scanners run via `scanners/walk.py`). `python3` was already used by the previous `shared-packages` scanner; scan now fails fast with a clear error if it is missing.
 
 ### Added
