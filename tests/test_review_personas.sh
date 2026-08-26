@@ -13,7 +13,7 @@ if [[ -z "$output" ]]; then
   echo "FAIL: default_review_personas empty"; errors=$((errors+1))
 fi
 
-for p in security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect; do
+for p in security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect convention-auditor; do
   if [[ "$output" != *"$p"* ]]; then
     echo "FAIL: default set missing $p"; errors=$((errors+1))
   fi

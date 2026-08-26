@@ -15,7 +15,7 @@ if load_persona "nonexistent-persona" 2>/dev/null; then
   echo "FAIL: load_persona should fail on unknown name"; errors=$((errors+1))
 fi
 
-for p in security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect; do
+for p in security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect convention-auditor; do
   body=$(load_persona "$p" 2>/dev/null || echo "")
   if [[ -z "$body" ]]; then
     echo "FAIL: persona $p did not load"; errors=$((errors+1))

@@ -3,7 +3,7 @@
 # then handed off to run_synthesize from lib/review-debate.sh.
 
 default_review_personas() {
-  echo "security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect"
+  echo "security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect convention-auditor"
 }
 
 build_persona_prompt() {

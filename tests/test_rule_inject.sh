@@ -11,7 +11,7 @@
 #      邊界（預算剛好卡在兩條規則之間、第一條就超預算仍要收、0／負數預算
 #      的容錯）都要測。
 #   2. rule_inject_persona 的注入錨點不能寫死找 `^SCOPE NOTE:`——
-#      agents/personas/ 裡五個 persona 只有兩個真的有 SCOPE NOTE
+#      agents/personas/ 裡六個 persona 只有兩個真的有 SCOPE NOTE
 #      （performance-hawk.md、api-contract-guardian.md），其餘三個
 #      （security-auditor.md、refactoring-sage.md、test-architect.md）
 #      沒有，若硬找 SCOPE NOTE 會讓沒有它的 persona 注入位置掉到檔尾、
@@ -487,7 +487,7 @@ test_inject_all_default_persona_dir_resolves_without_external_mra_dir() {
   unset MRA_DIR
   local n
   n="$(rule_inject_all "$FIX/rules" nestjs "$OUT/default-personas-out" 2>"$OUT/default.warn")"
-  eq "處理了 agents/personas 底下 5 個 persona（不含 README）" "5" "$n"
+  eq "處理了 agents/personas 底下 6 個 persona（不含 README）" "6" "$n"
   [ -f "$OUT/default-personas-out/security-auditor.md" ] \
     && ok "security-auditor.md 產出了" || fail "security-auditor.md 沒產出"
   [ -f "$OUT/default-personas-out/test-architect.md" ] \
@@ -643,7 +643,7 @@ test_inject_layers_report_has_four_columns() {
   local out="$OUT/layers-cols" report
   report="$(rule_inject_layers "$FIX/rules" "$out" "vue" "" "" 2>"$OUT/layers-cols.warn")"
   eq "第一欄是層名" "vue" "$(printf '%s' "$report" | cut -f1)"
-  eq "第二欄是 persona 總數" "5" "$(printf '%s' "$report" | cut -f2)"
+  eq "第二欄是 persona 總數" "6" "$(printf '%s' "$report" | cut -f2)"
   eq "第三欄是沒有 FOCUS 而跳過的數量" "1" "$(printf '%s' "$report" | cut -f3)"
   # 這份 fixture 只有 common、nestjs、react 各一條，vue 層看得到的只有
   # common 那一條。這一欄要回答的正是「這一層實際有幾條規則進了 prompt」，
