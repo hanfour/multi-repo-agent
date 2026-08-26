@@ -37,6 +37,10 @@ build_persona_prompt() {
 ## Changed Files
 %CHANGED_FILES%
 
+## 覆蓋確認
+結束前，把上面 Changed Files 清單裡的每一個檔案都列出來，各自標 PASS
+（看過、沒問題）或列出你的 finding。不能悄悄跳過任何一個檔案。
+
 %LANG%
 
 IMPORTANT: Every finding MUST include exact file:line evidence from the source.

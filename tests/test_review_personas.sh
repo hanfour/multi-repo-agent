@@ -50,6 +50,13 @@ if [[ "$prompt_lang" != *"Use 繁體中文 for output."* ]]; then
   echo "FAIL: prompt missing language directive"; errors=$((errors+1))
 fi
 
+# Coverage checklist should appear in prompt
+prompt_coverage=$(build_persona_prompt "security-auditor" "d" "x.js
+y.js")
+if [[ "$prompt_coverage" != *"把上面 Changed Files 清單裡的每一個檔案都列出來"* ]]; then
+  echo "FAIL: prompt missing coverage checklist requirement"; errors=$((errors+1))
+fi
+
 if [[ $errors -eq 0 ]]; then
   echo "PASS: all review-personas tests passed"
 else
