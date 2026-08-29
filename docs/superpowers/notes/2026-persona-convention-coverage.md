@@ -41,18 +41,23 @@ token 被撤銷（401），一次是先前既知的 token 過期，兩次都在�
 | baseline severity_rate | 0.25 | 0.41 |
 | convention-auditor severity_rate | 0.38 | 0.50 |
 | baseline comments_total | 217 | 217 |
-| convention-auditor comments_total | 217 | 180 |
+| convention-auditor comments_total | 180 | 180 |
 | baseline unmatched_rate | 0.96 | 0.92 |
 | convention-auditor unmatched_rate | 0.96 | 0.90 |
 
-（tol5 的 comments_total／unmatched_rate 兩輪剛好同一個數字，是同一份
-review 輸出在不同容差下重算指標，comments_total 本身不隨容差變。）
+（comments_total 本身不隨容差變，是同一份 review 輸出在不同容差下重算
+指標——convention-auditor 這輪兩個容差都是 180，跟 baseline 的 217 不同，
+不是巧合。tol5 的 unmatched_rate 兩邊剛好都四捨五入到 0.96，這才是真的
+巧合。）
 
-miss_rate 在容差 15 微幅改善（37→36），severity_rate 明顯上升（41%→50%），
-但這兩個改善都伴隨 comments_total 下降 37 則（217→180）——不是「講得更少但
-更準」的正面訊號，而是後面查出來的失敗率問題的副作用。
+miss_rate 在容差 15 微幅改善（37→36），severity_rate 在數字上從 41%
+升到 50%，但這兩個改善都伴隨 comments_total 下降 37 則（217→180）——不是
+「講得更少但更準」的正面訊號，而是後面查出來的失敗率問題的副作用。這兩個
+彙總指標本身能不能當「改善」或「惡化」的證據，要放進下面〈重複執行雜訊〉
+一節裡跟底噪比過才算數。
 
-**file_miss_rate 從 0.44 升到 0.48，跟設計目標方向相反。**
+**file_miss_rate 從 0.44 升到 0.48**，跟設計目標方向相反——但方向對不對
+是一回事，這個差距夠不夠大到能下結論，見下一節。
 
 ## 為什麼會這樣：persona 個別失敗率暴增
 
@@ -110,13 +115,41 @@ query（`pricing-model-options.ts`）逐項對照 `enabled`、`staleTime`、key
 機制，在單一 PR 上重現：機制生效的證據跟機制失敗的證據同時存在同一個
 PR 裡。
 
+## 重複執行雜訊
+
+`docs/superpowers/notes/2026-layered-injection.md`〈重複執行基準線〉一節
+量過同一組設定（personas 模式、輪數 20、同一批 38 個 PR）連跑兩次，54 條
+expected finding 裡有 4 到 5 條的命中狀態會翻面——這是解讀本文任何「幾條
+差異」時的底噪。同一次重跑也量到 severity_rate 在兩個容差下各自跳了
+17、16 個百分點（33%→50%、47%→63%），comments_total 幾乎不變（194 對
+198）。
+
+拿這個底噪回頭看前面兩節的彙總指標：
+
+- **file_miss_rate 從 0.44 升到 0.48**，對應 file_missed 24→26（54 條裡
+  差 2 條）。這個差距落在浮動下限（4-5 條）以內甚至更小：方向是錯的，但
+  幅度分不出來是真的變差，還是單純換一次執行就會出現的雜訊。
+- **severity_rate 從 41% 升到 50%**，9 個百分點的變化，比重複執行基準線
+  量到的 16-17 個百分點雜訊還小。這個數字同樣不能當「明顯上升」的證據，
+  上一節已把「明顯」拿掉。
+
+修正之後，唯一沒有被這個雜訊蓋過的證據是 persona 個別失敗率：3 次到 21
+次是 7 倍的落差，遠超過任何一次重複執行基準線量到的浮動範圍，而且 21 次
+失敗裡倖存下來的 20 份 stderr 檔案逐字都寫著同一句 `Error: Reached max
+turns (20)`——這不是彙總指標的雜訊，是可驗證、可重現的失敗模式。
+
 ## 結論
 
 兩個假設的機制都被證實真實存在——`convention-auditor` 真的會做 sibling
 比對並非空談，覆蓋清單要求真的會逼 persona 交代原本會被略過的小改動。但
 這次設計低估了新增工作量對固定 turn 預算的壓力，尤其是 `convention-auditor`
-的 METHOD 天生比其餘 5 個 persona 貴（多一輪搜尋）。net 上，這一輪的
-file_miss_rate 沒有改善，反而變差。
+的 METHOD 天生比其餘 5 個 persona 貴（多一輪搜尋）。
+
+net 上，這一輪的彙總指標（file_miss_rate、severity_rate）多半分不出「變
+差」跟「雜訊」——上一節已經把這兩個數字放進重複執行的底噪比過。真正站得
+住腳、不受雜訊影響的證據是 persona 個別失敗率從 3 次暴增到 21 次，而且
+根因（20 輪 turn 預算撞頂）逐條 stderr 都能驗證。這才是下面判斷「不能算
+達標」的主要依據，彙總指標只是附帶、方向正確但幅度不確定的旁證。
 
 以「拿去解決 file_miss_rate 天花板」這個目標衡量，這次改動目前**不能算
 達標**，需要下一輪處理 turn 預算問題才能重新驗證原本的假設。
