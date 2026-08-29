@@ -13,11 +13,29 @@ if [[ -z "$output" ]]; then
   echo "FAIL: default_review_personas empty"; errors=$((errors+1))
 fi
 
-for p in security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect convention-auditor; do
+# With no env var set, convention-auditor must NOT be included, and the
+# default set must be exactly the original 5 names.
+for p in security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect; do
   if [[ "$output" != *"$p"* ]]; then
     echo "FAIL: default set missing $p"; errors=$((errors+1))
   fi
 done
+if [[ "$output" == *"convention-auditor"* ]]; then
+  echo "FAIL: default set should not include convention-auditor when MRA_REVIEW_ENABLE_CONVENTION_AUDITOR is unset"; errors=$((errors+1))
+fi
+if [[ "$(echo "$output" | wc -w | tr -d ' ')" != "5" ]]; then
+  echo "FAIL: default set should have exactly 5 personas by default, got: $output"; errors=$((errors+1))
+fi
+
+# With MRA_REVIEW_ENABLE_CONVENTION_AUDITOR=1, convention-auditor must be
+# included, growing the default set to 6.
+output_with_auditor=$(MRA_REVIEW_ENABLE_CONVENTION_AUDITOR=1 default_review_personas)
+if [[ "$output_with_auditor" != *"convention-auditor"* ]]; then
+  echo "FAIL: default set should include convention-auditor when MRA_REVIEW_ENABLE_CONVENTION_AUDITOR=1"; errors=$((errors+1))
+fi
+if [[ "$(echo "$output_with_auditor" | wc -w | tr -d ' ')" != "6" ]]; then
+  echo "FAIL: default set should have exactly 6 personas when convention-auditor is enabled, got: $output_with_auditor"; errors=$((errors+1))
+fi
 
 prompt=$(build_persona_prompt "security-auditor" "diff --git a/x b/x" "x.js")
 if [[ "$prompt" != *"ROLE: Security Auditor"* ]]; then
@@ -50,11 +68,19 @@ if [[ "$prompt_lang" != *"Use 繁體中文 for output."* ]]; then
   echo "FAIL: prompt missing language directive"; errors=$((errors+1))
 fi
 
-# Coverage checklist should appear in prompt
-prompt_coverage=$(build_persona_prompt "security-auditor" "d" "x.js
+# Coverage checklist must NOT appear in prompt when the env var is unset —
+# default behavior must match the pre-branch template exactly.
+prompt_no_coverage=$(build_persona_prompt "security-auditor" "d" "x.js
 y.js")
-if [[ "$prompt_coverage" != *"把上面 Changed Files 清單裡的每一個檔案都列出來"* ]]; then
-  echo "FAIL: prompt missing coverage checklist requirement"; errors=$((errors+1))
+if [[ "$prompt_no_coverage" == *"account for every file in the Changed Files list"* ]]; then
+  echo "FAIL: prompt should not include coverage checklist requirement by default"; errors=$((errors+1))
+fi
+
+# Coverage checklist should appear in prompt when explicitly enabled
+prompt_coverage=$(MRA_REVIEW_ENABLE_COVERAGE_CHECKLIST=1 build_persona_prompt "security-auditor" "d" "x.js
+y.js")
+if [[ "$prompt_coverage" != *"account for every file in the Changed Files list"* ]]; then
+  echo "FAIL: prompt missing coverage checklist requirement when MRA_REVIEW_ENABLE_COVERAGE_CHECKLIST=1"; errors=$((errors+1))
 fi
 
 if [[ $errors -eq 0 ]]; then

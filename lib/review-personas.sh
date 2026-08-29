@@ -3,7 +3,11 @@
 # then handed off to run_synthesize from lib/review-debate.sh.
 
 default_review_personas() {
-  echo "security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect convention-auditor"
+  local base="security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect"
+  if [[ "${MRA_REVIEW_ENABLE_CONVENTION_AUDITOR:-0}" == "1" ]]; then
+    base="$base convention-auditor"
+  fi
+  echo "$base"
 }
 
 build_persona_prompt() {
@@ -23,6 +27,11 @@ build_persona_prompt() {
     consumer_section=$'\nConsumer projects: '"${consumers}"$'\nGrep them for references to any changed/removed identifiers.\n'
   fi
 
+  local coverage_section=""
+  if [[ "${MRA_REVIEW_ENABLE_COVERAGE_CHECKLIST:-0}" == "1" ]]; then
+    coverage_section=$'## Coverage Checklist\nBefore finishing, account for every file in the Changed Files list above:\nmark it PASS (reviewed, no issue) or list your finding. Do not silently\nskip any file. If the Changed Files list is long, group entries by\ndirectory and give one PASS/finding line per group instead of per file —\ncall out individually only the files where you actually found something or\nthat you specifically inspected.\n\n'
+  fi
+
   local template
   template=$(cat <<'TEMPLATE'
 %PERSONA_BODY%
@@ -37,11 +46,7 @@ build_persona_prompt() {
 ## Changed Files
 %CHANGED_FILES%
 
-## 覆蓋確認
-結束前，把上面 Changed Files 清單裡的每一個檔案都列出來，各自標 PASS
-（看過、沒問題）或列出你的 finding。不能悄悄跳過任何一個檔案。
-
-%LANG%
+%COVERAGE_SECTION%%LANG%
 
 IMPORTANT: Every finding MUST include exact file:line evidence from the source.
 TEMPLATE
@@ -52,6 +57,7 @@ TEMPLATE
   template="${template//%CONSUMER_SECTION%/$consumer_section}"
   template="${template//%DIFF%/$diff}"
   template="${template//%CHANGED_FILES%/$changed_files}"
+  template="${template//%COVERAGE_SECTION%/$coverage_section}"
   template="${template//%LANG%/$lang_directive}"
   printf '%s\n' "$template"
 }
