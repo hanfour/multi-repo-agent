@@ -91,8 +91,18 @@ run_persona_review() {
   local i pid rc
   for i in "${!pids[@]}"; do
     pid="${pids[$i]}"
-    if ! wait "$pid"; then
+    # Capture the real exit code directly from `wait`, not from `!`
+    # (negating before capturing $? always yields 0/1, never the real code —
+    # that's why every "failed (rc=...)" log line used to read rc=0). Keep
+    # `wait` as the if-condition itself (not `! wait`) so a nonzero exit
+    # doesn't trip `set -e` (bin/mra.sh runs under `set -euo pipefail`) and
+    # abort this loop before the remaining personas are waited on.
+    if wait "$pid"; then
+      rc=0
+    else
       rc=$?
+    fi
+    if [[ "$rc" -ne 0 ]]; then
       log_warn >&2 "[personas] ${persona_names[$i]} failed (rc=$rc) — stderr: ${err_files[$i]}" "review"
     fi
   done

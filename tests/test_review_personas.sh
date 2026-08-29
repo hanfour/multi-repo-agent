@@ -83,6 +83,23 @@ if [[ "$prompt_coverage" != *"account for every file in the Changed Files list"*
   echo "FAIL: prompt missing coverage checklist requirement when MRA_REVIEW_ENABLE_COVERAGE_CHECKLIST=1"; errors=$((errors+1))
 fi
 
+# run_persona_review must log the REAL exit code of a failed persona call.
+# Regression coverage for the `if ! wait "$pid"; then rc=$?` bug: negating
+# wait's result before capturing $? always yielded 0/1 (never the actual
+# exit code), so every "failed (rc=...)" log line read rc=0 regardless of
+# the real failure. Stub review_call_model to fail with a distinctive code
+# and assert the logged rc matches it.
+review_call_model() { return 42; }
+persona_err=$(mktemp)
+run_persona_review "proj" "/tmp" "d" "x.js" "security-auditor" "" "" "" "" "" claude >/dev/null 2>"$persona_err"
+if ! grep -q "rc=42" "$persona_err"; then
+  echo "FAIL: expected failed persona log to report the real rc (42), got: $(cat "$persona_err")"; errors=$((errors+1))
+fi
+if grep -q "rc=0" "$persona_err"; then
+  echo "FAIL: failed persona log incorrectly reports rc=0"; errors=$((errors+1))
+fi
+rm -f "$persona_err"
+
 if [[ $errors -eq 0 ]]; then
   echo "PASS: all review-personas tests passed"
 else
