@@ -154,24 +154,105 @@ net 上，這一輪的彙總指標（file_miss_rate、severity_rate）多半分�
 以「拿去解決 file_miss_rate 天花板」這個目標衡量，這次改動目前**不能算
 達標**，需要下一輪處理 turn 預算問題才能重新驗證原本的假設。
 
+## 驗證：convention-auditor 專屬 turn 上限（2026-08-31）
+
+上一節〈下一步〉第一點的子選項（b）：`run_persona_review` 讓
+`convention-auditor` 可以用新環境變數
+`MRA_REVIEW_CONVENTION_AUDITOR_MAX_TURNS` 單獨拉高 turn 上限，不動其餘
+5 個 persona 共用的 `MRA_REVIEW_PERSONA_MAX_TURNS`（`lib/review-personas.sh`
+`run_persona_review`，commit `cb6df82`）。不動 persona 的 METHOD，也不動
+`run_synthesize`。
+
+### 執行條件
+
+label `personas-with-convention-auditor-turns30`，跟前兩輪同一份
+`candidates_sha`（`7a8226ee333100a9`）、同一批 38 個 PR、容差 15。
+`MRA_REVIEW_PERSONA_MAX_TURNS=20`（跟上一輪一致），
+`MRA_REVIEW_CONVENTION_AUDITOR_MAX_TURNS=30`（拉高 50%，沒有量測依據，
+是先驗一次可行性的起始值）。跑完整 38 個 PR 之前，先單獨重跑 PR#746 當
+sanity check——這個 PR 先前兩次獨立觀察 convention-auditor 都撞了 20 輪
+上限——這次沒有出現任何 persona 失敗紀錄，才進到完整回測。
+
+### persona 個別失敗率：驗證有效
+
+| | baseline-personas（5 個 persona） | with-auditor 共用 20 輪（6 個） | with-auditor-turns30（6 個，這輪） |
+| --- | --- | --- | --- |
+| 個別失敗總次數 | 3（未逐一細分是哪個 persona） | 21 | 9 |
+| convention-auditor | 不存在 | 12 | 1 |
+| test-architect | — | 5 | 7 |
+| api-contract-guardian | — | 4 | 1 |
+
+convention-auditor 從 12 次降到 1 次，是這次改動要驗證的目標，機制生效。
+test-architect 的失敗次數（7）沒有跟著下降，甚至比前兩輪都高，說明它的
+失敗成因跟 convention-auditor 的 turn 上限無關——上一節〈下一步〉第二點
+點出的覆蓋清單成本，這輪同樣沒有動它，還是原封不動地在吃預算。
+
+### 新問題：瓶頸下推到 debate/synthesize 層
+
+前兩輪 PR 成功數都是 38/38，這輪掉到 35/38——PR#752、#780、#817 完全
+失敗，三份 `.err` 檔案裡的訊息都是 `[debate] claude failed ... Error:
+Reached max turns (8)`，即 `MRA_REVIEW_AGENT_MAX_TURNS`（預設 8，這次
+沒有調整）撞頂，不是任何一個 persona 本身失敗。
+
+PR#817 是最乾淨的案例：6 個 persona 全部成功，`.err` 檔案裡沒有任何一條
+persona 層的失敗紀錄，但 debate 階段自己撞了 8 輪上限，整個 review 輸出
+報廢。瓶頸沒有消失，只是從「persona 層 20 輪」移到了「debate 層 8
+輪」——convention-auditor 這次確實把原本會空手而回的內容交了出來，但
+下游處理這些材料的預算沒有跟著放寬。
+
+### 彙總指標：分母縮水，不能跟前兩輪直接比
+
+3 個失敗 PR 各自帶走 2、1、1 條 expected finding，共 4 條。
+`run-backtest.sh` 對失敗的 PR 一律排除、不計入任何統計，這輪的分母因此
+從前兩輪的 54 條縮成 50 條。下面只列絕對值，不直接比較比例：
+
+| | baseline-personas | with-auditor 共用 20 | with-auditor-turns30 |
+| --- | --- | --- | --- |
+| expected_total | 54 | 54 | 50 |
+| missed | 37 | 36 | 33 |
+| miss_rate | 0.69 | 0.67 | 0.66 |
+| file_missed | 24 | 26 | 24 |
+| file_miss_rate | 0.44 | 0.48 | 0.48 |
+| comments_total | 217 | 180 | 152 |
+| severity_agree | 7 | 9 | 8 |
+| severity_rate | 0.41 | 0.50 | 0.47 |
+| PR 成功數 | 38/38 | 38/38 | 35/38 |
+
+file_missed 的絕對數（24）回到了 baseline 的水準，但因為分母從 54 縮到
+50，比例仍是 0.48，沒有反映出這個回落——分母裡消失的那 4 條 expected
+finding 命中與否完全未知，不能假設它們原本會被抓到或漏掉，所以這裡不能
+說「file_miss_rate 其實已經改善只是被分母蓋過」，只能說絕對值跟比例在
+這輪呈現不同方向，兩個都要保留，都不能單獨拿來下結論。
+
+comments_total 從 180 降到 152，同樣主要是少了 3 個 PR。換算成每個成功
+PR 的平均值：baseline 5.7、上一輪 4.7、這輪 4.3，持續下降，跟 persona
+個別失敗總次數下降（21→9）方向相反。比較合理的解讀：這 3 個完全失敗的
+PR，正是 persona 層產出內容最多、才會讓 debate 撞頂的那幾個，被踢出樣本
+之後系統性拉低了剩餘 35 個 PR 的平均值——不是「這次設定讓 persona 講得
+更少」，是「講得最多的幾個 PR 直接報廢，不計入平均」。
+
+### 結論
+
+子選項（b）本身驗證有效：convention-auditor 的個別失敗率如預期壓下來
+了，機制運作方式跟預期一致。但整體目標（file_miss_rate 天花板）仍然
+沒有被這輪回答——即使不考慮分母縮水的問題，0.48 也還沒回到 baseline 的
+0.44；而且解決 persona 層瓶頸之後，debate/synthesize 層固定的 8 輪
+預算變成了新的撞頂點，比前兩輪多損失 3 個 PR、4 條 expected finding 的
+資訊。
+
 ## 下一步
 
-三個方向，按能回答的問題排序。
+一、`MRA_REVIEW_AGENT_MAX_TURNS`（debate/synthesize 層，目前固定 8）需要
+跟 persona 層同樣的處理——先用單一 PR（例如 PR#817，6 個 persona 全過但
+debate 撞頂的最乾淨案例）驗證拉高之後真的能跑完，再決定要整體拉高還是
+比照 convention-auditor 的做法給它獨立的環境變數。在這個問題解決之前，
+重跑任何一輪都會撞到同樣的下推瓶頸。
 
-第一，把 `convention-auditor` 的個別失敗率壓下來。兩個子選項：
-（a）簡化它的 METHOD，減少「先搜尋再比對」需要的輪次；
-（b）給它單獨拉高 `MRA_REVIEW_PERSONA_MAX_TURNS`（目前是全體 persona 共用
-同一個值，這個 persona 個別需要更多輪並不代表其餘 5 個也需要）。在turn
-預算問題沒解決之前，重跑這一輪只會得到同樣被失敗率淹沒的雜訊。
+二、覆蓋清單要求對 test-architect、api-contract-guardian 的成本仍然沒有
+被單獨量化——這輪它們的失敗次數（7、1）比 baseline（5 個 persona 合計
+3 次）高，需要一輪只加覆蓋清單、不加新 persona／不動 turn 上限的對照組
+才能回答。
 
-第二，覆蓋清單要求造成的額外輪次成本要單獨量化。這一輪的整體失敗率
-（21 次）裡，convention-auditor 佔 12 次，其餘 9 次分布在
-test-architect／api-contract-guardian，這兩者在 baseline 那輪合計只失敗
-過極少次——覆蓋清單本身也在吃預算，不是只有新 persona 的成本。要分開回答
-「加 persona 貴」跟「加覆蓋清單要求貴」這兩個問題，得跑一輪只加覆蓋清單
-不加新 persona 的對照組。
-
-第三，`2026-rule-extraction-comparison.md` 與 `2026-layered-injection.md`
-共同指出的天花板仍然沒有被這一輪回答：這一輪的 file_miss_rate 甚至還沒有
-回到 baseline 的 0.44。turn 預算問題解決之後，才有資格重新用這一輪的兩個
-機制假設去檢驗那個天花板動不動得了。
+三、`2026-rule-extraction-comparison.md` 與 `2026-layered-injection.md`
+共同指出的 file_miss_rate 天花板依然沒有被回答，要等第一點的 debate 層
+瓶頸解決、能拿到一輪 38/38 全過的完整資料後，才有資格重新檢驗。
