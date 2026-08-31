@@ -391,6 +391,7 @@ run_synthesize() {
   local findings_a="$5" findings_b="$6"
   local consumers="$7" _has_api_change="$8"
   local lang_directive="$9" model="${10}" claude_add_dirs="${11}" _mra_dir="${12}"
+  local max_turns="${13:-${MRA_REVIEW_SYNTH_MAX_TURNS:-8}}"
 
   local prompt
   prompt=$(cat <<'PROMPT_START'
@@ -451,7 +452,7 @@ Rules for line numbers:
   _review_without_github_credentials claude_invoke debate -p "$prompt" \
     "${_ad_arr[@]}" \
     --model "$model" \
-    --max-turns "${MRA_REVIEW_SYNTH_MAX_TURNS:-8}" \
+    --max-turns "$max_turns" \
     --disallowedTools "Write,Edit,NotebookEdit" \
     --setting-sources "project"
 }

@@ -432,7 +432,8 @@ $MRA_REVIEW_PR_DISCUSSION"
     review_json=$(run_synthesize \
       "$project" "$project_dir" "$persona_diff" "$persona_changed" \
       "$persona_findings" "" "$consumers" "$has_api_change" \
-      "$persona_lang" "$model" "$persona_focused" "$mra_dir")
+      "$persona_lang" "$model" "$persona_focused" "$mra_dir" \
+      "${MRA_REVIEW_PERSONA_SYNTH_MAX_TURNS:-${MRA_REVIEW_SYNTH_MAX_TURNS:-8}}")
     synth_exit=$?
     # synthesize 的 claude_invoke 偶爾會安靜地失敗：5 個 persona 全部成功、
     # mra 整體退出碼 0，但 synthesize 這一步吐出空字串或截斷輸出，兩個

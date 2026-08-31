@@ -87,7 +87,11 @@ FENCED_JSON_WITH_PROSE=$'這是五個 persona 綜合後的最終 review：\n\n``
 # 用一個全域變數控制 run_synthesize stub 這次要回什麼、退出碼是多少，
 # 讓每個測試案例只需要在呼叫前設一次就好，不用另外定義一整組函式。
 SYNTH_MODE="valid"
+SYNTH_MAX_TURNS_FILE="$TMP/last-synth-max-turns"
 run_synthesize() {
+  # lib/review.sh 用 $(...) 呼叫 run_synthesize，跑在子 shell 裡——對全域
+  # 變數的賦值不會傳回外層，記錄第 13 個參數要靠檔案，不能靠變數。
+  printf '%s' "${13:-}" > "$SYNTH_MAX_TURNS_FILE"
   case "$SYNTH_MODE" in
     valid)             printf '%s' "$VALID_JSON"; return 0 ;;
     valid_approved)    printf '%s' "$VALID_APPROVED_JSON"; return 0 ;;
@@ -226,6 +230,26 @@ for mode in empty prose missing_comments nonzero_exit; do
     ok "不合格情況($mode)沒有偽造出 status=APPROVED(實際是 [$status])"
   fi
 done
+
+# --- 案例 7：personas 路徑把 MRA_REVIEW_PERSONA_SYNTH_MAX_TURNS 傳給
+# run_synthesize 的第 13 個參數，未設定時退回 MRA_REVIEW_SYNTH_MAX_TURNS，
+# 兩者都沒設時退回 8(跟 debate 路徑沿用的預設值一致) ------------------------
+SYNTH_MODE="valid"
+unset MRA_REVIEW_PERSONA_SYNTH_MAX_TURNS MRA_REVIEW_SYNTH_MAX_TURNS
+rm -f "$SYNTH_MAX_TURNS_FILE"
+call_review "$TMP/c7a.out" "$TMP/c7a.err" --base main
+eq "兩個 env 都沒設時，personas 路徑傳給 run_synthesize 的 max_turns 是 8" "8" "$(cat "$SYNTH_MAX_TURNS_FILE" 2>/dev/null)"
+
+export MRA_REVIEW_SYNTH_MAX_TURNS=15
+rm -f "$SYNTH_MAX_TURNS_FILE"
+call_review "$TMP/c7b.out" "$TMP/c7b.err" --base main
+eq "只設共用值時，personas 路徑退回 MRA_REVIEW_SYNTH_MAX_TURNS=15" "15" "$(cat "$SYNTH_MAX_TURNS_FILE" 2>/dev/null)"
+
+export MRA_REVIEW_PERSONA_SYNTH_MAX_TURNS=16
+rm -f "$SYNTH_MAX_TURNS_FILE"
+call_review "$TMP/c7c.out" "$TMP/c7c.err" --base main
+eq "設了 persona 專屬值時，優先於共用值(收到 16 而不是 15)" "16" "$(cat "$SYNTH_MAX_TURNS_FILE" 2>/dev/null)"
+unset MRA_REVIEW_PERSONA_SYNTH_MAX_TURNS MRA_REVIEW_SYNTH_MAX_TURNS
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

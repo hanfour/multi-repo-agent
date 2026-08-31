@@ -88,5 +88,37 @@ else
 fi
 unset MRA_REVIEW_SYNTH_MAX_TURNS
 
+# --- 案例 3：呼叫端顯式傳入第 13 個參數(max_turns)時，它優先於
+# MRA_REVIEW_SYNTH_MAX_TURNS ---------------------------------------------
+# personas 路徑(lib/review.sh)需要比 debate 路徑更寬的 synthesize 預算
+# (6 個 persona 的 findings 全部串成一份塞進去，比 debate 的 2 份多)，
+# 用顯式參數覆寫，不影響 debate 路徑沿用共用 env 的既有行為。
+call_synth_with_override() {
+  run_synthesize "proj" "$TMP/project" "DIFF" "changed.txt" \
+    "findings A" "findings B" "" "false" "" "sonnet" "" "$MRA_DIR" "$1" \
+    >"$TMP/out" 2>"$TMP/err"
+}
+
+export MRA_REVIEW_SYNTH_MAX_TURNS=15
+rm -f "$ARGS_FILE"
+call_synth_with_override 30
+mt3="$(max_turns_arg)"
+if [[ "$mt3" == "30" ]]; then
+  ok "顯式傳入 max_turns=30 時，即使 MRA_REVIEW_SYNTH_MAX_TURNS=15 也用 30(收到 --max-turns 30)"
+else
+  fail "顯式傳入 max_turns=30 時應該收到 --max-turns 30，實際是 [$mt3]"
+fi
+unset MRA_REVIEW_SYNTH_MAX_TURNS
+
+# --- 案例 4：舊呼叫方式(不傳第 13 個參數)行為不變，退回 env/預設 8 --------
+rm -f "$ARGS_FILE"
+call_synth
+mt4="$(max_turns_arg)"
+if [[ "$mt4" == "8" ]]; then
+  ok "不傳第 13 個參數時(舊呼叫方式)，行為不變，仍是 --max-turns 8"
+else
+  fail "不傳第 13 個參數時應該仍是 --max-turns 8，實際是 [$mt4]"
+fi
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
