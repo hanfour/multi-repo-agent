@@ -100,6 +100,56 @@ if grep -q "rc=0" "$persona_err"; then
 fi
 rm -f "$persona_err"
 
+# run_persona_review must give convention-auditor its own max_turns override
+# (MRA_REVIEW_CONVENTION_AUDITOR_MAX_TURNS), falling back to the shared
+# MRA_REVIEW_PERSONA_MAX_TURNS when unset — other personas must never be
+# affected by the override.
+turns_log=$(mktemp)
+review_call_model() {
+  local prompt="$3" max_turns="$7"
+  if [[ "$prompt" == *"ROLE: Convention Auditor"* ]]; then
+    echo "convention-auditor:$max_turns" >> "$turns_log"
+  else
+    echo "other:$max_turns" >> "$turns_log"
+  fi
+}
+
+# Case 1: neither env var set — both personas fall back to the hardcoded
+# default (8).
+: > "$turns_log"
+run_persona_review "proj" "/tmp" "d" "x.js" "convention-auditor security-auditor" "" "" "" "" "" claude >/dev/null 2>/dev/null
+if ! grep -q "^convention-auditor:8$" "$turns_log"; then
+  echo "FAIL: expected convention-auditor to get default max_turns 8 with no env vars set, got: $(cat "$turns_log")"; errors=$((errors+1))
+fi
+if ! grep -q "^other:8$" "$turns_log"; then
+  echo "FAIL: expected other personas to get default max_turns 8 with no env vars set, got: $(cat "$turns_log")"; errors=$((errors+1))
+fi
+
+# Case 2: only the shared var set — every persona (including
+# convention-auditor) uses it, matching pre-change behavior.
+: > "$turns_log"
+MRA_REVIEW_PERSONA_MAX_TURNS=20 run_persona_review "proj" "/tmp" "d" "x.js" "convention-auditor security-auditor" "" "" "" "" "" claude >/dev/null 2>/dev/null
+if ! grep -q "^convention-auditor:20$" "$turns_log"; then
+  echo "FAIL: expected convention-auditor to fall back to shared max_turns 20, got: $(cat "$turns_log")"; errors=$((errors+1))
+fi
+if ! grep -q "^other:20$" "$turns_log"; then
+  echo "FAIL: expected other personas to use shared max_turns 20, got: $(cat "$turns_log")"; errors=$((errors+1))
+fi
+
+# Case 3: both vars set — convention-auditor uses its own override, other
+# personas stay on the shared value.
+: > "$turns_log"
+MRA_REVIEW_PERSONA_MAX_TURNS=20 MRA_REVIEW_CONVENTION_AUDITOR_MAX_TURNS=30 \
+  run_persona_review "proj" "/tmp" "d" "x.js" "convention-auditor security-auditor" "" "" "" "" "" claude >/dev/null 2>/dev/null
+if ! grep -q "^convention-auditor:30$" "$turns_log"; then
+  echo "FAIL: expected convention-auditor to use its own override 30, got: $(cat "$turns_log")"; errors=$((errors+1))
+fi
+if ! grep -q "^other:20$" "$turns_log"; then
+  echo "FAIL: expected other personas to stay on shared max_turns 20 despite convention-auditor override, got: $(cat "$turns_log")"; errors=$((errors+1))
+fi
+rm -f "$turns_log"
+unset -f review_call_model
+
 if [[ $errors -eq 0 ]]; then
   echo "PASS: all review-personas tests passed"
 else

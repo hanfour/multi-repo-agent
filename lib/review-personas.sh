@@ -80,10 +80,14 @@ run_persona_review() {
     err_files+=("$err")
     persona_names+=("$p")
     (
-      local prompt
+      local prompt max_turns
       prompt=$(build_persona_prompt "$p" "$diff" "$changed_files" "$consumers" "$pkb_context" "$lang_directive")
+      max_turns="${MRA_REVIEW_PERSONA_MAX_TURNS:-8}"
+      if [[ "$p" == "convention-auditor" ]]; then
+        max_turns="${MRA_REVIEW_CONVENTION_AUDITOR_MAX_TURNS:-$max_turns}"
+      fi
       review_call_model "review-persona" "$provider" "$prompt" "$model" \
-        "$project_dir" "$claude_add_dirs" "${MRA_REVIEW_PERSONA_MAX_TURNS:-8}" ""
+        "$project_dir" "$claude_add_dirs" "$max_turns" ""
     ) > "$f" 2> "$err" &
     pids+=("$!")
   done
