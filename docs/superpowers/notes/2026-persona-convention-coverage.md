@@ -191,8 +191,11 @@ test-architect 的失敗次數（7）沒有跟著下降，甚至比前兩輪都�
 
 前兩輪 PR 成功數都是 38/38，這輪掉到 35/38——PR#752、#780、#817 完全
 失敗，三份 `.err` 檔案裡的訊息都是 `[debate] claude failed ... Error:
-Reached max turns (8)`，即 `MRA_REVIEW_AGENT_MAX_TURNS`（預設 8，這次
-沒有調整）撞頂，不是任何一個 persona 本身失敗。
+Reached max turns (8)`，即 `MRA_REVIEW_SYNTH_MAX_TURNS`（正式名稱更正：
+不是 `MRA_REVIEW_AGENT_MAX_TURNS`，那個預設 20，是給 debate 路徑 Agent
+A/B 分析階段用的；這裡撞頂的是 `run_synthesize` 用的
+`MRA_REVIEW_SYNTH_MAX_TURNS`，預設 8，這次沒有調整）撞頂，不是任何一個
+persona 本身失敗。
 
 PR#817 是最乾淨的案例：6 個 persona 全部成功，`.err` 檔案裡沒有任何一條
 persona 層的失敗紀錄，但 debate 階段自己撞了 8 輪上限，整個 review 輸出
@@ -242,11 +245,10 @@ PR，正是 persona 層產出內容最多、才會讓 debate 撞頂的那幾個�
 
 ## 下一步
 
-一、`MRA_REVIEW_AGENT_MAX_TURNS`（debate/synthesize 層，目前固定 8）需要
-跟 persona 層同樣的處理——先用單一 PR（例如 PR#817，6 個 persona 全過但
-debate 撞頂的最乾淨案例）驗證拉高之後真的能跑完，再決定要整體拉高還是
-比照 convention-auditor 的做法給它獨立的環境變數。在這個問題解決之前，
-重跑任何一輪都會撞到同樣的下推瓶頸。
+一、`MRA_REVIEW_SYNTH_MAX_TURNS`（synthesize 層，目前固定 8）需要跟
+persona 層同樣的處理——先用單一 PR（例如 PR#817，6 個 persona 全過但
+debate 撞頂的最乾淨案例）驗證拉高之後真的能跑完，再跑一輪完整回測。在
+這個問題解決之前，重跑任何一輪都會撞到同樣的下推瓶頸。
 
 二、覆蓋清單要求對 test-architect、api-contract-guardian 的成本仍然沒有
 被單獨量化——這輪它們的失敗次數（7、1）比 baseline（5 個 persona 合計
