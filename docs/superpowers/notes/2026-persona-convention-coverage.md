@@ -243,18 +243,104 @@ PR，正是 persona 層產出內容最多、才會讓 debate 撞頂的那幾個�
 預算變成了新的撞頂點，比前兩輪多損失 3 個 PR、4 條 expected finding 的
 資訊。
 
+## 驗證：personas 路徑 synthesize 專屬 turn 上限（2026-08-31）
+
+上一節〈下一步〉第一點：`run_synthesize` 加一個可選的 `max_turns` 參數
+（commit `8ec40fd`），debate 路徑的 4 個既有呼叫點不動，只在 personas
+路徑（`lib/review.sh`）顯式傳入新環境變數
+`MRA_REVIEW_PERSONA_SYNTH_MAX_TURNS`，未設定時退回共用的
+`MRA_REVIEW_SYNTH_MAX_TURNS`（預設 8）。
+
+### 執行條件
+
+label `personas-with-convention-auditor-turns30-synth16`，跟前三輪同一
+份 `candidates_sha`、同一批 38 個 PR、容差 15。`MRA_REVIEW_PERSONA_MAX_TURNS=20`、
+`MRA_REVIEW_CONVENTION_AUDITOR_MAX_TURNS=30`（跟上一輪一致），
+`MRA_REVIEW_PERSONA_SYNTH_MAX_TURNS=16`（共用值 8 的兩倍，沒有量測依據，
+起始值）。先用 PR#817（上一輪 6 個 persona 全過、debate 自己撞頂的最乾淨
+案例）單獨驗證：這次順利跑完，沒有任何失敗紀錄，才進到完整回測。
+
+完整回測第一次跑到 25/38 時，`run-backtest.sh` 自己的覆蓋率門檻
+（`COVERAGE_TOO_LOW`，低於 0.8 直接判定「這一輪的數字不可用」）擋下了
+一份不能用的結果——`.err` 檔案顯示從某個時間點開始，大量 PR 撞到
+`You've hit your session limit · resets 8pm (Asia/Taipei)`，是 claude
+CLI 的帳號用量額度耗盡，跟這次程式改動無關，是環境問題（跟
+`docs/superpowers/plans/2026-08-26-persona-convention-coverage.md` 記錄
+過的 OAuth 過期是同一類狀況）。額度重置時間過後，原地重跑同一個
+`--label` 指令接手——`run-backtest.sh` 的續跑邏輯確認只重跑了失敗的
+PR（已成功 PR 的檔案時間戳沒有變動），最終拿到一份完整、乾淨的結果。
+
+### PR 成功數：這系列回測第一次 38/38 全過
+
+| | baseline-personas | with-auditor 共用 20 | with-auditor-turns30 | 這輪（turns30+synth16） |
+| --- | --- | --- | --- | --- |
+| PR 成功數 | 38/38 | 38/38 | 35/38 | **38/38** |
+| 個別失敗總次數 | 3 | 21 | 9 | 8 |
+| convention-auditor | 不存在 | 12 | 1 | 2 |
+| test-architect | — | 5 | 7 | 4 |
+| api-contract-guardian | — | 4 | 1 | 2 |
+
+上一輪的 3 個完全失敗（persona 層修好、瓶頸下推到 synthesize 層撞頂）
+這輪全部消失，沒有出現新的完全失敗案例。convention-auditor 的個別失敗
+次數比上一輪（1 次）略回升到 2 次，但仍遠低於共用 20 輪那輪的 12 次。
+
+### 彙總指標：這次跟 baseline 分母一致（都是 54 條），可以直接比
+
+| | baseline-personas | 這輪（turns30+synth16） | 差距 | 落在雜訊底噪內？ |
+| --- | --- | --- | --- | --- |
+| expected_total | 54 | 54 | — | — |
+| missed | 37 | 35 | -2 條 | 是（底噪 4-5 條） |
+| miss_rate | 0.69 | 0.65 | -0.04 | 是 |
+| file_missed | 24 | 23 | -1 條 | 是 |
+| file_miss_rate | 0.44 | 0.43 | -0.01 | 是 |
+| severity_rate | 0.41 | 0.53 | +0.12 | 是（底噪 16-17 個百分點） |
+| comments_total | 217 | 175 | -42 則 | — |
+| unmatched | 200 | 156 | -44 則 | — |
+| unmatched_rate | 0.92 | 0.89 | -0.03 | — |
+
+底噪引用 `2026-layered-injection.md`〈重複執行基準線〉：同一組設定連跑
+兩次，54 條裡有 4-5 條命中狀態會翻面，severity_rate 在兩個容差下各自
+跳了 16-17 個百分點，comments_total 幾乎不變（194 對 198，差 4 則）。
+miss_rate、file_miss_rate、severity_rate 這三個的差距都落在或接近這個
+底噪範圍內，不能斷言「改善」——但這是三輪嘗試以來，file_miss_rate
+第一次沒有比 baseline 差（0.43 對 0.44，前兩輪都是 0.48）。
+
+comments_total 下降 42 則、unmatched 下降 44 則，兩者幾乎完全對應——
+這次少講的 42 則裡，四十四分之四十二是先前會被判成 unmatched（跟任何
+expected finding 都對不上、算噪音）的部分。跟 miss_rate 沒有跟著變差
+（35 對 37，落在底噪內）合起來看，這次的下降主要是噪音變少，不是
+有用的 finding 被漏掉——跟先前重複執行雜訊底噪「comments_total 幾乎
+不變」的量測不同（差距 42 遠超過底噪的 4），comments_total 的下降本身
+是有意義的訊號，只是「更精煉」跟「miss_rate 微幅波動」是兩件各自獨立
+的事，不能互相證明。
+
+### 結論
+
+`MRA_REVIEW_SYNTH_MAX_TURNS` 確實是這輪之前的真正瓶頸：給 personas
+路徑一個獨立、更寬的 synthesize turn 上限之後，PR 成功數第一次達到
+38/38，且沒有引入任何新的完全失敗案例。file_miss_rate 天花板（前兩輪
+分別是 0.85／0.85 的 miss_rate 起跳、file_miss_rate 0.44 起跳）本身
+仍然沒有被打破——這輪 0.43 跟 baseline 0.44 的差距在雜訊範圍內，只能
+說「沒有變差」，不能說「解決了」。但這是第一次能在同樣的 54 條分母、
+38/38 全過的乾淨資料上跟 baseline 直接比較，不用再像前三輪一樣先扣掉
+分母縮水或失敗率暴增的干擾。
+
 ## 下一步
 
-一、`MRA_REVIEW_SYNTH_MAX_TURNS`（synthesize 層，目前固定 8）需要跟
-persona 層同樣的處理——先用單一 PR（例如 PR#817，6 個 persona 全過但
-debate 撞頂的最乾淨案例）驗證拉高之後真的能跑完，再跑一輪完整回測。在
-這個問題解決之前，重跑任何一輪都會撞到同樣的下推瓶頸。
-
-二、覆蓋清單要求對 test-architect、api-contract-guardian 的成本仍然沒有
-被單獨量化——這輪它們的失敗次數（7、1）比 baseline（5 個 persona 合計
+一、覆蓋清單要求對 test-architect、api-contract-guardian 的成本仍然沒有
+被單獨量化——這輪它們的失敗次數（4、2）比 baseline（5 個 persona 合計
 3 次）高，需要一輪只加覆蓋清單、不加新 persona／不動 turn 上限的對照組
-才能回答。
+才能回答，是不是這道要求本身在吃預算，還是純粹跟這輪的隨機波動有關。
 
-三、`2026-rule-extraction-comparison.md` 與 `2026-layered-injection.md`
-共同指出的 file_miss_rate 天花板依然沒有被回答，要等第一點的 debate 層
-瓶頸解決、能拿到一輪 38/38 全過的完整資料後，才有資格重新檢驗。
+二、`2026-rule-extraction-comparison.md` 與 `2026-layered-injection.md`
+共同指出的 file_miss_rate 天花板，這輪雖然拿到了乾淨資料，但差距在雜訊
+範圍內，還不能下結論。要看到明確、超出底噪範圍的改善，可能需要再往前
+一步——例如 convention-auditor 的 METHOD 本身（先前〈下一步〉子選項
+（a），這一系列一直沒有動過）是不是也該調整，或者這個天花板本身有別的
+成因，兩個追蹤過的成因（PR#764、PR#746）已經被機制證實存在，但沒有大到
+能穿透底噪的程度。
+
+三、convention-auditor 失敗次數這輪回升到 2 次（上一輪 1 次），樣本數
+太小（38 個 PR 裡的 1-2 次差距）分不出是雜訊還是 30 輪真的偶爾不夠，
+不需要單獨追——如果之後某一輪它的失敗次數明顯升高，才需要回頭檢視
+`MRA_REVIEW_CONVENTION_AUDITOR_MAX_TURNS=30` 這個起始值夠不夠。
