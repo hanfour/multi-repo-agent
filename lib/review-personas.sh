@@ -111,14 +111,29 @@ run_persona_review() {
     fi
   done
 
+  # Keep each persona's raw stdout/stderr when a dump dir is requested. What
+  # normally survives a review is only the synthesized JSON, which cannot tell
+  # "this persona never looked at the file" apart from "this persona flagged it
+  # and synthesize dropped it" — both look identical downstream. Unset (the
+  # default) writes nothing and leaves the flow untouched.
+  local dump_dir="${MRA_REVIEW_PERSONA_DUMP_DIR:-}"
+  if [[ -n "$dump_dir" ]] && ! mkdir -p "$dump_dir" 2>/dev/null; then
+    log_warn >&2 "[personas] cannot create dump dir '$dump_dir' — raw outputs not kept" "review"
+    dump_dir=""
+  fi
+
   local all_findings=""
-  local f
-  for f in "${result_files[@]}"; do
+  local i f
+  for i in "${!result_files[@]}"; do
+    f="${result_files[$i]}"
     all_findings+="$(cat "$f")"$'\n'
+    [[ -n "$dump_dir" ]] && cp "$f" "$dump_dir/${persona_names[$i]}.txt" 2>/dev/null
     rm -f "$f"
   done
   local e
-  for e in "${err_files[@]}"; do
+  for i in "${!err_files[@]}"; do
+    e="${err_files[$i]}"
+    [[ -n "$dump_dir" ]] && cp "$e" "$dump_dir/${persona_names[$i]}.err" 2>/dev/null
     if [[ ! -s "$e" ]]; then
       rm -f "$e"
     fi

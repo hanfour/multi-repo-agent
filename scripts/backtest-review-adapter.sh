@@ -438,6 +438,20 @@ fi
 # 情況，包含會 timeout 這件事。turn 數上限對齊是因為 gateway 設定本身有設；
 # gateway 沒放寬 timeout，這裡也不該偷偷放寬。
 range_expr="${base_sha}...${head_sha}"
+
+# MRA_BACKTEST_PERSONA_DUMP_BASE：留存每個 persona 的原始輸出(見
+# lib/review-personas.sh 的 MRA_REVIEW_PERSONA_DUMP_DIR)。最終 review JSON
+# 分不出「這個 persona 根本沒提到這個檔案」與「提到了、但 synthesize 把它
+# 丟掉」，兩者長得一模一樣；原始輸出是唯一能區分的東西。
+#
+# 一定要逐 PR 一個子目錄：一輪回測跑幾十個 PR，共用同一個目錄的話，persona
+# 檔名(<persona>.txt)在每個 PR 都一樣，後跑的會蓋掉先跑的，最後只剩下最後
+# 一個 PR 的輸出。子目錄名沿用 run-backtest.sh 存每個 PR 結果的同一套規則
+# (斜線換成雙底線，再接 __<pr>)，兩邊的檔案才對得起來。
+if [[ -n "${MRA_BACKTEST_PERSONA_DUMP_BASE:-}" ]]; then
+  export MRA_REVIEW_PERSONA_DUMP_DIR="${MRA_BACKTEST_PERSONA_DUMP_BASE}/${repo//\//__}__${pr}"
+fi
+
 review_output="$(cd "$BT_WS" && MRA_REVIEW_EMIT_JSON=1 \
   MRA_REVIEW_AGENT_MAX_TURNS="$agent_max_turns" \
   bash "$MRA_DIR/bin/mra.sh" review "$project" --range "$range_expr" "${mode_args[@]}")"

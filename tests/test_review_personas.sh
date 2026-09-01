@@ -150,6 +150,62 @@ fi
 rm -f "$turns_log"
 unset -f review_call_model
 
+# run_persona_review must be able to keep each persona's RAW output when
+# MRA_REVIEW_PERSONA_DUMP_DIR is set. Without it, the only thing that
+# survives a review is the synthesized JSON, so "the persona never looked at
+# this file" and "the persona flagged it but synthesize dropped it" are
+# indistinguishable — that gap is what this dump exists to close.
+review_call_model() {
+  local prompt="$3"
+  if [[ "$prompt" == *"ROLE: Convention Auditor"* ]]; then
+    echo "RAW-OUT convention-auditor"
+    echo "RAW-ERR convention-auditor" >&2
+  else
+    echo "RAW-OUT security-auditor"
+    echo "RAW-ERR security-auditor" >&2
+  fi
+}
+
+# Case 1: env var unset — nothing is written anywhere (behaviour unchanged).
+dump_probe=$(mktemp -d)
+run_persona_review "proj" "/tmp" "d" "x.js" "convention-auditor security-auditor" "" "" "" "" "" claude >/dev/null 2>/dev/null
+if [[ -n "$(ls -A "$dump_probe" 2>/dev/null)" ]]; then
+  echo "FAIL: nothing should be dumped when MRA_REVIEW_PERSONA_DUMP_DIR is unset"; errors=$((errors+1))
+fi
+rmdir "$dump_probe" 2>/dev/null
+
+# Case 2: env var set — one .txt per persona holding its raw stdout.
+dump_dir=$(mktemp -d)/nested   # also asserts the dir is created when missing
+MRA_REVIEW_PERSONA_DUMP_DIR="$dump_dir" \
+  run_persona_review "proj" "/tmp" "d" "x.js" "convention-auditor security-auditor" "" "" "" "" "" claude >/dev/null 2>/dev/null
+for p in convention-auditor security-auditor; do
+  if [[ ! -f "$dump_dir/$p.txt" ]]; then
+    echo "FAIL: expected raw stdout dump at $dump_dir/$p.txt"; errors=$((errors+1))
+  elif ! grep -q "RAW-OUT $p" "$dump_dir/$p.txt"; then
+    echo "FAIL: $p.txt should hold that persona's own raw output, got: $(cat "$dump_dir/$p.txt")"; errors=$((errors+1))
+  fi
+done
+
+# Case 3: stderr is dumped too — needed to tell "ran and stayed silent about
+# this file" apart from "died on max turns and contributed nothing".
+for p in convention-auditor security-auditor; do
+  if [[ ! -f "$dump_dir/$p.err" ]]; then
+    echo "FAIL: expected raw stderr dump at $dump_dir/$p.err"; errors=$((errors+1))
+  elif ! grep -q "RAW-ERR $p" "$dump_dir/$p.err"; then
+    echo "FAIL: $p.err should hold that persona's own stderr, got: $(cat "$dump_dir/$p.err")"; errors=$((errors+1))
+  fi
+done
+
+# Case 4: dumping must not change what run_persona_review returns.
+out_with_dump=$(MRA_REVIEW_PERSONA_DUMP_DIR="$dump_dir" \
+  run_persona_review "proj" "/tmp" "d" "x.js" "convention-auditor security-auditor" "" "" "" "" "" claude 2>/dev/null)
+out_without=$(run_persona_review "proj" "/tmp" "d" "x.js" "convention-auditor security-auditor" "" "" "" "" "" claude 2>/dev/null)
+if [[ "$out_with_dump" != "$out_without" ]]; then
+  echo "FAIL: dumping changed the findings returned to the caller"; errors=$((errors+1))
+fi
+rm -rf "$(dirname "$dump_dir")"
+unset -f review_call_model
+
 if [[ $errors -eq 0 ]]; then
   echo "PASS: all review-personas tests passed"
 else

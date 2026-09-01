@@ -138,6 +138,7 @@ write_mra_stub() {
 printf '%s\n' "\$*" > "$ARGV_LOG"
 printf 'MRA_REVIEW_AGENT_MAX_TURNS=%s\n' "\${MRA_REVIEW_AGENT_MAX_TURNS:-<unset>}" > "$ENV_LOG"
 printf 'MRA_CONFIG=%s\n' "\${MRA_CONFIG:-<unset>}" >> "$ENV_LOG"
+printf 'MRA_REVIEW_PERSONA_DUMP_DIR=%s\n' "\${MRA_REVIEW_PERSONA_DUMP_DIR:-<unset>}" >> "$ENV_LOG"
 {
   printf 'cwd=%s\n' "\$(pwd)"
   printf 'worktree_head=%s\n' "\$(git -C rails-app-1 rev-parse HEAD 2>&1)"
@@ -538,6 +539,24 @@ eq "設了 MRA_REVIEW_PERSONA_MAX_TURNS=15 時，cond 檔的 max_turns 跟著變
   "15" "$(jq -r '.max_turns' "$PCOND_FILE_TEST2")"
 eq "設了 MRA_REVIEW_SYNTH_MAX_TURNS=20 時，cond 檔的 synth_max_turns 跟著變" \
   "20" "$(jq -r '.synth_max_turns' "$PCOND_FILE_TEST2")"
+
+# --- MRA_BACKTEST_PERSONA_DUMP_BASE：每個 PR 自己一個子目錄 ----------------
+# persona 的原始輸出是唯一能分辨「這個 persona 根本沒提到這個檔案」與
+# 「提到了、但 synthesize 把它丟掉」的東西，最終 JSON 兩者長得一樣。
+# 一輪回測跑 38 個 PR，所以 dump 目錄一定要逐 PR 分開，否則後跑的 PR 會
+# 蓋掉先跑的，留下來的只有最後一個 PR 的輸出。
+"$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json >/dev/null 2>&1
+eq "沒設 MRA_BACKTEST_PERSONA_DUMP_BASE 時，不傳 MRA_REVIEW_PERSONA_DUMP_DIR 給 mra review" \
+  "<unset>" "$(grep '^MRA_REVIEW_PERSONA_DUMP_DIR=' "$ENV_LOG" | cut -d= -f2-)"
+
+DUMP_BASE="$TMP/persona-dumps"
+MRA_BACKTEST_PERSONA_DUMP_BASE="$DUMP_BASE" \
+  "$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json >/dev/null 2>&1
+# 路徑裡同時含 repo 與 pr，逐 PR 分開這件事就成立了（gh stub 只認 101，
+# 沒辦法在這裡真的跑第二個 PR 來對照）。
+eq "設了 MRA_BACKTEST_PERSONA_DUMP_BASE 時，per-PR 子目錄用 <repo 的斜線換成雙底線>__<pr>" \
+  "$DUMP_BASE/acme__rails-app-1__101" \
+  "$(grep '^MRA_REVIEW_PERSONA_DUMP_DIR=' "$ENV_LOG" | cut -d= -f2-)"
 
 # --- MRA_BACKTEST_COND_FILE 沒設時，adapter 不寫檔也不報錯 -----------------
 out_nocond="$("$ADAPTER" review acme/rails-app-1 --pr 101 --strategy personas --json 2>"$TMP/nocond.err")"
