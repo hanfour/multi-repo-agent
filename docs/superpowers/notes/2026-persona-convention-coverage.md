@@ -776,6 +776,12 @@ PR 成功數（38/38 對 35/38）、以及每個 PR 只評到 3.46 個相異檔�
 
 ## persona 抓到了，synthesize 丟掉了（2026-09-02）
 
+> **這一節的結論已被推翻**，見下面〈更正：上一節的結論錯了，而且基準集
+> 本身有問題〉。這裡的 `#764` 案例被判定為「persona 抓到了同一個缺陷」，
+> 逐條比對後確認 `throwOnError` 與 `skipGlobalError` 是兩個獨立機制，
+> 不是同一件事；而且那條 expected finding 在受審當下不成立。內容保留
+> 當推論過程的記錄。
+
 〈下一步（2026-09-02 起）〉第二點的機制做好之後（commit `9475013`，
 `MRA_REVIEW_PERSONA_DUMP_DIR`／`MRA_BACKTEST_PERSONA_DUMP_BASE`），第一次
 單 PR 試跑就撞到一個直接的反例。
@@ -860,3 +866,108 @@ expected finding 做三段分類：persona 原始輸出提過且有 finding、�
 三、擴大基準集（處理 12 條同源條目）仍然需要，但排在一、二之後：先弄
 清楚現有 54 條裡的漏抓各自屬於哪一類，比拿更多條目跑同一套分不出類別的
 指標更有價值。
+
+## 更正：上一節的結論錯了，而且基準集本身有問題（2026-09-02）
+
+上一節〈persona 抓到了，synthesize 丟掉了〉的核心宣稱是錯的。對 13 個
+PR（「四輪都漏」的那 15 條所在，共 18 條 expected finding）跑完帶 dump
+的 review 之後，逐條做語意比對，結論翻轉。
+
+### 先修一個會毀掉整份分析的比對錯誤
+
+第一版分類腳本在完整路徑找不到時退回純檔名比對。這是 monorepo，
+`list-actions.tsx`、`use-list-data.ts` 這種檔名在多個 feature 目錄下都
+存在，結果把 persona 對「另一支同名檔案」的 finding 算成命中。修正前是
+C 8 條、A 0 條，全部是誤判。改成「完整路徑優先、退回路徑後三層、不退回
+裸檔名」之後才是下面的數字。
+
+### 修正後的分佈
+
+| 類別 | 條數 | 意義 |
+| --- | --- | --- |
+| C 報了但最終 JSON 沒有 | 4 | persona 對這個檔案報了 finding，被 synthesize 丟掉 |
+| B 提到但沒報 finding | 6 | 有 persona 明確判 PASS |
+| A 完全沒提到 | 4 | 六個 persona 的原始輸出都沒出現這個檔案 |
+| HIT 這次命中 | 4 | 對照組，最終 JSON 有這個檔案 |
+
+（C 從 5 改成 4：`#410` 那條的 security-auditor finding 主體是
+`redis.service.ts`，`env.schema.ts` 只出現在括號裡的跨檔案對照引用，
+分類腳本的「同一行含路徑且含 severity 標記」判準會把這種引用算成報了
+finding。實際上四個 persona 都對那個檔案給了 PASS，應歸 B。）
+
+### C 類 4 條，沒有一條是「抓到了正確答案被丟掉」
+
+逐條比對 persona 報的內容與 expected 的缺陷，四條全部是**同一個檔案的
+不同問題**，沒有一條是同一個缺陷。上一節拿來當決定性證據的 `#764` 也
+不成立：
+
+- convention-auditor 報的是這支 query 沒有覆寫 `throwOnError: false`，
+  後果是 403/404 上拋給 route errorComponent、使用者看到整頁錯誤。
+- expected 說的是沒有標 `meta.skipGlobalError`。
+
+讀 PR#764 head 的 `lib/tanstack/query.ts` 可以確認這是兩個獨立機制：
+`throwOnError` 決定錯誤上不上拋，`skipGlobalError` 是 `queryCache.onError`
+裡的分支，管 toast 與 console。加 `throwOnError: false` 不會影響
+`onError` 那條路徑，真正的修法也不是它。三條做過反向關鍵字檢查（拿
+expected 的關鍵詞回頭搜六份 persona 輸出全文），`hasMonthlyRows`、
+`STUDIO_URL`／`scheme`／`javascript:`、`skipGlobalError`／`toast` 全部
+零命中。
+
+synthesize 確實會丟東西，而且會丟掉標成 HIGH 的 finding（`#764` 那則
+HIGH 與另一則 MEDIUM 都沒進最終 JSON，`#145`、`#410` 也各有整個檔案的
+finding 消失）。但這 18 條裡沒有一條能證明它丟掉的是正確答案。
+
+### 更根本的問題：基準集有無效條目
+
+比對過程中去核對了受審 PR 的 head 版本與修 bug 的 commit，10 條詳查的
+條目裡有 5 條的 expected finding 站不住：
+
+| 條目 | 問題 |
+| --- | --- |
+| `#410` `env.schema.ts:41` | 這一行 PR#410 一個字都沒改（是更早的 commit `9f66825b` 引入），修 bug 的 commit 是 12 天後獨立提的安全性收緊 |
+| `#764` `device-type-options.ts:22` | expected 描述的「會跳全域錯誤 toast」在受審當下不成立：當時的 `onError` 只有標了 `errorToast` 才跳 toast，這支沒標，失敗只會 `console.error`。是修 bug 那個 commit 自己重寫 `onError` 才讓 `skipGlobalError` 變必要 |
+| `#746` `$lineItemId.tsx:395` | note 說的 `useLineItemDetailDraft()` 沒帶 id 在第 251 行，PR#746 沒碰那行；第 395 行的實際內容是一個 `<div className=...>` |
+| `#750` `$lineItemId.tsx:411` | 同上，第 411 行是 `onCostEffectiveTrafficChange={...}` |
+| `#791` `line-item-setting-checklist.tsx:32` | note 描述的 `isPending` 回 `undefined` 是**另一個檔案**（`line-item-audience-targeting-section.tsx`）的缺陷 |
+
+成因是 `candidates.json` 的建構方式：拿 fix commit 的 hunk 範圍去跟受審
+PR 的改動範圍取行號交集。行號交集不等於「同一個缺陷在這個 PR 裡就存
+在」，也不保證交集算出來的那一行就是缺陷所在。`#746`／`#750` 是最清楚
+的例子：fix commit 有好幾個 hunk，真正改 draft hook 的那個沒有跟 PR 相
+交，相交的是別的 hunk，於是行號落在無關的位置上。
+
+### 這對前面幾節的意義
+
+四輪都打不破 file_miss_rate 天花板，現在多一個候選解釋：有一部分「漏
+抓」是不可能抓到的。PR 沒改那一行、或缺陷在受審當下還不存在，任何
+reviewer 都不該報。詳查的 10 條裡佔 5 條，但這 10 條是刻意挑「四輪都
+漏」的難例，不能直接外推到 54 條的比例。
+
+也要收回上一節那句「前四輪的歸因方向錯了」的說法：那是建立在 `#764`
+是 C1 的判斷上，而 `#764` 已確認是 C2。前四輪的歸因是不是錯的，這份
+資料回答不了。
+
+### 這一輪能站住的
+
+1. 三類的機制都真實存在，而且可以分辨了：A（沒提到）、B（提到判 PASS）、
+   C（報了被丟掉）在 18 條裡分別是 4、6、4 條。這是先前拿不到的資訊。
+2. synthesize 會丟掉 HIGH 等級的 finding，有多個案例。丟的是不是正確
+   答案，這批資料回答不了。
+3. 基準集有無效條目，成因（行號交集）可以驗證，也可以修。
+4. A 類 4 條裡，`#785`、`#791` 所在的 PR 有一個 persona（test-architect）
+   撞 `max turns (20)` 掛掉，輸出只有 29 bytes。這 13 個 PR 裡有 3 個
+   出現同一個狀況，跟前四輪觀察到的 test-architect 失敗率一致。
+
+## 下一步（2026-09-02 第二次更新）
+
+一、**先修基準集，再談任何漏抓率**。`candidates.json` 的行號交集法會產
+出「PR 沒改過那行」與「缺陷當下不存在」兩類無效條目。可驗證的修法：對
+每條 expected finding 檢查它的 path 與 line 是否落在該 PR 的實際 diff
+hunk 內，落不進去的標記出來。這是純程式檢查，不用跑任何 review。
+
+二、上一節列的「跑完整 38 個 PR 帶 dump」往後排。在基準集的無效條目
+清掉之前，跑更大樣本只會得到更多無法解讀的數字。
+
+三、`test-architect` 在 20 輪下的失敗率是這份資料裡少數乾淨的訊號
+（13 個 PR 裡 3 個），可以比照 convention-auditor 給它獨立的 turn 上限，
+判準是它的個別失敗次數，不牽涉 file_miss_rate。
