@@ -106,6 +106,11 @@ query（`pricing-model-options.ts`）逐項對照 `enabled`、`staleTime`、key
 `skipGlobalError` 這個特定慣例，不是「FOCUS 沒涵蓋」的原始問題重演，是
 單次執行下 sibling 比對挑中了哪個維度的變異。
 
+（2026-09-02 更正：這段結論是在只看得到最終 JSON 的情況下推論的。留存
+persona 原始輸出之後，同樣設定重跑這個 PR，convention-auditor 覆蓋到了
+那個維度，而且報成 HIGH，是 synthesize 沒有把它留下來。見
+〈persona 抓到了，synthesize 丟掉了〉一節。）
+
 **PR#746**（`$lineItemId.tsx:395`，expected：`useLineItemDetailDraft()` 少帶
 `lineItem.id`）：兩次獨立觀察都印證了覆蓋清單機制本身有效——
 `refactoring-sage`、`security-auditor` 都在輸出裡明確把 `$lineItemId.tsx`
@@ -768,3 +773,90 @@ PR 成功數（38/38 對 35/38）、以及每個 PR 只評到 3.46 個相異檔�
 四、基準集本身有 12 條同源條目（2 個缺陷型態、11 個 PR），佔 22%。
 擴大基準集時要處理這個問題，否則單一缺陷型態的系統性表現會被放大成
 12 條的變化。
+
+## persona 抓到了，synthesize 丟掉了（2026-09-02）
+
+〈下一步（2026-09-02 起）〉第二點的機制做好之後（commit `9475013`，
+`MRA_REVIEW_PERSONA_DUMP_DIR`／`MRA_BACKTEST_PERSONA_DUMP_BASE`），第一次
+單 PR 試跑就撞到一個直接的反例。
+
+### 案例：PR#764
+
+這個 PR 是本文最前面那份 spec 追蹤的兩個原始案例之一。設定跟
+`turns30+synth16` 那輪一致，6 個 persona 全部跑完（六份 `.err` 都是 0
+bytes，沒有任何一個撞 turn 上限）。
+
+最終 review JSON 只有一則 comment，落在 `device-type-picker.test.tsx`，
+summary 寫著「無安全性、契約破壞或效能問題」。expected finding 所在的
+`device-type-options.ts` 一則 comment 都沒有，照 `backtest_file_missed`
+的判準記成 file_missed。
+
+但 persona 的原始輸出裡，六個 persona 全部都提到了這個檔案，其中三個
+各自產出了帶 severity 的 finding。convention-auditor 那條是：
+
+> **[HIGH]** `device-type-options.ts:24` — 同樣「依 `adFormatTypeId`
+> 門控」的選項 query，`pricing-model-options.ts:22-24` 與
+> `media-options.ts:22-23` 都明確覆寫 `throwOnError: false`，蓋掉
+> `src/lib/tanstack/query.ts` 的全域預設（403/404 會拋給 route
+> errorComponent）。這支漏寫，若該格式的裝置選項 API 回 403/404，會把
+> 使用者導向整頁錯誤，而非像兩個 sibling 一樣把錯誤留在對話框內處理。
+
+對照 expected finding：
+
+> `device-type-options.ts:22` [MEDIUM] — 選項查詢沒有標記
+> `skipGlobalError`，背景載入失敗時會跳全域錯誤 toast，與呼叫端自己的
+> 錯誤處理重複。
+
+兩條講的是同一件事：這支 query 沒有覆寫全域錯誤處理（一邊寫
+`skipGlobalError`、一邊寫 `throwOnError: false`，是同一個機制的兩種
+說法），行號差 2，在容差 15 下算命中。persona 抓到了，而且嚴重度還報得
+比 expected 高一級。
+
+### 這推翻了什麼
+
+本文〈兩個具體案例的追蹤結果〉當時對這個 PR 的結論是：convention-auditor
+真的做了 sibling 比對，但「這次比對的維度沒有剛好覆蓋到 `skipGlobalError`
+這個特定慣例」。那是在只看得到最終 JSON 的情況下做的推論。現在看得到
+原始輸出，同樣的設定下它覆蓋到了，還報成 HIGH。
+
+更要緊的是前四輪的歸因方向：新增 persona、加覆蓋清單、調 persona 層與
+synthesize 層的 turn 預算，全部都在處理「persona 沒產出」這個假設。這個
+案例顯示至少有一條路徑不是那樣：persona 產出了，synthesize 沒有留下來。
+一條 HIGH、兩條 MEDIUM，三個 persona 各自獨立提到同一個檔案，最終 JSON
+一條都沒有。
+
+`run_synthesize` 的 prompt（`lib/review-debate-agents.sh`）有三條丟棄
+規則：Rule 4「Drop any finding that does not explain scope relation,
+reachable path, concrete impact」、Rule 5「Drop ... cosmetic gaps ...
+unless they create a concrete reachable bug now」、Rule 7「APPROVED only
+if zero CRITICAL or HIGH」。哪一條丟掉了這則 HIGH，這個案例還看不出來，
+但丟棄發生在 synthesize 這一層是可以確定的。
+
+### 這個案例能撐多少
+
+只有一個 PR、一次執行。它證明的是「persona 抓到、synthesize 丟掉」這條
+路徑真實存在，而且就發生在原始 spec 追蹤的案例上。它沒有證明的是這條
+路徑佔 file_missed 的多少比例：要回答那個，得對更多 PR 做同樣的比對
+（每個 PR 逐條檢查 persona 原始輸出有沒有提到 expected finding 的檔案，
+再跟最終 JSON 對照）。
+
+不過就算比例未知，這個案例已經足以說明前四輪的一個共同問題：把
+file_missed 全部歸因到 persona 層，在沒有原始輸出的情況下是無法驗證的
+假設，而不是觀察。
+
+## 下一步（2026-09-02 更新）
+
+一、跑一輪帶 `MRA_BACKTEST_PERSONA_DUMP_BASE` 的完整回測，對每一條
+expected finding 做三段分類：persona 原始輸出提過且有 finding、提過但
+判 PASS、完全沒提。這是第一次能把 file_missed 拆成「persona 沒看到」、
+「persona 看到判沒問題」、「persona 報了但 synthesize 丟掉」三類，而
+這三類要修的地方完全不同。
+
+二、上一版〈下一步〉第三點（驗證「檔案選取」假設）維持，但判準要改：
+有了原始輸出，「每個 PR 只評到 3.46 個相異檔案」這個數字要重新算一次，
+因為那是從最終 JSON 算的，現在知道最終 JSON 是 synthesize 過濾後的結果，
+不等於 persona 看過的範圍。
+
+三、擴大基準集（處理 12 條同源條目）仍然需要，但排在一、二之後：先弄
+清楚現有 54 條裡的漏抓各自屬於哪一類，比拿更多條目跑同一套分不出類別的
+指標更有價值。
