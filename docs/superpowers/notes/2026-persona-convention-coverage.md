@@ -129,6 +129,9 @@ expected finding 裡有 4 到 5 條的命中狀態會翻面——這是解讀本
 - **file_miss_rate 從 0.44 升到 0.48**，對應 file_missed 24→26（54 條裡
   差 2 條）。這個差距落在浮動下限（4-5 條）以內甚至更小：方向是錯的，但
   幅度分不出來是真的變差，還是單純換一次執行就會出現的雜訊。
+  （2026-09-01 更正：這裡把 missed 的 4-5 條門檻套到 file_missed 上是
+  沒有依據的，那個門檻沒有在 file_missed 這個度量上量過。見
+  〈對照組：只加覆蓋清單，不加新 persona〉的〈彙總指標〉一節。）
 - **severity_rate 從 41% 升到 50%**，9 個百分點的變化，比重複執行基準線
   量到的 16-17 個百分點雜訊還小。這個數字同樣不能當「明顯上升」的證據，
   上一節已把「明顯」拿掉。
@@ -291,8 +294,8 @@ PR（已成功 PR 的檔案時間戳沒有變動），最終拿到一份完整�
 | expected_total | 54 | 54 | — | — |
 | missed | 37 | 35 | -2 條 | 是（底噪 4-5 條） |
 | miss_rate | 0.69 | 0.65 | -0.04 | 是 |
-| file_missed | 24 | 23 | -1 條 | 是 |
-| file_miss_rate | 0.44 | 0.43 | -0.01 | 是 |
+| file_missed | 24 | 23 | -1 條 | 無法判斷（見下方更正） |
+| file_miss_rate | 0.44 | 0.43 | -0.01 | 無法判斷 |
 | severity_rate | 0.41 | 0.53 | +0.12 | 是（底噪 16-17 個百分點） |
 | comments_total | 217 | 175 | -42 則 | — |
 | unmatched | 200 | 156 | -44 則 | — |
@@ -301,31 +304,40 @@ PR（已成功 PR 的檔案時間戳沒有變動），最終拿到一份完整�
 底噪引用 `2026-layered-injection.md`〈重複執行基準線〉：同一組設定連跑
 兩次，54 條裡有 4-5 條命中狀態會翻面，severity_rate 在兩個容差下各自
 跳了 16-17 個百分點，comments_total 幾乎不變（194 對 198，差 4 則）。
-miss_rate、file_miss_rate、severity_rate 這三個的差距都落在或接近這個
-底噪範圍內，不能斷言「改善」——但這是三輪嘗試以來，file_miss_rate
-第一次沒有比 baseline 差（0.43 對 0.44，前兩輪都是 0.48）。
+miss_rate、severity_rate 這兩個的差距都落在或接近這個底噪範圍內，不能
+斷言「改善」。file_miss_rate 這一列原本也寫「在底噪內」，
+2026-09-01 更正：那個 4-5 條的門檻是在 missed 上量的，沒有在 file_missed
+上量過，這一格應該是「無法判斷」。可以確定的只有 file_missed 這輪是 23，
+是四輪裡最低的一個（baseline 24、with-auditor 26、turns30 24），至於這
+算不算改善，要等 file_missed 自己的浮動被量出來才知道。
 
-comments_total 下降 42 則、unmatched 下降 44 則，兩者幾乎完全對應——
-這次少講的 42 則裡，四十四分之四十二是先前會被判成 unmatched（跟任何
-expected finding 都對不上、算噪音）的部分。跟 miss_rate 沒有跟著變差
-（35 對 37，落在底噪內）合起來看，這次的下降主要是噪音變少，不是
-有用的 finding 被漏掉——跟先前重複執行雜訊底噪「comments_total 幾乎
-不變」的量測不同（差距 42 遠超過底噪的 4），comments_total 的下降本身
-是有意義的訊號，只是「更精煉」跟「miss_rate 微幅波動」是兩件各自獨立
-的事，不能互相證明。
+comments_total 下降 42 則、unmatched 下降 44 則，兩者幾乎完全對應：
+少掉的 comment 幾乎都是先前會被判成 unmatched 的那些。跟先前重複執行
+底噪「comments_total 幾乎不變」的量測相比（差距 4 則），42 則的落差
+跨得出去，是有意義的訊號。
+
+2026-09-01 更正：這裡原本把 unmatched 稱作「噪音」，並據此說「下降的
+主要是噪音、不是有用的 finding」。unmatched 的定義只是「跟基準集裡任何
+一條 expected finding 都對不上」，而基準集是從後續修 bug 的 commit 反推
+出來的，涵蓋不到所有真實有效的 review 意見。正確的說法是「跟基準集對不
+上的 comment 少了 44 則」，那些 comment 有沒有價值，這份資料回答不了。
 
 ### 結論
 
-`MRA_REVIEW_SYNTH_MAX_TURNS` 確實是這輪之前的真正瓶頸：給 personas
-路徑一個獨立、更寬的 synthesize turn 上限之後，PR 成功數第一次達到
-38/38，且沒有引入任何新的完全失敗案例。file_miss_rate 天花板（前兩輪
-分別是 0.85／0.85 的 miss_rate 起跳、file_miss_rate 0.44 起跳）本身
-仍然沒有被打破——這輪 0.43 跟 baseline 0.44 的差距在雜訊範圍內，只能
-說「沒有變差」，不能說「解決了」。但這是第一次能在同樣的 54 條分母、
-38/38 全過的乾淨資料上跟 baseline 直接比較，不用再像前三輪一樣先扣掉
-分母縮水或失敗率暴增的干擾。
+給 personas 路徑一個獨立、更寬的 synthesize turn 上限之後，PR 成功數
+第一次達到 38/38，且沒有引入任何新的完全失敗案例。這是可以確定的事實。
 
-## 下一步
+「`MRA_REVIEW_SYNTH_MAX_TURNS` 是真正的瓶頸」這個因果解釋，在
+2026-09-01 那輪之後要打折：同樣是 synth 8，PR#817 在某些設定下跑得完、
+某些跑不完（見〈#817：五種設定下的結果不構成一致模式〉），所以 synth
+從 8 放寬到 16 跟 38/38 之間的關係，比原本寫的更弱。
+
+file_miss_rate 天花板本身仍然沒有被打破——但「這輪 0.43 跟 baseline
+0.44 的差距在雜訊範圍內」這句話也是誤用了 missed 的門檻，見上面的更正。
+可以確定的是：這是第一次能在同樣的 54 條分母、38/38 全過的乾淨資料上跟
+baseline 直接比較，不用再像前三輪一樣先扣掉分母縮水或失敗率暴增的干擾。
+
+## 下一步（2026-08-31）
 
 一、覆蓋清單要求對 test-architect、api-contract-guardian 的成本仍然沒有
 被單獨量化——這輪它們的失敗次數（4、2）比 baseline（5 個 persona 合計
@@ -344,3 +356,155 @@ expected finding 都對不上、算噪音）的部分。跟 miss_rate 沒有跟�
 太小（38 個 PR 裡的 1-2 次差距）分不出是雜訊還是 30 輪真的偶爾不夠，
 不需要單獨追——如果之後某一輪它的失敗次數明顯升高，才需要回頭檢視
 `MRA_REVIEW_CONVENTION_AUDITOR_MAX_TURNS=30` 這個起始值夠不夠。
+
+## 對照組：只加覆蓋清單，不加新 persona（2026-09-01）
+
+回答上一節〈下一步〉第一點。label `personas-coverage-checklist-only`：
+5 個 persona（跟 baseline 同陣容，`MRA_REVIEW_ENABLE_CONVENTION_AUDITOR=0`）、
+`MRA_REVIEW_ENABLE_COVERAGE_CHECKLIST=1`、persona 20 輪、synthesize 維持
+預設 8 輪（刻意不放寬，才能只留覆蓋清單這一個變因）。同一份
+`candidates_sha`、容差 15。37/38 成功（`failed_count=1`），覆蓋率 0.97
+高於 `run-backtest.sh` 的 0.8 門檻，數字可用。
+
+過程中同樣撞到一次 claude CLI 額度耗盡（`resets 1am`），一樣被
+`COVERAGE_TOO_LOW` 擋下（0.42），額度重置後原地重跑接手。連續兩輪都在
+跑到 17-25 個 PR 時撞到額度上限，是規劃後續回測要納入的執行條件。
+
+### 兩筆成本各自的數字
+
+四輪擺在一起，前兩維剛好構成「有無 convention-auditor」×「有無覆蓋
+清單」的對照：
+
+| | persona 陣容 | 覆蓋清單 | turn 預算 | 個別失敗總次數 |
+| --- | --- | --- | --- | --- |
+| baseline-personas | 5 | 無 | 共用 20／synth 8 | 3 |
+| coverage-checklist-only（這輪） | 5 | 有 | 共用 20／synth 8 | 8 |
+| with-convention-auditor | 6 | 有 | 共用 20／synth 8 | 21 |
+| turns30+synth16 | 6 | 有 | 30／synth 16 | 8 |
+
+逐 persona 拆開：
+
+| | baseline | coverage-only | with-auditor | turns30+synth16 |
+| --- | --- | --- | --- | --- |
+| test-architect | 未逐一細分 | 6 | 5 | 4 |
+| api-contract-guardian | （合計 3） | 2 | 4 | 2 |
+| convention-auditor | 不存在 | 不存在 | 12 | 2 |
+
+覆蓋清單本身的成本：3 → 8，多 5 次個別失敗，5 個 persona 陣容不變、
+turn 預算不變，唯一的差別就是這道要求。convention-auditor 自己的成本：
+`with-auditor` 那輪 21 次裡它佔 12 次，其餘 9 次（test-architect 5 ＋
+api-contract-guardian 4）跟這輪的 8 次（6＋2）落在同一個量級。
+
+這兩個數字有兩個限制。第一，這是 2x2 設計裡的三格，缺「開
+convention-auditor、關覆蓋清單」那一格，所以只能說兩筆成本可以各自估出
+一個數，不能說它們之間沒有交互作用。第二，baseline 那輪的 3 次沒有逐
+persona 細分，「多 5 次」是總數相減，不是同一個 persona 前後比。
+
+### #817：五種設定下的結果不構成一致模式
+
+這輪唯一失敗的 PR#817，`.err` 寫的是 `Reached max turns (8)`，5 個
+persona 全部成功、synthesize 自己撞頂。把這個 PR 在五輪裡的結果全部
+攤開：
+
+| 設定 | PR#817 |
+| --- | --- |
+| 5 persona ＋ 無覆蓋清單 ＋ synth 8（baseline） | 跑完 |
+| 6 persona ＋ 覆蓋清單 ＋ 共用 20 輪 ＋ synth 8 | 跑完 |
+| 6 persona ＋ 覆蓋清單 ＋ auditor 30 輪 ＋ synth 8 | 撞頂失敗 |
+| 5 persona ＋ 覆蓋清單 ＋ synth 8（這輪） | 撞頂失敗 |
+| 6 persona ＋ 覆蓋清單 ＋ auditor 30 輪 ＋ synth 16 | 跑完 |
+
+同樣是覆蓋清單加 synth 8，第二列跑完、第三與第四列撞頂。單一 PR、每種
+設定各跑一次，分不出這是設定造成的差異還是同一設定下的執行浮動。可以
+說的只有兩件事：synth 8 之下這個 PR 至少失敗過兩次、synth 16 之下跑完
+過一次。不能說撞頂的主因是覆蓋清單，也不能說跟 persona 數量無關：
+第二列跟第三列的 persona 陣容與覆蓋清單都一樣，差別只在
+convention-auditor 的 turn 上限，而那個參數理論上不影響 synthesize 的
+輸入量。
+
+`MRA_REVIEW_PERSONA_SYNTH_MAX_TURNS`（commit `8ec40fd`）之後那一輪拿到
+38/38，這個事實不變；但「為什麼 synth 8 有時候不夠」目前沒有乾淨的
+解釋，「覆蓋清單讓每個 persona 的輸出變長」是一個跟資料相容的推測，
+沒有量過 persona 輸出長度，不能當結論。
+
+### 彙總指標
+
+| | baseline | coverage-only（這輪） | turns30+synth16 |
+| --- | --- | --- | --- |
+| expected_total | 54 | 53 | 54 |
+| missed | 37 | 38 | 35 |
+| miss_rate | 0.69 | 0.72 | 0.65 |
+| file_missed | 24 | 25 | 23 |
+| file_miss_rate | 0.44 | 0.47 | 0.43 |
+| comments_total | 217 | 172 | 175 |
+| unmatched | 200 | 157 | 156 |
+| unmatched_rate | 0.92 | 0.91 | 0.89 |
+| severity_rate | 0.41 | 0.53 | 0.53 |
+| PR 成功數 | 38/38 | 37/38 | 38/38 |
+
+missed 跟 baseline 差 1 條（37 → 38），落在 `2026-layered-injection.md`
+量到的 4-5 條浮動內，不能說覆蓋清單讓漏抓變差。
+
+file_missed 差 1 條（24 → 25）不能用同一句話帶過：那個 4-5 條的浮動是
+在 missed 上量的，file_missed 從來沒有量過重複執行浮動。兩者不是同一個
+度量。file_missed 問的是「這個檔案裡有沒有任何 comment」，對錨點漂移
+免疫，浮動應該比 missed 小，但小多少沒有數字。這一節（以及本文前面
+所有拿 4-5 條門檻去判斷 file_missed 的地方）都受這個限制影響：目前無法
+判斷 24 → 25 → 26 → 23 這些變化是不是雜訊。
+
+comments_total 是唯一有底噪可比、且明顯跨出去的：`2026-layered-injection.md`
+量到重複執行下它幾乎不變（194 對 198，差 4 則），而這裡 217 → 172 少了
+45 則。三輪帶覆蓋清單的結果分別是 172、180、175；因為 PR 數不同（37 或
+38），換成每個 PR 平均比較公平：baseline 5.71，三輪帶覆蓋清單的是
+4.65／4.74／4.61。開不開 convention-auditor 都落在 4.6-4.7 之間，
+baseline 明顯較高。review 講得比較少這件事跟覆蓋清單同時出現，跟
+convention-auditor 沒有對應關係。
+
+unmatched 同步從 200 降到 157／156。unmatched 的定義是「跟基準集裡任何
+一條 expected finding 都對不上」，這不等於「是噪音」：基準集是從後續修
+bug 的 commit 反推出來的，本來就涵蓋不到所有真實有效的 review 意見。
+所以只能說「跟基準集對不上的 comment 少了 43 則」，不能說「噪音少了 43
+則」。少掉的那些是不是真的沒價值，這份資料回答不了。
+
+severity_rate 兩輪都是 0.53、baseline 0.41，差 12 個百分點，仍在底噪
+（16-17 個百分點）內，不能當證據。
+
+### 結論
+
+覆蓋清單要求算得出來的帳：個別 persona 失敗從 3 次增為 8 次（總數相減，
+baseline 未逐一細分）、每個 PR 的 comment 從 5.71 則降到 4.65 則、跟
+基準集對不上的 comment 少 43 則、missed 的變化落在浮動內。
+
+算不出來的帳：file_missed 的變化無法判斷（沒有這個度量的浮動基準）；
+少掉的 comment 有沒有價值（基準集涵蓋不到的部分無法評估）；覆蓋清單跟
+convention-auditor 之間有沒有交互作用（缺 2x2 的第四格）；synth 8 撞頂
+的成因（同設定下有成功有失敗）。
+
+convention-auditor 的成本是另外一筆：在共用 20 輪預算下是 12 次失敗，
+給它 30 輪之後降到 2 次。
+
+## 下一步（2026-09-01）
+
+一、先補量 file_missed 的重複執行浮動。這是解鎖其他判斷的前提：本文
+（以及前面幾節）所有關於 file_missed 的「在底噪內」判斷，都是把 missed
+的 4-5 條門檻挪用過來的，沒有依據。做法跟
+`2026-layered-injection.md`〈重複執行基準線〉一樣，同一個 label 跑第二
+次，逐條比對檔案層級的命中狀態。成本是一輪回測。
+
+在那之前，「file_miss_rate 天花板沒有被打破」這句話本身也是證據不足的：
+四輪的 file_missed 是 24、25、26、23，如果 file_missed 自己的浮動其實
+只有 1-2 條，這幾個數字就不是「都在同一區間」，而是有方向的變化。
+目前無法分辨。
+
+二、補跑 2x2 的第四格：`MRA_REVIEW_ENABLE_CONVENTION_AUDITOR=1` ＋
+`MRA_REVIEW_ENABLE_COVERAGE_CHECKLIST=0`。有了這格才能講「兩筆成本
+獨立」，沒有的話只能各自報一個數。
+
+三、convention-auditor 的 METHOD（先前子選項（a），一直沒動過）仍是
+未試過的變因，但在第一、二點補齊之前動它，等於在看不清底噪的情況下再
+加一個機制，沒有比前四輪更多的依據。
+
+四、覆蓋清單要不要改成預設開（目前預設關），取捨是「每個 PR 少講 1.06
+則、其中多數跟基準集對不上」對上「多 5 次 persona 個別失敗」。這是產品
+決定不是量測問題，但要注意「少講的那些沒價值」目前沒有證據，基準集
+涵蓋不到的部分這份資料回答不了。
