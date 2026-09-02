@@ -10,6 +10,11 @@
 #   fix F1    改 seven4：整個 hunk 歸到 PR #7（ratio 1.0），合併後 2 天
 #   fix F2    改 seven5 與 l6（相鄰，同一個 hunk）：ratio 0.5
 #   fix F3    改 l9：ratio 0，不該成為候選
+#   fix F4    改 seven3，只在 origin 上、本機 clone 沒有：產生器要自己 fetch
+#
+# 本機 clone 是從 $TMP/remote clone 出來的，F4 在 clone 之後才推上 remote，
+# 模擬「PR 合進已刪除的分支，merge commit 從任何 ref 都到不了，只能用 sha
+# 直接 fetch」這種真實情況（super-dsp-2.0 30 個 PR 裡有 7 個）。
 set -uo pipefail
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -19,7 +24,7 @@ export MRA_BACKTEST_WORKSPACE="$TMP/ws"
 export MRA_TEST_SHAS="$TMP/shas"
 mkdir -p "$TMP/bin" "$MRA_TEST_SHAS" "$MRA_BACKTEST_WORKSPACE"
 
-R="$MRA_BACKTEST_WORKSPACE/blame-app"
+R="$TMP/remote"
 mkdir -p "$R"
 g() { git -C "$R" -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false "$@"; }
 g init -q -b main >/dev/null 2>&1 || g init -q >/dev/null
@@ -39,17 +44,28 @@ sed -i.bak 's/^l9$/fixed9/' "$R/a.rb"; rm -f "$R/a.rb.bak"
 GIT_COMMITTER_DATE=2026-08-14T00:00:00Z g commit -q -am "fix: l9"
 g rev-parse HEAD > "$MRA_TEST_SHAS/f3"
 
+# 本機 clone：到 F3 為止。之後 remote 再多一個 F4，本機沒有。
+git clone -q "$R" "$MRA_BACKTEST_WORKSPACE/blame-app"
+# 本機 file:// 的 remote 預設不准用 sha 直接 fetch 未公告的物件；GitHub 准。
+g config uploadpack.allowAnySHA1InWant true
+sed -i.bak 's/^seven3$/fixed3/' "$R/a.rb"; rm -f "$R/a.rb.bak"
+GIT_COMMITTER_DATE=2026-08-15T00:00:00Z g commit -q -am "fix: seven3 (remote only)"
+g rev-parse HEAD > "$MRA_TEST_SHAS/f4"
+
 cat > "$TMP/bin/gh" <<'SHIM'
 #!/usr/bin/env bash
 mc7="$(cat "$MRA_TEST_SHAS/mc7")"; f1="$(cat "$MRA_TEST_SHAS/f1")"
 f2="$(cat "$MRA_TEST_SHAS/f2")"; f3="$(cat "$MRA_TEST_SHAS/f3")"
-# 開關：merge commit 不在本機／fix commit 不在本機，各自獨立
+# 開關：merge commit 不在本機／fix commit 不在本機／fix commit 只在 origin，各自獨立
 if [[ "${MRA_TEST_MC_MISSING:-0}" == "1" ]]; then mc7="0000000000000000000000000000000000000000"; fi
 case "$*" in
   *"commits?since"*|*"commits?"*)
     extra=""
     if [[ "${MRA_TEST_FIX_MISSING:-0}" == "1" ]]; then
       extra=',{"sha":"1111111111111111111111111111111111111111","commit":{"message":"fix: not fetched yet"}}'
+    fi
+    if [[ "${MRA_TEST_FIX_REMOTE:-0}" == "1" ]]; then
+      extra=",{\"sha\":\"$(cat "$MRA_TEST_SHAS/f4")\",\"commit\":{\"message\":\"fix: seven3 (remote only)\"}}"
     fi
     printf '[[{"sha":"%s","commit":{"message":"fix: seven4"}},{"sha":"%s","commit":{"message":"fix: seven5 and l6"}},{"sha":"%s","commit":{"message":"fix: l9"}}%s]]' \
       "$f1" "$f2" "$f3" "$extra" ;;
@@ -131,6 +147,23 @@ fix_missing="$(MRA_TEST_FIX_MISSING=1 bash "$MRA_DIR/scripts/build-benchmark.sh"
 eq "fix commit 不在本機結束碼非 0" "1" "$?"
 has "fix commit 不在本機印 LOOKUP_FAILED（commit 層 1 筆）" "$fix_missing" "LOOKUP_FAILED	acme/blame-app	0	1	1"
 eq "fix commit 不在本機時 candidates.json 原封不動" "$before" "$(cat "$C")"
+
+# --- fix commit 只在 origin：產生器自己用 sha fetch 一次，抓到就照常算 ---------
+if git -C "$MRA_BACKTEST_WORKSPACE/blame-app" cat-file -e "$(cat "$MRA_TEST_SHAS/f4")^{commit}" 2>/dev/null; then
+  fail "前置：F4 一開始不該在本機 clone"
+else
+  ok "前置：F4 一開始不在本機 clone"
+fi
+remote_out="$(MRA_TEST_FIX_REMOTE=1 bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/blame-app --limit 10 --attribution blame 2>&1)"
+eq "fix commit 只在 origin 時結束碼 0" "0" "$?"
+eq "F4 被 fetch 下來並成為候選的 fix" "1" \
+  "$(jq --arg s "$(cat "$MRA_TEST_SHAS/f4")" '[.[0].fix_commits[] | select(.sha == $s)] | length' "$C")"
+eq "F4 的 hunk 歸到 PR #7、PR 當時是第 3 行" "[3]" \
+  "$(jq -c --arg s "$(cat "$MRA_TEST_SHAS/f4")" '.[0].fix_commits[] | select(.sha == $s) | .hunks[0].head_lines' "$C")"
+case "$remote_out" in
+  *LOCAL_COMMIT_MISSING*) fail "抓得到的 commit 不該印 LOCAL_COMMIT_MISSING：$remote_out" ;;
+  *) ok "抓得到的 commit 不印 LOCAL_COMMIT_MISSING" ;;
+esac
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

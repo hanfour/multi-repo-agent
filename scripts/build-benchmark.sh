@@ -145,12 +145,24 @@ n_failed_commit=0
 #
 # 不能因為「查不到」就當成「沒有 hunk」跳過：那正是交集模式那邊花了四次
 # 代價才堵住的洞（候選悄悄消失、結束碼還是 0）。
+
+# commit 不在本機時先用 sha 直接向 origin 抓一次，抓不到才算失敗。合進
+# 短命分支（之後刪掉或 rebase 掉）的 PR，merge commit 從本機任何 ref 都到
+# 不了，`git fetch origin` 抓不到它；GitHub 准直接用 sha fetch。實測
+# super-dsp-2.0 最近 30 個 PR 有 7 個是這樣，不補這道整個 repo 永遠跑不完。
+_ensure_local_commit() {
+  local sha="$1"
+  git -C "$REPO_DIR" cat-file -e "${sha}^{commit}" 2>/dev/null && return 0
+  git -C "$REPO_DIR" fetch -q origin "$sha" >/dev/null 2>&1 || true
+  git -C "$REPO_DIR" cat-file -e "${sha}^{commit}" 2>/dev/null
+}
+
 _blame_hits_for_pr() {
   local pr="$1" merged="$2" own="$3" fixes="$4"
   local n_fix j sha msg fix_date gap files path h hunks failed
   hits='[]'
-  if ! git -C "$REPO_DIR" cat-file -e "${own}^{commit}" 2>/dev/null; then
-    printf 'LOCAL_COMMIT_MISSING\t%s\t%s\t%s\tmerge commit 不在本機 clone %s，先 git fetch\n' \
+  if ! _ensure_local_commit "$own"; then
+    printf 'LOCAL_COMMIT_MISSING\t%s\t%s\t%s\tmerge commit 不在本機 clone %s，向 origin 抓也抓不到\n' \
       "$REPO" "$pr" "$own" "$REPO_DIR" >&2
     return 1
   fi
@@ -158,8 +170,9 @@ _blame_hits_for_pr() {
   for ((j = 0; j < n_fix; j++)); do
     sha="$(printf '%s' "$fixes" | jq -r ".[$j].sha")"
     msg="$(printf '%s' "$fixes" | jq -r ".[$j].message")"
-    if ! files="$(git -C "$REPO_DIR" diff --name-only --no-renames "${sha}^1" "$sha" 2>/dev/null)"; then
-      printf 'LOCAL_COMMIT_MISSING\t%s\t%s\t%s\tfix commit 不在本機 clone %s，先 git fetch\n' \
+    if ! _ensure_local_commit "$sha" \
+       || ! files="$(git -C "$REPO_DIR" diff --name-only --no-renames "${sha}^1" "$sha" 2>/dev/null)"; then
+      printf 'LOCAL_COMMIT_MISSING\t%s\t%s\t%s\tfix commit 不在本機 clone %s，向 origin 抓也抓不到\n' \
         "$REPO" "$pr" "$sha" "$REPO_DIR" >&2
       n_failed_commit=$((n_failed_commit + 1))
       continue
