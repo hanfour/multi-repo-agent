@@ -8,8 +8,20 @@ set -uo pipefail
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$MRA_DIR/lib/backtest-hunks.sh"
 source "$MRA_DIR/lib/backtest-groundtruth.sh"
+source "$MRA_DIR/lib/backtest-blame.sh"
 
 REPO=""; LIMIT=100; DAYS=14; UNTIL=""
+# 候選的判定方式：
+#   overlap（預設）fix commit 的行號區間跟 PR 的行號區間有交集。全走 gh API。
+#   blame          fix commit 改到的舊行 blame 回去指到 PR 的 commit（見
+#                  lib/backtest-blame.sh）。PR 與 fix commit 的列表照舊走 gh，
+#                  hunk 與 blame 走本機 clone：MRA_BACKTEST_WORKSPACE/<repo
+#                  第二段>，跟 backtest-review-adapter.sh 用同一個慣例。
+# 兩種模式產出的候選都寫進同一份 candidates.json，合併規則相同；blame 模式
+# 的候選多一個 attribution: "blame" 欄位，fix_commits[] 帶 hunks 而不是
+# overlaps。一個 fix commit 要有任何一個 hunk 的歸因比例達門檻才算候選，
+# 門檻 MRA_BACKTEST_BLAME_MIN_RATIO，預設 0.5（54 條人工定案上的最佳值）。
+ATTRIBUTION="overlap"
 # 每個帶值的旗標都要先確認後面真的還有一個參數。少了這道，`--repo` 打在最後
 # 一個位置時 set -u 會讓腳本死在「$2: 未綁定的變數」，訊息指向行號而不是使用者
 # 打錯的那個旗標。這個專案的其他腳本（run-backtest.sh、review-benchmark.sh、
@@ -32,13 +44,33 @@ while [[ $# -gt 0 ]]; do
     # （預設）行為與現在完全一致。
     --until) [[ $# -ge 2 ]] || _require_opt_value "--until"
              UNTIL="$2"; shift 2 ;;
+    --attribution) [[ $# -ge 2 ]] || _require_opt_value "--attribution"
+             ATTRIBUTION="$2"; shift 2 ;;
     -h|--help)
-      echo "用法: build-benchmark.sh --repo <owner/name> [--limit N] [--days N] [--until <ISO8601>]"
+      echo "用法: build-benchmark.sh --repo <owner/name> [--limit N] [--days N] [--until <ISO8601>] [--attribution overlap|blame]"
       exit 0 ;;
     *) echo "未知參數：$1" >&2; exit 1 ;;
   esac
 done
 [[ -z "$REPO" ]] && { echo "缺 --repo" >&2; exit 1; }
+case "$ATTRIBUTION" in
+  overlap|blame) ;;
+  *) echo "ATTRIBUTION_INVALID：--attribution 只接受 overlap 或 blame，給了「${ATTRIBUTION}」" >&2; exit 1 ;;
+esac
+BLAME_MIN_RATIO="${MRA_BACKTEST_BLAME_MIN_RATIO:-0.5}"
+case "$BLAME_MIN_RATIO" in
+  ''|*[!0-9.]*|.|*.*.*) echo "BLAME_MIN_RATIO_INVALID：MRA_BACKTEST_BLAME_MIN_RATIO 的值「${BLAME_MIN_RATIO}」不是數字" >&2; exit 1 ;;
+esac
+# blame 模式全靠本機 clone。clone 不在就什麼都算不出來，在還沒打任何 API
+# 之前先擋，訊息指向要 clone 到哪裡。
+REPO_DIR=""
+if [[ "$ATTRIBUTION" == "blame" ]]; then
+  REPO_DIR="${MRA_BACKTEST_WORKSPACE:-$HOME/workspace}/${REPO#*/}"
+  if ! git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "LOCAL_REPO_MISSING：--attribution blame 需要本機 clone，找不到 ${REPO_DIR}（MRA_BACKTEST_WORKSPACE 可改路徑）" >&2
+    exit 1
+  fi
+fi
 # --limit 會變成 GitHub 的 per_page，上限是 100。超過的話 API 靜默回 100 筆，
 # 分母比要求的少而且沒有任何訊號（見 lib/backtest-groundtruth.sh 的
 # backtest_merged_prs）。那邊也有同一道守衛，這裡先擋是為了讓訊息指向使用者
@@ -104,6 +136,61 @@ n_candidates=0
 # 查不到），混在同一個數字裡，操作者事後看報告分不出是哪一種，等於白算。
 n_failed_pr=0
 n_failed_commit=0
+
+# blame 模式：對 PR 的每個 fix commit 改到的每個檔案做歸因，結果放進全域
+# $hits（跟交集模式同一個變數，後面組候選的程式碼兩種模式共用）。失敗的
+# 分類跟交集模式對齊：merge commit 不在本機是 PR 層失敗（回非 0，呼叫端
+# 計數）；fix commit 不在本機是 commit 層失敗（這裡直接加 n_failed_commit）。
+# 兩種都印 LOCAL_COMMIT_MISSING 指出哪個 sha，操作者知道要 git fetch 什麼。
+#
+# 不能因為「查不到」就當成「沒有 hunk」跳過：那正是交集模式那邊花了四次
+# 代價才堵住的洞（候選悄悄消失、結束碼還是 0）。
+_blame_hits_for_pr() {
+  local pr="$1" merged="$2" own="$3" fixes="$4"
+  local n_fix j sha msg fix_date gap files path h hunks failed
+  hits='[]'
+  if ! git -C "$REPO_DIR" cat-file -e "${own}^{commit}" 2>/dev/null; then
+    printf 'LOCAL_COMMIT_MISSING\t%s\t%s\t%s\tmerge commit 不在本機 clone %s，先 git fetch\n' \
+      "$REPO" "$pr" "$own" "$REPO_DIR" >&2
+    return 1
+  fi
+  n_fix="$(printf '%s' "$fixes" | jq 'length')"
+  for ((j = 0; j < n_fix; j++)); do
+    sha="$(printf '%s' "$fixes" | jq -r ".[$j].sha")"
+    msg="$(printf '%s' "$fixes" | jq -r ".[$j].message")"
+    if ! files="$(git -C "$REPO_DIR" diff --name-only --no-renames "${sha}^1" "$sha" 2>/dev/null)"; then
+      printf 'LOCAL_COMMIT_MISSING\t%s\t%s\t%s\tfix commit 不在本機 clone %s，先 git fetch\n' \
+        "$REPO" "$pr" "$sha" "$REPO_DIR" >&2
+      n_failed_commit=$((n_failed_commit + 1))
+      continue
+    fi
+    if ! fix_date="$(git -C "$REPO_DIR" show -s --format=%cI "$sha" 2>/dev/null)" \
+       || ! gap="$(backtest_gap_days "$merged" "$fix_date")"; then
+      n_failed_commit=$((n_failed_commit + 1))
+      continue
+    fi
+    hunks='[]'; failed=0
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      if ! h="$(backtest_blame_hunks "$REPO_DIR" "$own" "$sha" "$path")"; then
+        failed=1; break
+      fi
+      # 只留有任何一行指到 PR 的 hunk；完全沒指到的 hunk 是雜訊，留著只會
+      # 讓 --next 印一堆跟 PR 無關的區間
+      hunks="$(printf '%s' "$hunks" | jq -c --argjson h "$h" '. + ($h | map(select(.to_pr > 0)))')"
+    done <<< "$files"
+    if ((failed)); then
+      n_failed_commit=$((n_failed_commit + 1))
+      continue
+    fi
+    if [[ "$(printf '%s' "$hunks" | jq --argjson m "$BLAME_MIN_RATIO" 'any(.[]; .ratio >= $m)')" != "true" ]]; then
+      continue
+    fi
+    hits="$(printf '%s' "$hits" | jq --arg s "$sha" --arg m "$msg" --argjson g "$gap" --argjson h "$hunks" \
+      '. + [{sha: $s, message: $m, gap_days: ($g + 0), hunks: $h}]')"
+  done
+  return 0
+}
 for ((i = 0; i < n_pr; i++)); do
   pr="$(printf '%s' "$prs" | jq -r ".[$i].n")"
   merged="$(printf '%s' "$prs" | jq -r ".[$i].merged_at")"
@@ -127,6 +214,20 @@ for ((i = 0; i < n_pr; i++)); do
     continue
   fi
   [[ "$n_fix_found" -eq 0 ]] && continue
+
+  if [[ "$ATTRIBUTION" == "blame" ]]; then
+    if ! _blame_hits_for_pr "$pr" "$merged" "$own" "$fixes"; then
+      n_failed_pr=$((n_failed_pr + 1))
+      continue
+    fi
+    [[ "$(printf '%s' "$hits" | jq 'length')" -eq 0 ]] && continue
+    n_candidates=$((n_candidates + 1))
+    result="$(printf '%s' "$result" | jq \
+      --arg repo "$REPO" --argjson pr "$pr" --arg merged "$merged" --argjson h "$hits" \
+      '. + [{repo: $repo, pr: $pr, merged_at: $merged, attribution: "blame", fix_commits: $h,
+             confirmed: null, expected_findings: []}]')"
+    continue
+  fi
 
   if ! pr_ranges="$(backtest_pr_ranges "$REPO" "$pr")"; then
     n_failed_pr=$((n_failed_pr + 1))
