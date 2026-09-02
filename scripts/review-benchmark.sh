@@ -135,10 +135,20 @@ case "${1:---next}" in
     echo "repo    $repo"
     echo "PR      https://github.com/$repo/pull/$pr"
     echo "合併於  $(printf '%s' "$item" | jq -r '.merged_at')"
+    # 兩種候選：交集模式（build-benchmark.sh 預設）的 fix 帶 overlaps，blame
+    # 模式（--attribution blame）的 fix 帶 hunks 與 gap_days。哪個欄位在就印
+    # 哪個；缺的欄位用 // [] 補，不然 jq 對 null 迭代會中斷，後面的 fix 全部
+    # 印不出來。歸因那行印 PR 當時版本的行號（head_lines），人工填 --add 的
+    # line 就是用這個座標。
     printf '%s' "$item" | jq -r --arg repo "$repo" '
+      def pct: (. * 100 | round) as $p
+        | "\($p / 100 | floor).\($p % 100 | tostring | if length < 2 then "0" + . else . end)";
       .fix_commits[]
-      | "fix     https://github.com/\($repo)/commit/\(.sha)\n        \(.message)",
-        (.overlaps[] | "        重疊 \(.path)  PR \(.pr_range[0])-\(.pr_range[1])  fix \(.fix_range[0])-\(.fix_range[1])")'
+      | ("fix     https://github.com/\($repo)/commit/\(.sha)"
+          + (if .gap_days != null then "  合併後 \(.gap_days) 天" else "" end)
+          + "\n        \(.message)"),
+        ((.overlaps // [])[] | "        重疊 \(.path)  PR \(.pr_range[0])-\(.pr_range[1])  fix \(.fix_range[0])-\(.fix_range[1])"),
+        ((.hunks // [])[] | "        歸因 \(.path)  fix \(.new_from)-\(.new_to)  比例 \(.ratio | pct)  PR 當時行 \(.head_lines | map(tostring) | join(",") | if . == "" then "?" else . end)")'
     echo
     echo "判斷：這個 fix 是在修這個 PR 引入的缺陷嗎？"
     echo "  是 → scripts/review-benchmark.sh --set --repo $repo $pr true"
@@ -265,6 +275,34 @@ print(int((f-m).total_seconds()//86400))
         if [[ -n "$_gap" && "$_gap" =~ ^[0-9]+$ && "$_gap" -gt 3 ]]; then
           echo "FIX_LONG_AFTER_MERGE：最早的 fix commit 在 ${resolved}#${pr} 合併後 ${_gap} 天才出現。這個缺陷有可能在受審當下還不存在（是後來的改動才讓它成立），那樣 reviewer 看不到它、這條會保證漏抓。確認一下受審版本的程式碼裡這個缺陷是否真的成立" >&2
         fi
+      fi
+    fi
+
+    # blame 歸因的候選（build-benchmark.sh --attribution blame）：fix 的每個
+    # hunk 記了「舊行 blame 回去有多少比例指到這個 PR」（ratio）與那些行在 PR
+    # 當時版本的行號（head_lines）。填的行號附近（±15 行）沒有任何一個 hunk
+    # 的歸因達門檻，代表 fix 改的不是這個 PR 寫的行：缺陷多半是合併後別處的
+    # 改動才成立的，或者行號填錯了位置。人工定案的 54 條上，這道點名 34 條
+    # 無效裡的 20 條、誤報 20 條有效裡的 3 條（notes/2026-persona-convention-
+    # coverage.md「產生方式的根因」），所以一樣只警告不擋。
+    #
+    # ±15 是那 17 條有效條目的人工行號與歸因行的實測距離（全在 ±9 內）再放寬
+    # 一點。head_lines 為空（行內容在 PR 版本裡對不到）的 hunk 退回用 fix 新檔
+    # 側的區間判遠近，寧可少警告也不要因為對不到行就誤報。交集模式的候選沒
+    # 有 attribution 欄位，這道完全不碰。
+    if [[ "$(jq -r --argjson p "$pr" --arg r "$resolved" \
+          '.[] | select(.pr == $p and .repo == $r) | .attribution // ""' "$C" 2>/dev/null)" == "blame" ]]; then
+      _min="${MRA_BACKTEST_BLAME_MIN_RATIO:-0.5}"
+      _best="$(jq -r --argjson p "$pr" --arg r "$resolved" --arg path "$path" --argjson line "$line" '
+        [ .[] | select(.pr == $p and .repo == $r)
+          | .fix_commits[]? | .hunks[]? | select(.path == $path)
+          | select(
+              (if (.head_lines | length) > 0
+               then any(.head_lines[]; ((. - $line) | fabs) <= 15)
+               else ($line >= .new_from - 15 and $line <= .new_to + 15) end))
+          | .ratio ] | max // 0' "$C" 2>/dev/null)" || _best=""
+      if [[ -n "$_best" ]] && [[ "$(jq -n --argjson b "$_best" --argjson m "$_min" '$b < $m')" == "true" ]]; then
+        echo "NOT_BLAMED_TO_PR：${path}:${line} 附近（±15 行）沒有任何 fix hunk 的 blame 歸因達 ${_min}（最高 ${_best}）。fix 改的行不是 ${resolved}#${pr} 寫的，缺陷多半是合併後別處的改動才成立的，或者行號填錯了位置。用 --next 看歸因的行號（PR 當時的座標）再確認一次" >&2
       fi
     fi
 

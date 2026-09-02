@@ -325,5 +325,79 @@ eq "gh 查不到時 --add 仍然成功" "0" "$rc_nogh"
 eq "gh 查不到時 finding 照樣寫進去" "3" \
   "$(jq -r '.[0].expected_findings | length' "$OOB_DIR/candidates.json")"
 
+# --- blame 歸因模式的候選（build-benchmark.sh --attribution blame）---------
+# 這種候選的 fix_commits[] 帶 hunks 而不是 overlaps：每個 hunk 記歸因比例
+# （ratio）與 PR 當時版本的行號（head_lines）。--next 要把它們印出來讓人
+# 看；--add 在填的行號附近（±15 行）沒有任何一個 hunk 的歸因達門檻時警告
+# NOT_BLAMED_TO_PR。人工定案的 54 條裡，這道能點名 34 條無效裡的 20 條、
+# 誤報 20 條有效裡的 3 條（notes/2026-persona-convention-coverage.md），跟
+# 另外兩道一樣只警告不擋。
+BL_DIR="$TMP/bench-blame"
+mkdir -p "$BL_DIR"
+cat > "$BL_DIR/candidates.json" <<'J'
+[{"repo":"acme/rails-app-1","pr":9951,"merged_at":"2026-08-01T00:00:00Z","attribution":"blame",
+  "fix_commits":[{"sha":"aaa111","message":"fix: attributed","gap_days":2.5,
+    "hunks":[{"path":"app/x.rb","kind":"mod","old_from":104,"old_to":104,"new_from":104,"new_to":104,
+              "n":1,"to_pr":1,"ratio":1,"head_lines":[102]},
+             {"path":"app/y.rb","kind":"mod","old_from":50,"old_to":59,"new_from":50,"new_to":59,
+              "n":10,"to_pr":2,"ratio":0.2,"head_lines":[51,52]}]}],
+  "confirmed":null,"expected_findings":[]},
+ {"repo":"acme/rails-app-1","pr":9952,"merged_at":"2026-08-01T00:00:00Z",
+  "fix_commits":[{"sha":"bbb222","message":"overlap only",
+    "overlaps":[{"path":"app/x.rb","pr_range":[100,110],"fix_range":[100,110]}]}],
+  "confirmed":null,"expected_findings":[]}]
+J
+
+# --next 印出歸因 hunk：檔名、比例、PR 當時的行號、合併後天數
+out_next="$(PATH="$GAP_BIN:$PATH" MRA_BENCHMARK_DIR="$BL_DIR" bash "$S" --next 2>&1)"
+has "--next 印出歸因 hunk 的檔名" "$out_next" "app/x.rb"
+has "--next 印出歸因比例" "$out_next" "1.00"
+has "--next 印出 PR 當時的行號" "$out_next" "102"
+has "--next 印出合併後天數" "$out_next" "2.5"
+
+# gh 回涵蓋 100..119 的 hunk，讓 LINE_OUTSIDE_DIFF 不出聲；git stub 讓
+# FIX_LONG_AFTER_MERGE 不出聲（aaa111 晚 10 天會出聲，但那是另一道，用
+# lacks/has 各看自己的 token 就分得開）
+cat > "$GAP_BIN/gh" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s' '[[{"filename":"app/x.rb","patch":"@@ -100,5 +100,20 @@\n context"},{"filename":"app/y.rb","patch":"@@ -1,5 +1,200 @@\n context"}]]'
+SHIM
+
+# 行號 105，離 head_lines 102 只有 3 行、那個 hunk ratio 1.0：不警告
+out_near="$(PATH="$GAP_BIN:$PATH" MRA_BENCHMARK_DIR="$BL_DIR" \
+  bash "$S" --add --repo acme/rails-app-1 9951 app/x.rb 105 HIGH "靠近歸因行" 2>&1)"
+lacks "填的行號靠近歸因達門檻的 hunk 時不警告" "$out_near" "NOT_BLAMED_TO_PR"
+
+# 行號 118，離 102 有 16 行（超過 ±15）：警告，但仍寫進去
+out_far="$(PATH="$GAP_BIN:$PATH" MRA_BENCHMARK_DIR="$BL_DIR" \
+  bash "$S" --add --repo acme/rails-app-1 9951 app/x.rb 118 HIGH "離歸因行太遠" 2>&1)"
+has "填的行號離歸因行超過 15 行時警告" "$out_far" "NOT_BLAMED_TO_PR"
+has "警告指名位置" "$out_far" "app/x.rb:118"
+eq "警告之後 finding 仍然被寫進去（只警告不擋）" "2" \
+  "$(jq -r '.[] | select(.pr == 9951) | .expected_findings | length' "$BL_DIR/candidates.json")"
+
+# app/y.rb 的 hunk 就在 51..52 旁邊，但 ratio 0.2 沒達門檻 0.5：警告
+out_low="$(PATH="$GAP_BIN:$PATH" MRA_BENCHMARK_DIR="$BL_DIR" \
+  bash "$S" --add --repo acme/rails-app-1 9951 app/y.rb 52 HIGH "比例太低" 2>&1)"
+has "附近的 hunk 歸因比例未達門檻時警告" "$out_low" "NOT_BLAMED_TO_PR"
+has "警告帶出附近最高的歸因比例" "$out_low" "0.2"
+
+# 門檻可調：MRA_BACKTEST_BLAME_MIN_RATIO=0.1 時 app/y.rb:52 不再警告
+out_low_ok="$(PATH="$GAP_BIN:$PATH" MRA_BENCHMARK_DIR="$BL_DIR" MRA_BACKTEST_BLAME_MIN_RATIO=0.1 \
+  bash "$S" --add --repo acme/rails-app-1 9951 app/y.rb 53 HIGH "門檻調低" 2>&1)"
+lacks "門檻調低到 0.1 時不警告" "$out_low_ok" "NOT_BLAMED_TO_PR"
+
+# 檔案完全沒有任何歸因 hunk：警告
+out_nofile="$(PATH="$GAP_BIN:$PATH" MRA_BENCHMARK_DIR="$BL_DIR" \
+  bash "$S" --add --repo acme/rails-app-1 9951 app/z.rb 10 HIGH "沒有這個檔案的歸因" 2>&1)"
+has "檔案沒有任何歸因 hunk 時警告" "$out_nofile" "NOT_BLAMED_TO_PR"
+
+# 交集模式的候選沒有 hunks：這道檢查不適用，零行為變化
+out_ov="$(PATH="$GAP_BIN:$PATH" MRA_BENCHMARK_DIR="$BL_DIR" \
+  bash "$S" --add --repo acme/rails-app-1 9952 app/x.rb 500 HIGH "交集模式" 2>&1)"
+lacks "交集模式的候選不做 blame 檢查" "$out_ov" "NOT_BLAMED_TO_PR"
+eq "交集模式的 finding 照樣寫進去" "1" \
+  "$(jq -r '.[] | select(.pr == 9952) | .expected_findings | length' "$BL_DIR/candidates.json")"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))
