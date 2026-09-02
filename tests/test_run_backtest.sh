@@ -1327,5 +1327,72 @@ eq "failed 清單點名 9202" "acme/rails-app-1#9202" "$(jq -r '.failed_prs[0]' 
 eq "expected_total 只含好的那筆" "1" "$(jq -r '.expected_total' "$BAD_SUM")"
 eq "comments_total 只含好的那筆" "1" "$(jq -r '.comments_total' "$BAD_SUM")"
 
+# --- expected-exclusions.json：排除經查證確認在受審 PR 當下不成立的條目 ---
+# 回測基準集是拿 fix commit 的 hunk 行號跟受審 PR 的改動範圍取交集產生的，
+# 交集算得出行號不代表那裡有缺陷。實測 54 條裡有 34 條站不住（缺陷在受審
+# 當下還不存在、引用的行是未改動的 context、note 描述的是別的檔案）。這些
+# 條目不管換什麼設定都會被算成漏抓，把每一輪的 file_miss_rate 都拉到同一個
+# 區間，看起來像天花板。
+#
+# 刻意不改 candidates.json：那會讓 candidates_effective_sha 變動，既有的
+# summary 就失去可比性。改用獨立清單，而且預設不套用，要明確開啟。
+#
+# 這一組自己建 fixture，不沿用上面的 $C：測試跑到這裡時 $C 已經被前面幾個
+# 情境改寫過（畸形 expected、confirmed=false…），沿用會讓斷言驗到別的東西。
+EXCL_DIR="$TMP/bench-excl"
+mkdir -p "$EXCL_DIR/runs"
+cat > "$EXCL_DIR/candidates.json" <<'J'
+[
+ {"repo":"acme/rails-app-1","pr":9301,"merged_at":"2026-08-01T00:00:00Z","fix_commits":[],
+  "confirmed":true,
+  "expected_findings":[
+   {"path":"app/e1.rb","line":10,"severity":"HIGH","note":"e1"},
+   {"path":"app/e2.rb","line":40,"severity":"MEDIUM","note":"e2"},
+   {"path":"app/e3.rb","line":60,"severity":"LOW","note":"e3"}]}
+]
+J
+cat > "$EXCL_DIR/expected-exclusions.json" <<'J'
+{"exclusions":[
+  {"repo":"acme/rails-app-1","pr":9301,"path":"app/e2.rb","line":40,"kind":"TIME","reason":"t"},
+  {"repo":"acme/rails-app-1","pr":9301,"path":"app/e3.rb","line":60,"kind":"LINE","reason":"l"}
+]}
+J
+cat > "$TMP/bin/mra-excl" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s' '{"status":"CHANGES_REQUESTED","summary":"s","comments":[{"path":"app/e1.rb","line":10,"body":"x","severity":"HIGH"}]}'
+SHIM
+chmod +x "$TMP/bin/mra-excl"
+
+# 沒開旗標時：三條 expected 全部計入，行為與既有一致
+MRA_BENCHMARK_DIR="$EXCL_DIR" MRA_BACKTEST_CMD="mra-excl" \
+  bash "$S" --label no-excl >/dev/null 2>&1
+NOEXCL_SUM="$EXCL_DIR/runs/no-excl/summary.json"
+eq "沒開旗標時 expected_total 是 3（不排除任何條目）" "3" "$(jq -r '.expected_total' "$NOEXCL_SUM")"
+eq "沒開旗標時 exclusions_applied 是 false" "false" "$(jq -r '.exclusions_applied' "$NOEXCL_SUM")"
+eq "沒開旗標時 excluded_count 是 0" "0" "$(jq -r '.excluded_count' "$NOEXCL_SUM")"
+
+# 開了旗標：那兩條被排除，分母剩 1
+MRA_BENCHMARK_DIR="$EXCL_DIR" MRA_BACKTEST_CMD="mra-excl" \
+  MRA_BACKTEST_APPLY_EXCLUSIONS=1 bash "$S" --label with-excl >/dev/null 2>&1
+EXCL_SUM="$EXCL_DIR/runs/with-excl/summary.json"
+eq "開旗標後 expected_total 剩 1" "1" "$(jq -r '.expected_total' "$EXCL_SUM")"
+eq "開旗標後 exclusions_applied 是 true" "true" "$(jq -r '.exclusions_applied' "$EXCL_SUM")"
+eq "開旗標後 excluded_count 記錄實際排除數" "2" "$(jq -r '.excluded_count' "$EXCL_SUM")"
+# 排除的是真的被漏掉的那兩條，剩下的 e1 有命中，所以 miss_rate 應該是 0
+eq "排除後 miss_rate 只看剩下的條目" "0" "$(jq -r '.miss_rate' "$EXCL_SUM")"
+# candidates.json 沒被改動，指紋必須維持一致
+eq "排除機制不改動 candidates_effective_sha" \
+  "$(jq -r '.candidates_effective_sha' "$NOEXCL_SUM")" \
+  "$(jq -r '.candidates_effective_sha' "$EXCL_SUM")"
+
+# 清單檔不存在時，開旗標也不能炸
+NOFILE_DIR="$TMP/bench-nofile"
+mkdir -p "$NOFILE_DIR/runs"; cp "$EXCL_DIR/candidates.json" "$NOFILE_DIR/candidates.json"
+MRA_BENCHMARK_DIR="$NOFILE_DIR" MRA_BACKTEST_CMD="mra-excl" \
+  MRA_BACKTEST_APPLY_EXCLUSIONS=1 bash "$S" --label nofile >/dev/null 2>&1
+eq "開旗標但清單檔不存在時仍正常跑完" "0" "$?"
+eq "清單檔不存在時 excluded_count 是 0" "0" \
+  "$(jq -r '.excluded_count' "$NOFILE_DIR/runs/nofile/summary.json")"
+
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

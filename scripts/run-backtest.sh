@@ -173,7 +173,44 @@ fi
 # summary 會是 expected_total=0、三個率全部 0、退出碼 0 —— 一份看起來完美的
 # 成績單，實際上什麼都沒量到。這跟開頭那個 NO_CONFIRMED 是同一種假象，只是
 # 少了一層。
-n_findings="$(jq '[.[] | select(.confirmed == true) | .expected_findings | length] | add // 0' "$C")" ||
+# 排除清單：經查證確認在受審 PR 當下不成立的 expected finding。
+#
+# 基準集是拿 fix commit 的 hunk 行號跟受審 PR 的改動範圍取交集產生的，交集
+# 算得出行號不代表那裡有缺陷。實測 54 條裡有 34 條站不住：缺陷在受審當下
+# 還不存在（後來的改動才讓它成立）、引用的行是未改動的 context（note 的
+# 主體在檔案別處甚至別的檔案）、或 note 描述的缺陷根本不存在。這些條目
+# 不管換什麼設定都會被算成漏抓，把每一輪的 file_miss_rate 都拉到同一個
+# 區間，看起來像天花板。
+#
+# 刻意不改 candidates.json：candidates_effective_sha 涵蓋 confirmed==true
+# 項目的 expected_findings，動它會讓既有 summary 的指紋全部對不上，那些輪
+# 次就失去可比性。改用獨立清單，而且預設不套用——要明確設
+# MRA_BACKTEST_APPLY_EXCLUSIONS=1 才生效，因為套用之後的數字跟先前的輪次
+# 不是同一個分母，不該在使用者沒察覺的情況下換掉。
+EXCL_FILE="${MRA_BACKTEST_EXCLUSIONS:-$BENCH_DIR/expected-exclusions.json}"
+EXCLUSIONS='[]'
+EXCLUSIONS_APPLIED=false
+if [[ "${MRA_BACKTEST_APPLY_EXCLUSIONS:-0}" == "1" ]]; then
+  EXCLUSIONS_APPLIED=true
+  if [[ -s "$EXCL_FILE" ]]; then
+    EXCLUSIONS="$(jq -c '.exclusions // []' "$EXCL_FILE")" || {
+      echo "EXCLUSIONS_READ_FAILED：讀取 ${EXCL_FILE} 失敗，這一輪不套用排除" >&2
+      EXCLUSIONS='[]'
+    }
+  else
+    echo "EXCLUSIONS_MISSING：找不到 ${EXCL_FILE}，這一輪不排除任何條目" >&2
+  fi
+fi
+excluded_count=0
+
+n_findings="$(jq --argjson ex "$EXCLUSIONS" '
+  [ .[] | select(.confirmed == true)
+    | . as $c
+    | .expected_findings
+    | map(select(. as $ef
+        | ($ex | any(.repo == $c.repo and .pr == $c.pr
+                     and .path == $ef.path and .line == $ef.line)) | not))
+    | length ] | add // 0' "$C")" ||
   { echo "READ_FAILED：讀取 ${C} 的 expected_findings 失敗" >&2; exit 1; }
 if [[ "$n_findings" -eq 0 ]]; then
   echo "NO_EXPECTED_FINDINGS：${n_conf} 個 PR 標成 confirmed，但一條 expected finding 都沒有。用 scripts/review-benchmark.sh --add 補上，不然算出來的三個率全部是 0，看起來像滿分" >&2
@@ -282,6 +319,22 @@ for ((i = 0; i < n_conf; i++)); do
   repo="$(printf '%s' "$item" | jq -r '.repo')"
   pr="$(printf '%s' "$item" | jq -r '.pr')"
   expected="$(printf '%s' "$item" | jq -c '.expected_findings')"
+  # 套用排除清單（見上面 EXCL_FILE 的說明）。比對鍵是 (repo, pr, path, line)，
+  # 跟清單裡記的一致；比對不到的條目原樣留著。
+  if [[ "$EXCLUSIONS" != "[]" ]]; then
+    _before="$(printf '%s' "$expected" | jq 'length')"
+    expected="$(printf '%s' "$expected" | jq -c \
+      --argjson ex "$EXCLUSIONS" --arg repo "$repo" --argjson pr "$pr" '
+      map(select(. as $ef
+        | ($ex | any(.repo == $repo and .pr == $pr
+                     and .path == $ef.path and .line == $ef.line)) | not))')" || {
+      echo "EXCLUSIONS_FILTER_FAILED：${repo}#${pr} 套用排除清單失敗，這個 PR 用未過濾的 expected" >&2
+      expected="$(printf '%s' "$item" | jq -c '.expected_findings')"
+      _before=0
+    }
+    _after="$(printf '%s' "$expected" | jq 'length')"
+    excluded_count=$((excluded_count + _before - _after))
+  fi
 
   # 檔名鍵是 (repo, pr)：repo 裡的 '/' 全部換成 '__' 再接 '__<pr>.json'，跟
   # candidates.json 合併時用的鍵同一個道理——不能只用 pr，不同 repo 的 PR
@@ -531,6 +584,8 @@ _write_summary "$OUT/summary.json" \
   --argjson incomplete_count "$n_incomplete" --argjson incomplete_prs "$incomplete_list" \
   --argjson failed_count "$n_failed" --argjson failed_prs "$failed_list" \
   --argjson tolerance "$TOL" \
+  --argjson exclusions_applied "$EXCLUSIONS_APPLIED" \
+  --argjson excluded_count "$excluded_count" \
   --argjson file_missed "$file_missed" \
   --argjson conditions "$conditions_json" --arg conditions_source "$conditions_source" \
   --arg candidates_sha "$candidates_sha" \
@@ -540,6 +595,8 @@ _write_summary "$OUT/summary.json" \
          incomplete_count: $incomplete_count, incomplete_prs: $incomplete_prs,
          failed_count: $failed_count, failed_prs: $failed_prs,
          tolerance: $tolerance,
+         exclusions_applied: $exclusions_applied,
+         excluded_count: $excluded_count,
          file_missed: $file_missed,
          file_miss_rate: (if $m.expected_total == 0 then 0
                           else (($file_missed / $m.expected_total) * 100 | round) / 100 end),

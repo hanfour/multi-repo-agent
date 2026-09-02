@@ -233,6 +233,41 @@ case "${1:---next}" in
       fi
     fi
 
+    # fix commit 遠晚於 PR 合併時警告。這個基準集是拿 fix commit 的改動範圍
+    # 跟受審 PR 取交集產生的，交集算得出位置，不代表那個缺陷在受審當下就
+    # 存在。實測 54 條裡有 19 條是這種：缺陷是後來某次改動才讓它成立的
+    # （欄位改名、fixture 對應的欄位還沒建立、防護機制後來才搬走），
+    # reviewer 在當下看不到，標了保證漏抓。
+    #
+    # 時間差量得出鑑別度：無效條目的 fix commit 中位落在合併後 6.2 天，有效
+    # 條目是 0.9 天。門檻取 3 天，無效的 68% 會被點名、有效的 25% 會被誤報。
+    # 鑑別度不完美，所以跟 LINE_OUTSIDE_DIFF 一樣只警告不擋：缺陷確實可能
+    # 潛伏很久才被修，那種條目是有效的。查不到日期時跳過，不影響 --add。
+    _merged="$(jq -r --argjson p "$pr" --arg r "$resolved" \
+      '.[] | select(.pr == $p and .repo == $r) | .merged_at // ""' "$C" 2>/dev/null)"
+    if [[ -n "$_merged" ]]; then
+      _repo_dir="${MRA_BACKTEST_WORKSPACE:-$HOME/workspace}/${resolved#*/}"
+      _earliest=""
+      while read -r _sha; do
+        [[ -n "$_sha" ]] || continue
+        _d="$(git -C "$_repo_dir" show -s --format=%cI "$_sha" 2>/dev/null)" || continue
+        [[ -n "$_d" ]] || continue
+        if [[ -z "$_earliest" || "$_d" < "$_earliest" ]]; then _earliest="$_d"; fi
+      done < <(jq -r --argjson p "$pr" --arg r "$resolved" \
+        '.[] | select(.pr == $p and .repo == $r) | .fix_commits[]?.sha // empty' "$C" 2>/dev/null)
+      if [[ -n "$_earliest" ]]; then
+        _gap="$(python3 -c "
+import datetime,sys
+m=datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00'))
+f=datetime.datetime.fromisoformat(sys.argv[2])
+print(int((f-m).total_seconds()//86400))
+" "$_merged" "$_earliest" 2>/dev/null)" || _gap=""
+        if [[ -n "$_gap" && "$_gap" =~ ^[0-9]+$ && "$_gap" -gt 3 ]]; then
+          echo "FIX_LONG_AFTER_MERGE：最早的 fix commit 在 ${resolved}#${pr} 合併後 ${_gap} 天才出現。這個缺陷有可能在受審當下還不存在（是後來的改動才讓它成立），那樣 reviewer 看不到它、這條會保證漏抓。確認一下受審版本的程式碼裡這個缺陷是否真的成立" >&2
+        fi
+      fi
+    fi
+
     _write "追加 ${resolved}#${pr} 的 finding" \
       --argjson p "$pr" --arg r "$resolved" --arg path "$path" --argjson line "$line" --arg sev "$sev" --arg note "$note" \
       'map(if .pr == $p and .repo == $r

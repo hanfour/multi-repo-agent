@@ -262,6 +262,57 @@ has "警告指名是哪一個位置" "$out_oob" "app/x.rb:500"
 eq "警告之後 finding 仍然被寫進去（只警告不擋）" "2" \
   "$(jq -r '.[0].expected_findings | length' "$OOB_DIR/candidates.json")"
 
+# --- --add 對「fix commit 遠晚於 PR 合併」發警告 --------------------------
+# 這個基準集是拿 fix commit 的改動範圍跟受審 PR 取交集產生的，交集算得出
+# 位置，不代表那個缺陷在受審當下就存在。實測 54 條裡有 19 條屬於這種：
+# 缺陷是後來某次改動才讓它成立的，reviewer 在當下看不到，標了保證漏抓。
+#
+# 時間差是可以程式量的訊號：無效條目的 fix commit 中位落在 PR 合併後 6.2
+# 天，有效條目是 0.9 天。用 3 天當門檻，無效的 68% 會被點名，有效的只有
+# 25% 會被誤報。鑑別度不完美，所以跟 LINE_OUTSIDE_DIFF 一樣只警告不擋。
+GAP_DIR="$TMP/bench-gapguard"
+mkdir -p "$GAP_DIR"
+cat > "$GAP_DIR/candidates.json" <<'J'
+[{"repo":"acme/rails-app-1","pr":9901,"merged_at":"2026-08-01T00:00:00Z",
+  "fix_commits":[{"sha":"aaa111","message":"late fix","overlaps":[]}],
+  "confirmed":false,"expected_findings":[]},
+ {"repo":"acme/rails-app-1","pr":9902,"merged_at":"2026-08-01T00:00:00Z",
+  "fix_commits":[{"sha":"bbb222","message":"same day fix","overlaps":[]}],
+  "confirmed":false,"expected_findings":[]}]
+J
+
+GAP_BIN="$TMP/bin-gap"
+mkdir -p "$GAP_BIN"
+# gh 回一個涵蓋 105 的 hunk，讓行號那道檢查不出聲，隔離出時序這道
+cat > "$GAP_BIN/gh" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s' '[[{"filename":"app/x.rb","patch":"@@ -100,5 +100,10 @@\n context"}]]'
+SHIM
+chmod +x "$GAP_BIN/gh"
+# git 回 fix commit 的日期：aaa111 晚 10 天，bbb222 當天
+cat > "$GAP_BIN/git" <<'SHIM'
+#!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in
+    aaa111) printf '2026-08-11T00:00:00+00:00\n'; exit 0 ;;
+    bbb222) printf '2026-08-01T06:00:00+00:00\n'; exit 0 ;;
+  esac
+done
+exit 1
+SHIM
+chmod +x "$GAP_BIN/git"
+
+out_late="$(PATH="$GAP_BIN:$PATH" MRA_BENCHMARK_DIR="$GAP_DIR" \
+  bash "$S" --add --repo acme/rails-app-1 9901 app/x.rb 105 HIGH "晚 10 天" 2>&1)"
+has "fix commit 遠晚於合併時發警告" "$out_late" "FIX_LONG_AFTER_MERGE"
+has "警告帶出實際天數" "$out_late" "10"
+eq "警告之後 finding 仍然被寫進去（只警告不擋）" "1" \
+  "$(jq -r '.[] | select(.pr == 9901) | .expected_findings | length' "$GAP_DIR/candidates.json")"
+
+out_same="$(PATH="$GAP_BIN:$PATH" MRA_BENCHMARK_DIR="$GAP_DIR" \
+  bash "$S" --add --repo acme/rails-app-1 9902 app/x.rb 105 HIGH "當天" 2>&1)"
+lacks "fix commit 就在當天時不警告" "$out_same" "FIX_LONG_AFTER_MERGE"
+
 # gh 查不到時只是跳過這道檢查，不影響 --add
 cat > "$OOB_BIN/gh" <<'SHIM'
 #!/usr/bin/env bash
