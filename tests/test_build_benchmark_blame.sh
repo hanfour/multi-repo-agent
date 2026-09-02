@@ -14,7 +14,7 @@
 #
 # 本機 clone 是從 $TMP/remote clone 出來的，F4 在 clone 之後才推上 remote，
 # 模擬「PR 合進已刪除的分支，merge commit 從任何 ref 都到不了，只能用 sha
-# 直接 fetch」這種真實情況（super-dsp-2.0 30 個 PR 裡有 7 個）。
+# 直接 fetch」這種真實情況（某個內部 repo 最近 30 個 PR 裡有 7 個）。
 set -uo pipefail
 MRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

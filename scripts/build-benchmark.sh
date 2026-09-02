@@ -148,8 +148,8 @@ n_failed_commit=0
 
 # commit 不在本機時先用 sha 直接向 origin 抓一次，抓不到才算失敗。合進
 # 短命分支（之後刪掉或 rebase 掉）的 PR，merge commit 從本機任何 ref 都到
-# 不了，`git fetch origin` 抓不到它；GitHub 准直接用 sha fetch。實測
-# super-dsp-2.0 最近 30 個 PR 有 7 個是這樣，不補這道整個 repo 永遠跑不完。
+# 不了，`git fetch origin` 抓不到它；GitHub 准直接用 sha fetch。實測某個
+# 內部 repo 最近 30 個 PR 有 7 個是這樣，不補這道整個 repo 永遠跑不完。
 _ensure_local_commit() {
   local sha="$1"
   git -C "$REPO_DIR" cat-file -e "${sha}^{commit}" 2>/dev/null && return 0
