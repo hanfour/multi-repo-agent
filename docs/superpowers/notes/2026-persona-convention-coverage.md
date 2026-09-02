@@ -1404,3 +1404,73 @@ fix commit 與受審 PR 的時間差，或接受它並在解讀時扣掉。
 
 三、清理後的分母只有 20 條，要擴大基準集才能繼續用它比較設定。擴大時
 沿用新的產生時檢查，避免再長出同樣的無效條目。
+
+## 落地：排除機制與時序警告（2026-09-02）
+
+上一節〈下一步〉第二點。清理結果定案之後，把它變成可重複執行的機制。
+
+### 排除清單為什麼不寫進 candidates.json
+
+`candidates_effective_sha` 涵蓋 `confirmed==true` 項目的
+`expected_findings`（見 `run-backtest.sh` 對這個欄位的說明）。在條目上加
+`invalid` 標記、或直接移除那 34 條，都會讓這個指紋變動，既有九輪的
+summary 就對不上，那些輪次全部失去可比性。
+
+改成獨立清單 `$BENCH_DIR/expected-exclusions.json`，由 `run-backtest.sh`
+在取 `expected_findings` 之後依 `(repo, pr, path, line)` 過濾。清單本身
+放 cache 目錄不進版控，因為它含內部 repo 的 PR 編號與檔案路徑；repo 裡
+只有讀取機制。測試裡有一條專門釘「排除機制不改動
+candidates_effective_sha」。
+
+預設關閉，要設 `MRA_BACKTEST_APPLY_EXCLUSIONS=1` 才生效。理由是套用之後
+的分母跟先前的輪次不是同一個，不該在使用者沒察覺的情況下換掉。
+`summary.json` 記 `exclusions_applied` 與 `excluded_count`，任何一份
+summary 都看得出自己用的是哪個版本的分母。
+
+### 九輪重算的完整對照
+
+用 `--recompute` 重算（不跑任何 review，秒級完成）：
+
+| 輪次 | miss 原 | miss 清理後 | file 原 | file 清理後 |
+| --- | --- | --- | --- | --- |
+| baseline-personas | 0.69 | 0.40 | 0.44 | 0.25 |
+| with-convention-auditor | 0.67 | 0.45 | 0.48 | 0.30 |
+| turns30 | 0.66 | 0.35 | 0.48 | 0.15 |
+| turns30+synth16 | 0.65 | 0.35 | 0.43 | 0.15 |
+| turns30+synth16 重跑（同設定） | 0.74 | 0.45 | 0.48 | 0.25 |
+| coverage-checklist-only | 0.72 | 0.40 | 0.47 | 0.25 |
+| rules-taxonomy | 0.69 | 0.40 | — | 0.20 |
+| rules-taxonomy 重跑（同設定） | 0.70 | 0.40 | 0.46 | 0.20 |
+| taxonomy-layered | 0.69 | 0.35 | 0.48 | 0.15 |
+
+原始 summary 都保留（`summary-tol15.json`、`summary-tol5.json`），清理版
+另存為 `summary-cleaned-tol15.json`，兩邊都查得到。
+
+**但這張表不能拿來比較設定**。看同設定重跑那兩組：`turns30+synth16` 對
+它自己的重跑，清理後是 0.35 對 0.45（miss）、0.15 對 0.25（file）；
+`rules-taxonomy` 對它自己的重跑則是 0.40 對 0.40、0.20 對 0.20。前者差 2
+條就是 10 個百分點，因為分母只剩 20 條。清理讓數字更誠實，沒有讓它變得
+更能分辨設定差異，反而因為分母變小、單條的權重變重。
+
+### 時序警告
+
+行號那一類（12 條）`review-benchmark.sh --add` 早就有 `LINE_OUTSIDE_DIFF`
+警告，而且它的註解裡就寫著「實測 54 條裡有 10 條是這樣」，跟這次算出來
+的數字一致。所以這次只補時序那一類。
+
+時間差量得出鑑別度：無效條目的最早 fix commit 中位落在 PR 合併後 6.2 天，
+有效條目是 0.9 天。用 3 天當門檻，68% 的無效條目會被點名、25% 的有效條目
+會被誤報。跟 `LINE_OUTSIDE_DIFF` 同樣只警告不擋：缺陷確實可能潛伏很久才
+被修，那種條目是有效的。
+
+## 下一步（2026-09-02 第八次更新）
+
+一、擴大基準集。清理後只剩 20 條，單條權重 5 個百分點，任何設定比較都會
+被浮動蓋過。擴大時新的兩道警告（`LINE_OUTSIDE_DIFF`、`FIX_LONG_AFTER_MERGE`）
+會在標註當下就提醒，但它們只警告不擋，最終還是要人看過。
+
+二、清理後的分母重新量一次浮動。先前量的「同設定重跑翻面 8-11 條」是在
+54 條分母上量的，20 條分母的浮動要重量才知道。
+
+三、`#764` 那兩條 synthesize 丟錯的（新功能沒接上 registry、query 沒覆寫
+`throwOnError`）仍在清單上，是改 Rule 4／5 措辭時的迴歸案例。
