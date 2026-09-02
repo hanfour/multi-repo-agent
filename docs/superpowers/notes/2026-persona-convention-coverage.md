@@ -1578,6 +1578,40 @@ X 擋 25、精確率 0.62，比上表低 0.09，差在它多收了幾個分支�
 記 `blame_ratio`、`gap_days`、PR head 座標的行號；`review-benchmark.sh
 --add` 加 `NOT_BLAMED_TO_PR` 警告。現行交集路徑保留，預設不變。
 
+已實作（2026-09-02，commit `8a5deab`、`f407093`、`0f7fdad`、`12fd80d`）。
+用法：
+
+```
+MRA_BACKTEST_WORKSPACE=~/workspace scripts/build-benchmark.sh <owner/repo> --attribution blame
+scripts/review-benchmark.sh --next    # 每個 fix 印合併後天數、每個 hunk 印歸因比例與 PR 當時的行號
+```
+
+- 本機 clone 放在 `${MRA_BACKTEST_WORKSPACE:-$HOME/workspace}/<repo>`，
+  不在就印 `LOCAL_REPO_MISSING` 結束，不打 API。
+- fix commit 清單沿用 `backtest_fix_commits`（GitHub commits 端點、標題含
+  fix 詞彙、14 天視窗），跟研究筆記那個全本機掃描器不同，所以候選數會比
+  上表的估計少一些（上表多收了 merge 合併分支內的小 commit）。
+- 每個 fix 對每個改到的檔案跑 `git blame -w` 於 `fix^1`，只留 `to_pr > 0`
+  的 hunk；任一 hunk 比例達 `MRA_BACKTEST_BLAME_MIN_RATIO`（預設 0.5）才收
+  進候選。候選記 `attribution: "blame"`、每個 fix 記 `gap_days`（一位小數）
+  與 `hunks[]`（`path`、`kind`、新舊檔側區間、`n`、`to_pr`、`ratio`、
+  `head_lines`）。`head_lines` 是 PR 當時版本的行號（squash 用 merge
+  commit，merge 合併用 `mc^2`），人工填 line 直接用它。
+- 5 天門檻沒有做成產生器的篩選，只記 `gap_days` 讓 `--next` 印出來，
+  `--add` 既有的 `FIX_LONG_AFTER_MERGE`（3 天）警告照舊。
+- merge commit 或 fix commit 不在本機時先 `git fetch origin <sha>` 一次，
+  抓不到才算失敗（`LOCAL_COMMIT_MISSING`，最後 `LOOKUP_FAILED` exit 1，
+  不碰 candidates.json）。合進短命分支的 PR 只能這樣拿：repo A 最近 30 個
+  PR 有 7 個的 merge commit 從本機任何 ref 都到不了。
+- `--add` 對 blame 候選多一道 `NOT_BLAMED_TO_PR`：填的 `path:line` ±15 行
+  內沒有任何 hunk 比例達門檻就警告，只警告不擋。交集候選不受影響。
+
+在 repo A 最近 30 個 PR 上試跑：掃描 29 筆、候選 1 筆（fix commit 7 個，
+合併後 3 到 6 天，hunks 全部有 `head_lines`）、失敗 0 筆，4 分 20 秒。
+時間花在每個 PR 一次 commits 端點呼叫與 7 次 sha fetch，blame 本身一個
+42,000 行的 porcelain 輸出 0.3 秒。最近 30 個 PR 大多合併不到兩週，fix
+還沒出現，候選少是預期的；掃一年要看第二點。
+
 二、用新產生器掃三個 repo 一年，89 個新 PR 交給模型交叉驗證標註（Claude 與
 codex 各自判「缺陷在 PR head 成不成立」並寫 note，只收兩邊一致的）。這一步
 用 API 額度，不用 review 額度。
