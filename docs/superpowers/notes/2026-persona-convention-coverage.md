@@ -1616,6 +1616,78 @@ scripts/review-benchmark.sh --next    # 每個 fix 印合併後天數、每個 h
 codex 各自判「缺陷在 PR head 成不成立」並寫 note，只收兩邊一致的）。這一步
 用 API 額度，不用 review 額度。
 
+已完成（2026-09-02）。
+
+掃描：`build-benchmark.sh --since 2025-09-02T00:00:00Z --attribution blame`
+（`--since` 是 commit `6a873c3` 加的，逐頁抓某時間點之後的全部 merged PR），
+三個 repo 各自掃到獨立的輸出目錄，最後再合併進真實候選集。
+
+| repo | 一年 merged PR | 候選 | 其中既有 | 新的 | gap ≤ 5 天且 ratio ≥ 0.5 |
+| --- | --- | --- | --- | --- | --- |
+| repo A | 374 | 122 | 25 | 97 | 70 |
+| repo B | 206 | 72 | 11 | 61 | 47 |
+| repo C | 333 | 24 | 9 | 15 | 12 |
+| 合計 | 913 | 218 | 45 | 173 | 129 |
+
+新 PR 是 129 個，不是上表估的 89：上表的全本機掃描器只認 first-parent
+歷史上的 squash 與 merge commit，這次走 API 的 merged PR 清單多抓到 239
+個；篩選條件跟上表一樣（fix 距合併 ≤ 5 天、任一 hunk 歸因 ≥ 0.5）。
+
+標註方式：129 個 PR 分 26 批（每批 5 個），Claude 與 codex 拿同一份 prompt
+與批次 JSON，各自在本機 clone 上用 `git show <version_ref>:<path>` 查受審版本
+再下判斷，輸出每個 PR 一行 JSON（`verdict` V／X、`kind`、`reason`、
+`findings[]`）。prompt 的重點：候選是 blame 相關不是因果，「缺少某個東西」
+是缺陷形態而不是判 X 的理由，finding 要描述受審當下的程式碼，純樣式、文案
+（含錯誤訊息的措辭或語言）判 X。Claude 每批一個子代理，5 條並行，每批 3 到
+14 分鐘；codex 用 `codex exec`，三條 runner 並行，每批 3 到 25 分鐘，全部
+跑完 2 小時 16 分。129 個 PR 兩邊都有輸出。
+
+對齊規則：兩邊 X → `confirmed=false`；兩邊 V 且 finding 同檔案、行距 ≤ 15
+→ `confirmed=true`（note 用 Claude 的、severity 取較低的）；verdict 不一致
+或 V 但 finding 配不起來 → 人工。結果：
+
+| | Claude | codex | 對齊 |
+| --- | --- | --- | --- |
+| V | 30 | 48 | confirm 26（31 條 finding） |
+| X | 99 | 81 | reject 78 |
+| finding 數 | 38 | 69 | manual 25 |
+
+一致率 81%（104/129）。reject 78 個裡兩邊 kind 也一致的 54 個（NOFIX 34、
+TIME 18、OTHER 2）。manual 25 個裡 21 個是 Claude X、codex V，3 個相反，
+1 個兩邊 V 但 finding 對不上。codex 判 V 的型態有兩類 Claude 判 X：UX 呈現
+（對話框關閉動畫期間提前清資料的閃爍、錯誤狀態整張表被換掉、頁尾捲動定位）
+與 TIME（合併後別的 PR 才把它變成缺陷，例如 Prisma client 路徑遷移、後端
+合併後才加的權限與欄位）。
+
+兩邊 finding 都用 `git show` 檢查過：檔案存在、行號在範圍內、距 `head_lines`
+≤ 15 行。Claude 38 條全過；codex 69 條檔案與行號全過，2 條 ⚠️（一條離
+`head_lines` 50 行、一條檔案不在任何 hunk 裡），都沒進 confirm。
+
+人工決定四筆：repo B `#260` 兩邊都 V 但只有 LOW，移到 manual；repo A `#627`
+（Claude X、codex V）與 `#629`（兩邊 V）是同一個缺陷（picker 已選數量漏算目
+錄外的 id）在兩個 picker 上各出現一次，一起收；repo A `#25` 兩邊 V 但 finding
+對不上，收 Claude 那條；repo A `#114`（z.url() 缺中文錯誤訊息）判 X，prompt
+補上「錯誤訊息措辭或語言也算文案」那句。其餘 manual 維持 `confirmed: null`，
+不進分母。
+
+合併進真實候選集：跟 `build-benchmark.sh` 同一段聯集 jq，(repo, pr) 兩邊都
+有時機器欄位用新掃描蓋、`confirmed`／`expected_findings` 保留舊值；只合併
+既有 45 筆與通過篩選的 129 筆，篩掉的 44 筆不進去。合併前備份
+`candidates.json.before-year-merge-<時間戳>`。合併加標註後：
+
+| | 既有 | 這次 | 合計 |
+| --- | --- | --- | --- |
+| `confirmed: true` | 38 | 27 | 65 |
+| `confirmed: false` | 31 | 79 | 110 |
+| `confirmed: null` | 0 | 23 | 23 |
+| 條目 | 69 | 129 | 198 |
+
+expected_findings 合計 86 條（既有 54 加這次 32）。這次 27 個 PR 的分布：
+repo A 9、repo B 9、repo C 9。跟上表「89 個新 PR 約 45-50 條」的估計比，
+129 個 PR 得 32 條，每個 PR 的通過率 21%（27/129），比既有比例的 61% 低，
+差在既有候選集是人工看過才收、這次是兩個模型都判 V 才收，且兩個模型判 X
+的比例（Claude 77%、codex 63%）都比人工退回的 45% 高。
+
 三、新 PR 跑 review 回測。約 89 個 PR，每個額度視窗 20-25 個，要 4 個視窗。
 可以先跑 repo A 的 58 個。
 
