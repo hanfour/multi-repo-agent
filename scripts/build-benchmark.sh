@@ -10,7 +10,7 @@ source "$MRA_DIR/lib/backtest-hunks.sh"
 source "$MRA_DIR/lib/backtest-groundtruth.sh"
 source "$MRA_DIR/lib/backtest-blame.sh"
 
-REPO=""; LIMIT=100; DAYS=14; UNTIL=""
+REPO=""; LIMIT=100; DAYS=14; UNTIL=""; SINCE=""
 # 候選的判定方式：
 #   overlap（預設）fix commit 的行號區間跟 PR 的行號區間有交集。全走 gh API。
 #   blame          fix commit 改到的舊行 blame 回去指到 PR 的 commit（見
@@ -44,15 +44,26 @@ while [[ $# -gt 0 ]]; do
     # （預設）行為與現在完全一致。
     --until) [[ $# -ge 2 ]] || _require_opt_value "--until"
              UNTIL="$2"; shift 2 ;;
+    # 可選：收 created_at 不早於這個時間點的全部 merged PR，逐頁翻（見
+    # backtest_merged_prs）。給了就不管 --limit：那個只管「最近 N 筆」一頁。
+    # 掃一年用這個，跟 --until 一起給就是一段固定的區間。
+    --since) [[ $# -ge 2 ]] || _require_opt_value "--since"
+             SINCE="$2"; shift 2 ;;
     --attribution) [[ $# -ge 2 ]] || _require_opt_value "--attribution"
              ATTRIBUTION="$2"; shift 2 ;;
     -h|--help)
-      echo "用法: build-benchmark.sh --repo <owner/name> [--limit N] [--days N] [--until <ISO8601>] [--attribution overlap|blame]"
+      echo "用法: build-benchmark.sh --repo <owner/name> [--limit N] [--days N] [--until <ISO8601>] [--since <ISO8601>] [--attribution overlap|blame]"
       exit 0 ;;
     *) echo "未知參數：$1" >&2; exit 1 ;;
   esac
 done
 [[ -z "$REPO" ]] && { echo "缺 --repo" >&2; exit 1; }
+# --since 是拿去跟 created_at 做字串比較的，只有完整的 ISO 8601（YYYY-MM-DD
+# 開頭）才比得對；「2025-9-2」這種會靜默比錯，整個 repo 掃出來的分母都不對。
+if [[ -n "$SINCE" && ! "$SINCE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]]; then
+  echo "SINCE_INVALID：--since 要是 ISO 8601（例如 2025-09-02T00:00:00Z），給了「${SINCE}」" >&2
+  exit 1
+fi
 case "$ATTRIBUTION" in
   overlap|blame) ;;
   *) echo "ATTRIBUTION_INVALID：--attribution 只接受 overlap 或 blame，給了「${ATTRIBUTION}」" >&2; exit 1 ;;
@@ -110,7 +121,7 @@ fi
 # 跟著失敗、$prs 會是空字串（不是合法的 "[]"）；用 -z 這個額外檢查兜底，
 # 避免萬一 jq 成功但輸出詭異地是空字串，也一併當失敗處理，不要冒然當成
 # 合法的空 repo。
-if ! prs="$(backtest_merged_prs "$REPO" "$LIMIT" "$UNTIL")" || [[ -z "$prs" ]]; then
+if ! prs="$(backtest_merged_prs "$REPO" "$LIMIT" "$UNTIL" "$SINCE")" || [[ -z "$prs" ]]; then
   # 這裡沒有 n_failed_pr／n_failed_commit 可以印——迴圈根本還沒開始，兩個
   # 計數器都是初始值，印出來只會誤導成「查了 0 筆都沒失敗」。故意用
   # "listing" 這個字取代數字欄位，讓這行的形狀跟下面 PR／commit 層級的

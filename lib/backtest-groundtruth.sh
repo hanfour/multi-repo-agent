@@ -57,8 +57,16 @@
 # 自動改成分頁去湊滿——分頁會把「最近建立的 N 筆」變成一個要抓好幾頁、燒額度
 # 的操作，而目前的用法（每個 repo 取最近 100 個 PR）根本不需要。直接擋下來，
 # 讓使用者知道上限在哪，比悄悄給一個比要求少的分母好。
+#
+# $since（可選，ISO 8601）：收 created_at 不早於這個時間點的全部 merged PR
+# （>=，跟 until 的嚴格小於相對，兩個一起給就是左閉右開的區間）。這是給
+# 「掃一年」用的：沒有 since 的路徑只抓一頁、永遠碰不到第 101 筆以後的 PR。
+# 有 since 就逐頁翻（每頁 100 筆，$limit 不用），翻到「這一頁最後一筆的
+# created_at 已早於 since」或「這一頁不滿 100 筆」為止；端點是新到舊排序，
+# 所以停下來時再往後的頁全部都比 since 早。任何一頁抓不到就回非 0，不把抓
+# 到一半的清單當完整結果。
 backtest_merged_prs() {
-  local repo="$1" limit="${2:-100}" until="${3:-}"
+  local repo="$1" limit="${2:-100}" until="${3:-}" since="${4:-}"
   case "$limit" in
     ''|*[!0-9]*|0)
       printf 'LIMIT_INVALID\t%s\t--limit 必須是 1 到 100 之間的整數\n' "$limit" >&2
@@ -69,11 +77,28 @@ backtest_merged_prs() {
       "$limit" >&2
     return 1
   fi
-  gh api "repos/$repo/pulls?state=closed&per_page=$limit&sort=created&direction=desc" 2>/dev/null \
-    | jq --arg until "$until" \
-      '[ .[] | select(.merged_at != null)
-              | select($until == "" or .created_at < $until)
-              | {n: .number, merged_at: .merged_at, merge_commit_sha: .merge_commit_sha} ]'
+  local base="repos/$repo/pulls?state=closed&sort=created&direction=desc"
+  local filter='[ .[] | select(.merged_at != null)
+                      | select($until == "" or .created_at < $until)
+                      | select($since == "" or .created_at >= $since)
+                      | {n: .number, merged_at: .merged_at, merge_commit_sha: .merge_commit_sha} ]'
+  if [ -z "$since" ]; then
+    gh api "${base}&per_page=$limit" 2>/dev/null \
+      | jq --arg until "$until" --arg since "$since" "$filter"
+    return
+  fi
+  local page=1 all='[]' chunk n last
+  while :; do
+    chunk="$(gh api "${base}&per_page=100&page=$page" 2>/dev/null)" || return 1
+    n="$(printf '%s' "$chunk" | jq 'length')" || return 1
+    all="$(printf '%s\n%s' "$all" "$chunk" | jq -sc '.[0] + .[1]')" || return 1
+    last="$(printf '%s' "$chunk" | jq -r '.[-1].created_at // ""')" || return 1
+    if [ "$n" -lt 100 ] || [ -z "$last" ] || [[ "$last" < "$since" ]]; then
+      break
+    fi
+    page=$((page + 1))
+  done
+  printf '%s' "$all" | jq --arg until "$until" --arg since "$since" "$filter"
 }
 
 backtest_window_end() {

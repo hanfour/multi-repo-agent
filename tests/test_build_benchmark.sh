@@ -8,6 +8,8 @@ export MRA_BENCHMARK_DIR="$TMP/bench"
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gh" <<'SHIM'
 #!/usr/bin/env bash
+# 有給 MRA_TEST_GH_CALLS 就把每次呼叫的完整參數記下來，讓測試能檢查 URL。
+[[ -n "${MRA_TEST_GH_CALLS:-}" ]] && echo "$*" >> "$MRA_TEST_GH_CALLS"
 case "$*" in
   *"pulls/4919/files"*)
     # 另一個獨立的開關：只讓 pr-ranges 這條 lookup 失敗，commits 端點正常。
@@ -44,7 +46,7 @@ case "$*" in
       # 專門給「合法空 repo」測試用：查得到列表，列表本身是空的，
       # 不能跟上面的 PULLS_FAIL 開關共用同一種結束方式。
       *"repos/acme/empty-repo/"*) printf '%s' '[]' ;;
-      *) printf '%s' '[{"number":4919,"merged_at":"2026-08-10T09:09:52Z","merge_commit_sha":"own999"}]' ;;
+      *) printf '%s' '[{"number":4919,"created_at":"2026-08-05T00:00:00Z","merged_at":"2026-08-10T09:09:52Z","merge_commit_sha":"own999"}]' ;;
     esac ;;
 esac
 exit 0
@@ -70,7 +72,7 @@ eq "缺 --repo 值結束碼非 0" "1" "$?"
 
 # 其餘三個帶值的旗標也一樣不能吃掉下一個參數、也不能死在 set -u 的
 # 「$2: 未綁定的變數」——那種訊息指向行號，不指向使用者打錯的旗標。
-for _flag in --limit --days --until; do
+for _flag in --limit --days --until --since; do
   _out="$(bash "$MRA_DIR/scripts/build-benchmark.sh" "$_flag" 2>&1)"; _rc=$?
   eq "缺 ${_flag} 值結束碼非 0" "1" "$_rc"
   case "$_out" in
@@ -106,6 +108,34 @@ case "$days_bad" in
   *Traceback*) fail "--days 非數字不該噴 Python traceback" ;;
   *) ok "--days 非數字不噴 Python traceback" ;;
 esac
+
+# --since：掃「這個時間點之後建立的全部 PR」，走逐頁翻的路徑（見
+# lib/backtest-groundtruth.sh）。格式不對要在打 API 之前就擋下來：ISO 8601
+# 字串是拿來跟 created_at 做字串比較的，「2025-9-2」這種會靜默比錯。
+since_bad="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --since 2025-9-2 2>&1)"
+eq "--since 格式不對結束碼非 0" "1" "$?"
+case "$since_bad" in
+  SINCE_INVALID*) ok "--since 格式不對印出 SINCE_INVALID" ;;
+  *) fail "缺 SINCE_INVALID：$since_bad" ;;
+esac
+if [[ "$(bash "$MRA_DIR/scripts/build-benchmark.sh" --help 2>&1)" == *"--since"* ]]; then
+  ok "--help 提到 --since"
+else
+  fail "--help 沒提到 --since"
+fi
+export MRA_TEST_GH_CALLS="$TMP/gh-calls.log"; : > "$MRA_TEST_GH_CALLS"
+since_out="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --since 2026-08-01T00:00:00Z 2>&1)"
+eq "--since 結束碼 0" "0" "$?"
+if [[ "$since_out" == *"掃描 1 筆"* ]]; then ok "--since 之後建立的 PR 有掃到"; else fail "--since 之後建立的 PR 該掃到：$since_out"; fi
+eq "--since 走逐頁翻的 URL（帶 &page=1）" "1" "$(grep -c 'pulls?state=closed.*&page=1' "$MRA_TEST_GH_CALLS")"
+: > "$MRA_TEST_GH_CALLS"
+since_out="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --since 2026-08-10T00:00:00Z 2>&1)"
+if [[ "$since_out" == *"沒有 merged PR"* ]]; then ok "--since 之前建立的 PR 不掃"; else fail "--since 之前建立的 PR 不該掃：$since_out"; fi
+: > "$MRA_TEST_GH_CALLS"
+bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --limit 10 >/dev/null 2>&1
+eq "沒給 --since 時 URL 不帶 &page=（行為不變）" "0" "$(grep -c '&page=' "$MRA_TEST_GH_CALLS")"
+unset MRA_TEST_GH_CALLS
+rm -f "$TMP/bench/candidates.json"
 
 run1_out="$(bash "$MRA_DIR/scripts/build-benchmark.sh" --repo acme/rails-app-1 --limit 10 2>&1)"
 eq "退出碼 0" "0" "$?"

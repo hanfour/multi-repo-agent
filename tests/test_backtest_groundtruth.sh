@@ -49,6 +49,22 @@ case "$*" in
                    {"sha":"lll222","commit":{"message":"雜項調整 20260316\nfix rubocop\nfix rspec"}},
                    {"sha":"mmm333","commit":{"message":"季度盤點作業\n本次一併修正相關欄位對應"}}],
                   [{"sha":"nnn444","commit":{"message":"[ODM] 上刊通報 修正轉檔"}}]]' ;;
+  *"pulls?state=closed"*"&page=1"*)
+    # since 模式逐頁抓：第一頁滿 100 筆，created_at 從 2026-08-15 起一天一筆
+    # 往回排到 2026-05-08（跟真實端點一樣新到舊）。since 落在這 100 天內的
+    # 話，第一頁就該停；since 更早才需要翻第二頁。
+    jq -nc '[range(100) | {number: (5100 - .),
+                           created_at: (("2026-08-15T00:00:00Z" | fromdate) - . * 86400 | todate),
+                           merged_at: "2026-08-16T00:00:00Z",
+                           merge_commit_sha: ("p1-" + tostring)}]' ;;
+  *"pulls?state=closed"*"&page=2"*)
+    # 第二頁不滿 100 筆：抓完這頁就該停，不能再要第三頁。
+    if [[ "${MRA_TEST_PAGE2_FAIL:-0}" == "1" ]]; then exit 1; fi
+    printf '%s' '[{"number":4920,"created_at":"2026-04-10T00:00:00Z","merged_at":"2026-04-11T00:00:00Z","merge_commit_sha":"www999"},
+                  {"number":4919,"created_at":"2026-03-05T00:00:00Z","merged_at":"2026-03-10T09:09:52Z","merge_commit_sha":"own999"},
+                  {"number":4917,"created_at":"2026-02-01T00:00:00Z","merged_at":"2026-02-02T00:00:00Z","merge_commit_sha":"old111"}]' ;;
+  *"pulls?state=closed"*"&page="*)
+    echo "UNEXPECTED_PAGE $*" >&2; exit 1 ;;
   *"pulls?state=closed"*)
     printf '%s' '[{"number":4920,"created_at":"2026-08-15T00:00:00Z","merged_at":"2026-08-16T00:00:00Z","merge_commit_sha":"www999"},
                   {"number":4919,"created_at":"2026-08-05T00:00:00Z","merged_at":"2026-08-10T09:09:52Z","merge_commit_sha":"own999"},
@@ -266,6 +282,39 @@ has "印出 LIMIT_INVALID" "$limit_bad" "LIMIT_INVALID"
 # 邊界：100 本身要放行，不然這道守衛會連正常用法都擋掉。
 backtest_merged_prs acme/rails-app-1 100 >/dev/null 2>&1
 eq "limit 剛好 100 時放行" "0" "$?"
+
+# --- since：抓「這個時間點之後建立的全部 merged PR」，要逐頁翻 -------------
+# 沒有 since 的路徑只抓最近 N 筆一頁，永遠碰不到第 101 筆以後的 PR；掃一年
+# 的 PR 要靠 since。stub 第一頁 100 筆（08-15 到 05-08）、第二頁 3 筆。
+: > "$GH_CALLS"
+since_out="$(backtest_merged_prs acme/rails-app-1 100 "" 2026-03-05T00:00:00Z)"; since_rc=$?
+eq "since 模式退出 0" "0" "$since_rc"
+eq "since=03-05 翻到第二頁：第一頁 100 筆 + 第二頁 created_at >= since 的 2 筆" "102" \
+  "$(printf '%s' "$since_out" | jq 'length')"
+eq "since 剛好等於 4919 的 created_at 時 4919 要收（>=，跟 until 的嚴格小於相對）" "true" \
+  "$(printf '%s' "$since_out" | jq 'any(.[]; .n == 4919)')"
+eq "早於 since 的 4917 不收" "false" "$(printf '%s' "$since_out" | jq 'any(.[]; .n == 4917)')"
+eq "第二頁不滿 100 筆就停，沒有去要第三頁" "0" "$(grep -c '&page=3' "$GH_CALLS")"
+eq "since 模式仍然 sort=created" "2" "$(grep 'pulls?state=closed' "$GH_CALLS" | grep -c 'sort=created')"
+
+# since 落在第一頁範圍內：第一頁最後一筆（05-08）已經早於 since，不該再翻頁
+: > "$GH_CALLS"
+since_out="$(backtest_merged_prs acme/rails-app-1 100 "" 2026-06-01T00:00:00Z)"
+eq "since=06-01 只收第一頁裡 06-01 到 08-15 的 76 筆" "76" "$(printf '%s' "$since_out" | jq 'length')"
+eq "第一頁最後一筆已早於 since 就停，沒有去要第二頁" "0" "$(grep -c '&page=2' "$GH_CALLS")"
+
+# since 與 until 一起給：兩端都要生效
+since_out="$(backtest_merged_prs acme/rails-app-1 100 2026-08-01T00:00:00Z 2026-06-01T00:00:00Z)"
+eq "since=06-01 且 until=08-01：只剩 06-01 到 07-31 的 61 筆" "61" "$(printf '%s' "$since_out" | jq 'length')"
+
+# 沒給 since：不分頁，URL 不帶 page=，行為跟現在完全一樣
+: > "$GH_CALLS"
+backtest_merged_prs acme/rails-app-1 10 >/dev/null
+eq "沒給 since 時 URL 不帶 &page=" "0" "$(grep -c '&page=' "$GH_CALLS")"
+
+# since 模式某一頁抓不到：要回非 0，不能把抓到一半的清單當完整結果
+MRA_TEST_PAGE2_FAIL=1 backtest_merged_prs acme/rails-app-1 100 "" 2026-03-05T00:00:00Z >/dev/null 2>&1
+eq "since 模式翻頁失敗回非 0" "1" "$?"
 
 # backtest_overlap 對畸形輸入要回非 0。scripts/build-benchmark.sh 現在會接住
 # 它的退出碼（舊版丟掉，jq 失敗時 $ov 是空字串，而 bash 的算術比較把空字串
