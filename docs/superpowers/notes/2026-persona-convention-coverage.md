@@ -1691,4 +1691,86 @@ repo A 9、repo B 9、repo C 9。跟上表「89 個新 PR 約 45-50 條」的估
 三、新 PR 跑 review 回測。約 89 個 PR，每個額度視窗 20-25 個，要 4 個視窗。
 可以先跑 repo A 的 58 個。
 
+已完成（2026-09-03），見下一節。母體的估計是錯的：`run-backtest.sh` 只跑
+`confirmed: true` 的 PR，這次新增的是 27 個（每個 repo 9 個），不是 89 或 58；
+27 個兩個額度視窗跑完。
+
 四、原第二、三點（重量浮動、`#764` 迴歸案例）保留，等分母擴大後再做。
+
+## 新 PR 的 review 回測：漏抓率由 repo 組成決定（2026-09-03）
+
+27 個新 `confirmed: true` 的 PR，條件跟 `baseline-personas` 那輪完全一樣
+（claude sonnet、personas、persona max turns 20、synthesize max turns 8、
+tolerance 15、worktree 隔離），label `baseline-personas-year`。分 repo 子集跑：
+`MRA_BENCHMARK_DIR` 指到只含該子集 `candidates.json` 的目錄，跑完把輸出搬到
+主目錄同一個 label 底下 `--recompute`。repo B、C 的 18 個跑 1 小時 29 分，
+每個 PR 2 到 7 分鐘。
+
+### 先修一個假綠燈
+
+repo A `#949`（433 個檔案，+32,419／−10,941）5 個 persona 全部因 prompt 超過
+模型上限（約 127 萬 token）失敗，`run_persona_review` 照樣回 0，synthesize
+拿到空的 findings 產出 `APPROVED`、0 條 comment，summary 自己寫「兩個 review
+agent 皆未產出可用發現」，`run-backtest.sh` 把它算成一個成功的 PR。
+
+修正（commit `4e543e5`）：`run_persona_review` 計數失敗的 persona，全部失敗
+時在 stderr 記 `PERSONAS_ALL_FAILED` 並回 1；`review.sh` 的 personas 路徑用
+`|| persona_rc=$?` 接住，非 0 直接退回 `review_incomplete_json`，不呼叫
+synthesize。部分失敗維持原本行為。測試在 `test_review_personas.sh`（單元）
+與新的 `test_review_personas_all_failed.sh`（從 `review_project` 整條路徑驗
+synthesize 沒被呼叫）。修完重跑 `#949`，26 秒結束、`REVIEW_INCOMPLETE`、
+不計入彙總。
+
+另外兩個第一次 `REVIEW_FAILED` 的 PR：repo C `#4796`（一個 persona rc=1，
+synthesize 撞 max turns 8）與 repo B `#23`（37 個檔案，5 個 persona 都完成，
+synthesize 撞 max turns 8）。條件不動，各重跑一次都成功。
+
+### 結果
+
+26 個有效 PR、31 條 expected finding，對照既有 38 個 PR 那輪：
+
+| | 這次 27 個新 PR | 既有 38 個 | 合計 64 個 |
+| --- | --- | --- | --- |
+| 有效 PR | 26 | 38 | 64 |
+| expected finding | 31 | 54 | 85 |
+| 漏抓 | 15（0.48） | 37（0.69） | 52（0.61） |
+| 同檔完全沒講 | 9（0.29） | 24（0.44） | 33（0.39） |
+| comment 總數 | 189 | 217 | 406 |
+| 未對應率 | 0.92 | 0.92 | 0.92 |
+| 嚴重度吻合 | 8/16 | 7/17 | 15/33 |
+| 錨點漂移 | 6 | 13 | 19 |
+
+整體漏抓率從 0.69 降到 0.48，但按 repo 拆開，每個 repo 的漏抓率兩輪幾乎沒動：
+
+| repo | 輪次 | PR | finding | 漏抓 | 同檔沒講 | comment |
+| --- | --- | --- | --- | --- | --- | --- |
+| repo A（前端 monorepo） | 既有 | 22 | 26 | 23（0.88） | 17（0.65） | 121 |
+| | 這次 | 8 | 8 | 6（0.75） | 4（0.50） | 52 |
+| repo B（前端） | 既有 | 9 | 17 | 11（0.65） | 7（0.41） | 59 |
+| | 這次 | 9 | 11 | 7（0.64） | 4（0.36） | 61 |
+| repo C（Rails API） | 既有 | 7 | 11 | 3（0.27） | 0（0.00） | 37 |
+| | 這次 | 9 | 12 | 2（0.17） | 1（0.08） | 76 |
+
+差在組成：既有 38 個有 58% 是 repo A，這次 27 個三個 repo 各三分之一。
+拿整體漏抓率比較兩輪會得出「變好了」，拆開看是同一個 reviewer 在同一種
+repo 上的表現沒有變。之後任何跨輪次的比較都要按 repo 拆，或固定組成。
+
+repo C 的 finding 幾乎都命中，且錨點準（`#4604` 379→379、`#4668` 三條
+63／70／91 對 63／77／91）。repo A 漏的 6 條裡 4 條連檔案都沒碰到，reviewer
+不是看了沒抓到，是沒看那個檔案；那 4 個 PR 的 comment 全部落在別的檔案。
+這跟 PR 大小有沒有關係要在第四點一起看。
+
+未對應率兩輪都是 0.92：406 條 comment 對上 33 條 expected，其餘 373 條是基準
+集沒有記的東西，這個數字在基準集沒有反向標註（哪些 comment 是對的）之前
+沒有意義，不要拿來當「誤報率」。
+
+## 下一步（2026-09-03 第十次更新）
+
+一、第四點可以做了：分母 85 條、64 個 PR。重量浮動（同一組 PR 跑第二次看
+命中集合的變動）先做，`#764` 迴歸案例接著。
+
+二、repo A 的漏抓要拆開：8 個新 PR 的檔案數與 diff 大小對上有沒有命中，看
+「沒看那個檔案」是 PR 太大 persona 挑檔案時漏掉，還是 monorepo 的 PKB
+moduleMap 沒把那個模組指進來。這一步不用跑 review，看現有輸出就好。
+
+三、比較兩輪或兩個設定時，一律按 repo 拆或固定 repo 組成。
