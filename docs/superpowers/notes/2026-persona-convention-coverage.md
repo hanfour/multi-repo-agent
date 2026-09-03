@@ -1774,3 +1774,77 @@ repo C 的 finding 幾乎都命中，且錨點準（`#4604` 379→379、`#4668` 
 moduleMap 沒把那個模組指進來。這一步不用跑 review，看現有輸出就好。
 
 三、比較兩輪或兩個設定時，一律按 repo 拆或固定 repo 組成。
+
+## repo A 的漏抓不是大小也不是 PKB，是 persona 陣容沒有人看 UI 行為（2026-09-03）
+
+第十次更新第二點。只看現有輸出，沒有跑 review。
+
+### 大小與 PKB 兩個假設都不成立
+
+| PR | 檔案 | diff | 命中 | expected 檔在 PKB 模組內 | comment 落在 |
+| --- | --- | --- | --- | --- | --- |
+| `#76` | 6 | +456／−22 | 漏（同檔沒講） | 是（layout） | routes |
+| `#424` | 9 | +558／−8 | 命中 | 是（creative） | creative use-cases、e2e |
+| `#629` | 10 | +949／−11 | 漏（同檔有講） | 是（audience-targeting） | 同 feature |
+| `#184` | 12 | +328／−56 | 命中 | 是（measurement） | 同 feature、shared |
+| `#627` | 14 | +1,096／−81 | 漏（同檔有講） | 是（audience-targeting） | 同 feature |
+| `#185` | 27 | +569／−110 | 漏（同檔沒講） | 是（measurement） | 同 feature 的測試與後端 |
+| `#712` | 31 | +972／−1,430 | 漏（同檔沒講） | 是（line-item） | 同 feature、routes |
+| `#25` | 51 | +2,924／−683 | 漏（同檔沒講） | 是（layout） | auth、layout 測試 |
+
+8 個 PR 的 expected 檔案都在 PR diff 內，PKB 也都把對應的 feature 模組指
+進來了（`.err` 第二行的 modules 清單）。命中的兩個是 9 與 12 個檔案，漏的
+從 6 到 51 個都有，沒有一條大小門檻能把兩組分開。
+
+### 漏掉的 6 條長什麼樣
+
+- `#25`、`#76`：`DropdownMenuLabel` 沒包在 `DropdownMenuGroup` 內，base-ui 的
+  GroupLabel 取不到 context 直接 throw，開選單整頁報錯。要知道元件庫的
+  context 契約才看得出來。
+- `#185`：表格的 isError／isLoading 綁到只餵統計列的 query，統計失敗時整張
+  表被錯誤列取代。
+- `#712`：走期或預算任一為 null 就回傳靜態提示，不分 isEditing，編輯模式下
+  沒有輸入元件。
+- `#627`、`#629`：底部已選計數用目錄查得到的 chips 數，目錄對不回的舊 id
+  仍會送出，計數少算。
+
+六條全是「這個 UI 在某個狀態下的行為錯了」。五個 persona（security、
+api-contract、performance、refactoring、test-architect）沒有一個的判準是
+這件事。同檔有講的 `#627`／`#629`，comment 講的是 Zod schema 允許 null、
+三處重寫同一段計算、重複呼叫 `brandsInScope`：refactoring-sage 與
+performance-hawk 的視角，不是正確性。
+
+### comment 預算花在哪
+
+| repo | comment | 落在測試檔 | 講重複／重算 |
+| --- | --- | --- | --- |
+| repo A | 52 | 18（34%） | 16（30%） |
+| repo B | 61 | 4（6%） | 7（11%） |
+| repo C | 76 | 1（1%） | 12（15%） |
+
+repo A 三分之一的 comment 在測試檔上，來自 test-architect（`agents/personas/
+test-architect.md` 的 Isolated／Readable／Structure-insensitive／Specific 那
+幾條原則，comment 直接用這些原則名），嚴重度還標到 CRITICAL（測試命名不夠具體）。
+repo A 的 PR 幾乎每個都帶 vitest 測試，repo C 的 Rails PR 很少動 spec，
+persona 陣容一樣，落點差這麼多是被 PR 內容帶著走的。
+
+### 這一輪分不出「persona 沒看到」與「synthesize 丟掉」
+
+`backtest-review-adapter.sh` 有 `MRA_BACKTEST_PERSONA_DUMP_BASE` 可以留每個
+persona 的原始輸出，這一輪沒開，最終 JSON 看不出同檔沒講的 4 條是 persona
+根本沒提，還是提了被 synthesize 排掉（synthesize 一個 PR 只留 3 到 13 條）。
+第四點的重跑一定要開這個變數，同一次跑同時回答浮動與這個問題。
+
+## 下一步（2026-09-03 第十一次更新）
+
+一、第四點：`baseline-personas-year` 的 27 個 PR 同條件再跑一次，label
+`baseline-personas-year-repeat`，開 `MRA_BACKTEST_PERSONA_DUMP_BASE`。看
+31 條的檔案層級翻面數（既有 38 個那輪是 54 條翻 11 條），並用 persona
+原始輸出把同檔沒講拆成「沒提」與「被排掉」。
+
+二、上面六條 UI 行為缺陷是 persona 陣容的空缺，不是調 turns 或 PKB 能補的。
+要不要加一個看「狀態與行為」的 persona，等第一點的 dump 看完再決定：如果
+現有 persona 其實有提、只是被 synthesize 排掉，該動的是 synthesize 的取捨，
+不是再加 persona。
+
+三、`#764` 迴歸案例在第一點之後。
