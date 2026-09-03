@@ -2010,3 +2010,199 @@ repo 拆、看缺陷層級：檔案層級 repo A 已經 5/8，看不出差別。
 是不是同一件事，用 API 額度。人工判 44 條可以，再跑幾輪就不行。
 
 四、`#764` 迴歸案例。
+
+## 加 UI 行為 persona：缺陷層級 4 → 7，新增的 3 條都是它提的（2026-09-04）
+
+第十二次更新第一點。新增 `agents/personas/ui-behavior-inspector.md`，
+`MRA_REVIEW_ENABLE_UI_BEHAVIOR=1` 才加進陣容（與 convention-auditor 同一種
+旗標，預設關）。回測只取 repo A 與 repo B 的 18 個 PR（repo C 是 Rails
+API，這個 persona 對純後端 diff 的規定是一行說明、零 finding），label
+`personas-ui-behavior`，其他條件與前兩輪相同：sonnet、persona max turns
+20、synthesize max turns 8、容差 15、留 dump。比較對象是前兩輪同 18 個
+PR 的結果，用 `--recompute` 在同一個子集重算。
+
+### persona 看什麼
+
+五個焦點，每一個都對應前兩輪漏掉的某一類：
+
+| 焦點 | 對應的漏 |
+| --- | --- |
+| 狀態接線：哪個 query／store 旗標驅動 loading／error／empty／editing，某個資料來源的狀態會不會蓋掉另一個已載入的內容 | `#184`、`#185` |
+| 元件庫契約：需要 wrapper／provider／context 的 primitive，少包一層在執行期 throw | `#25`、`#76`、`#233` |
+| 顯示與送出不同份：計數、選取、草稿從篩選後或查表後的清單算，送出的是原始 id | `#627`、`#629` |
+| 模式分支：edit／view、create／update、權限分支提早 return，該模式下少了該有的控制項 | `#712` |
+| guard 的 subject：路由 guard 與按鈕用的是這個畫面的權限，不是隔壁畫面的 | `#137`、`#56`、`#70` |
+
+方法規定先列出每個改動的元件、路由、view hook 能處在哪些狀態，再逐狀態
+追資料來源；新用到的 library primitive 要查 node_modules 的型別或 repo 內
+既有用法。scope note 排除測試覆蓋、重複、render 成本，diff 沒有 UI 程式碼
+就一行說明、不出 finding。
+
+### 執行紀錄
+
+| 時間 | 事 |
+| --- | --- |
+| 16:18 | 啟動，18 個 PR |
+| 16:40 | 第 5 個 PR `#627` 的 6 個 persona 跑完、synthesize 撞 `session limit · resets 7:10pm`；之後 13 個 PR 的 78 個 persona 呼叫全部立刻拿到同一句 |
+| 22:38 | 額度回來，同指令補跑 14 個（run-backtest 只補沒有非空 json 的 PR） |
+| 補跑 | `#629` synthesize 撞 max turns 8 → `REVIEW_FAILED` |
+| 第三次 | `#629` 6 個 persona 全拿到 `401 OAuth access token has been revoked`，synthesize `OAuth session expired and could not be refreshed`（本機互動 session 同時在更新 token，與第十二次更新 `#137` 同型） |
+| 第四次 | `#629` 成功，`CHANGES_REQUESTED` 5 則 |
+
+session limit 與 401 兩種失敗，最終只留 `.err`，dump 全是同一句錯誤。失敗
+的 dump 目錄改名 `.attempt<n>` 留著，`.err` 存 `runs/<label>/failed-1st/`。
+`#949` 三輪都 prompt 過長，不算。
+
+### 三輪的彙總數字
+
+19 條 expected、17 個有效 PR，三輪相同。
+
+| | year | repeat | ui-behavior |
+| --- | --- | --- | --- |
+| 漏抓（行號容差 15） | 13（0.68） | 12（0.63） | 10（0.53） |
+| 同檔完全沒講 | 8（0.42） | 8（0.42） | 4（0.21） |
+| 錨點漂移 | 5 | 4 | 6 |
+| 未對應率 | 0.95 | 0.94 | 0.92 |
+| 嚴重度吻合 | 3/6 | 0/7 | 3/9 |
+| comment 總數 | 113 | 115 | 109 |
+
+### 三個層級、按 repo 拆
+
+| 層級 | year | repeat | ui-behavior |
+| --- | --- | --- | --- |
+| 檔案 | 11 | 11 | 15 |
+| 行 | 6 | 7 | 9 |
+| 缺陷 | 4 | 3 | 7 |
+
+按 repo 拆（缺陷層級中 / 檔案層級中 / n）：
+
+| repo | year | repeat | ui-behavior |
+| --- | --- | --- | --- |
+| repo A | 1 / 4 / 8 | 0 / 5 / 8 | 3 / 7 / 8 |
+| repo B | 3 / 7 / 11 | 3 / 6 / 11 | 4 / 8 / 11 |
+
+缺陷層級 ✓ 的條目：
+
+| 條目 | expected | year | repeat | ui-behavior | ui-behavior 那輪誰講的 |
+| --- | --- | --- | --- | --- | --- |
+| `#184` | isError 綁 statsQuery，統計失敗蓋掉已載入表格 | ✓ | ✗ | ✓ | ui-behavior-inspector（只有摘要文字） |
+| `#185` | 同 `#184` 那一處，另一個 PR | 檔案 MISS | 檔案 MISS | ✓ | ui-behavior-inspector |
+| `#712` | 走期任一 null 不分 isEditing 直接 return，編輯模式沒輸入元件 | 檔案 MISS | ✗（講缺測試） | ✓ | ui-behavior-inspector，第一則 CRITICAL 逐字對應 |
+| `#28` | 成功後只 invalidate 前置活動列表，沒失效 CAMPAIGN_LIST | ✗（講前綴過寬） | 檔案 MISS | ✓ | ui-behavior-inspector 第 3 條，synthesize 把 HIGH 降為 MEDIUM |
+| `#56` | 路由缺權限 | ✓ | ✓ | ✓ | security-auditor 與 ui-behavior-inspector 都提 |
+| `#70` | 儲存按鈕缺 update_stage_2 | ✓ | ✓ | ✓ | security-auditor；ui-behavior-inspector 講的是同一行另一個缺陷 |
+| `#83` | GET 該 POST | ✓ | ✓ | ✓ | api-contract-guardian |
+
+三條新增的 ✓（`#185`、`#712`、`#28`）都直接來自 ui-behavior-inspector 的
+finding；原本 ✓ 的 `#56`、`#70`、`#83` 沒有掉。`#184` 前兩輪翻面的那條這輪
+回來，ui persona 的文字只有摘要（見下面 ReportFindings 段），synthesize
+仍從摘要抓到根因。
+
+### 沒抓到的 12 條長什麼樣
+
+| 條目 | expected | 這輪的狀況 |
+| --- | --- | --- |
+| `#25` | app-header DropdownMenuLabel 沒包 Group，Base UI GroupLabel 讀 context throw | dump 把 app-header.tsx 列進掃描清單，2 條 finding 講 sidebar 與 footer，沒查 GroupLabel |
+| `#76` | user-menu 同一個缺陷 | 3 條 finding 全講 mock 佔位元件（switcher 沒接、搜尋框沒綁、頁籤沒進 URL），dump 沒提 user-menu |
+| `#233` | Dialog 內 Popover 沒設 modal，portal 出去被 scroll lock 擋住 | 看了同一個元件，3 條講 CommandItem value 不唯一等，沒查 Popover 的 modal |
+| `#627` | :463 底部已選計數只算 options 找得到的 | 1 條講 :404 toggleCategory 對全類而非篩選後可見清單。同一類「顯示與送出不同份」，不是 expected 那條 |
+| `#629` | :464 footer 已選計數取 chips.length，目錄對不回的舊 id 送出卻沒算 | 零 finding，結論寫「displayed chips and submitted ids consistent end to end」，與 expected 相反。第二次（synthesize 失敗那次）有 1 條「只看已選計數排除停用品牌但過濾不排除」，也不是 expected 那條 |
+| `#137` | Stage 2 guard 用 Stage 1 的 subject | 2 條：use-save-edit.ts:14 儲存是空實作（CRITICAL，真缺陷）、月份篩選編輯模式沒禁用；沒查 guard 的 subject |
+| `#23` ×2 | Map key 拿去比 productLineIds；切產品線沒重置 selectedAdFormatId | 5 條（2 CRITICAL）全走 ReportFindings，文字只剩「共找到 5 個問題」，不知道裡面有沒有這兩條 |
+| `#35` ×2 | useQuery data 預設字面量 `[]`，每次 render 新參照，useReactTable 無限 re-render | 6 條講 import 不存在的 export、store 欄位不對、prop 沒傳；React 參照穩定性不在五個焦點裡 |
+| `#95` | SKILL.md | 一行「沒有 UI 程式碼」。檔案 HIT 是別的 persona 講同檔別的事 |
+| `#424` | 後端篩選層級錯 | 一行「純後端」。三輪都是同檔別的事 |
+
+焦點第二條（元件庫契約）三條全漏，`#25` 與 `#76` 是同一個缺陷。兩個 dump
+都沒有去查 base-ui 的 GroupLabel 需要什麼 context。可能的原因：措辭寫的是
+「新用到的 library primitive」，而 `DropdownMenuLabel` 是專案
+`components/ui/dropdown-menu.tsx` 既有的包裝，看起來像專案自己的元件；而且
+這是「Label 放在哪一層」的結構問題，persona 的方法是按狀態走查，這種缺陷
+在任何狀態都一樣。要抓這類，措辭要明講「`components/ui/*` 包裝的
+primitive，在使用處的巢狀結構是否符合底層庫的要求」。焦點第三條兩條
+（`#627`、`#629`）persona 都走到了那個元件、也在看「篩選後 vs 送出」，
+一條指到另一處，一條判為一致。
+
+### ui persona 的 finding 有多少進了 synthesize
+
+`persona-survival.sh <subset> <label> <persona>`：dump 裡每一行
+`[SEV] \`path:line\`` 取 path 與行號，最終 comment 同 path 且行號差 ≤15 算
+survived。17 個 PR：
+
+| | 條數 |
+| --- | --- |
+| 格式正確的 finding | 28 |
+| 進了最終 comment | 26 |
+| 沒進的 | 2（`#35` 6 條中的 2 條） |
+| 走 ReportFindings、文字只有摘要 | `#23` 5 條、`#184` 2 條、`#629` 第二次 1 條 |
+| 沒有 `[SEV]` 標記的散文 | `#185` 1 條，synthesize 仍抓到 |
+
+comment 總數三輪 113、115、109，多一個 persona 沒有把 comment 數推高，也
+沒有把其他 persona 擠掉：逐 PR 看，`#185` 7／8／10、`#35` 11／11／13
+變多，`#184` 8／7／4、`#83` 8／12／5 變少，方向不一。synthesize 是在同一
+個預算裡換內容。
+
+persona 撞 max turns 20 這輪 2 個（`#712` test-architect、`#28`
+api-contract-guardian）；repeat 在這 18 個 PR 上 1 個（`#233`
+api-contract-guardian），year 沒留 dump 看不到。
+
+### 新發現：finding 走了 ReportFindings 工具，文字只剩摘要
+
+headless `claude -p` 內建 `ReportFindings` 工具（給 code-review 用的結構化
+回報）。persona 偶爾用它回報而不是寫在文字裡，`review_call_model` 只拿
+最終文字，finding 本體全部遺失，synthesize 看到的是「共找到 5 個問題（2 個
+CRITICAL、2 個 HIGH、1 個 MEDIUM）」這種摘要。
+
+| 輪 | 案例 | 遺失 |
+| --- | --- | --- |
+| ui-behavior | `#23` ui-behavior-inspector | 5 條含 2 CRITICAL，全部 |
+| ui-behavior | `#184` ui-behavior-inspector | 2 條，摘要有寫根因，synthesize 抓到 |
+| ui-behavior | `#629` 第二次 ui-behavior-inspector | 1 條 MEDIUM |
+| ui-behavior | `#83` ui-behavior-inspector、`#28` performance-hawk | 文字有本體，結尾多一句「已用 ReportFindings 回報」 |
+| repeat | `#4614` test-architect | 7 條，全部 |
+| repeat | `#185` api-contract-guardian | 2 條，摘要有寫內容 |
+| repeat | `#4796` performance-hawk | 文字有本體 |
+
+year 那輪沒留 dump。這輪 6 個 persona × 17 個 PR 共 102 次呼叫，本體遺失
+2 次（加上 `#629` 沒成功的第二次是 3 次），都是 ui-behavior-inspector；
+repeat 5 × 26 共 130 次，遺失 1 次。
+
+修法是 `lib/review-provider.sh:532` 的
+`--disallowedTools "Write,Edit,NotebookEdit"` 加 `ReportFindings`，
+`lib/model-provider.sh:36`、`lib/review-json.sh:219`、
+`lib/review-debate-agents.sh` 的 6 個站點同步。這輪跑完才改，中途不換條件。
+
+### 對「要不要預設開」的判斷
+
+repo A 缺陷層級 1／0／3，repo B 3／3／4。三條新增的 ✓ 都是這個 persona
+提的，原本的 ✓ 沒有掉，comment 總數沒變。反方向的證據：元件庫契約那三條
+全漏、`#627`／`#629` 走到了元件卻沒指到那一處、`#629` 還下了相反的結論；
+17 個 PR 一輪的樣本，前兩輪同條件重跑缺陷層級 11 與 9 只有 6 條重疊，這
+輪 7 條裡有多少是穩的還不知道。
+
+先不預設開。做法是先把 ReportFindings 修掉、persona 措辭補元件庫巢狀結構
+那句，同 18 個 PR 再跑一輪；兩輪都 ✓ 的條目數要超過前兩輪的 6。開關形式
+另一個選項是依 project type 開（前端 repo 開、Rails API 不開），persona
+對純後端 diff 已經會一行退出，成本是 6 個平行呼叫多 1 個。
+
+### 工具
+
+`persona-survival.sh <subset> <label> <persona>` 放
+`~/.cache/mra-review-benchmark/year-2026-09/`，與 `per-item.sh`、
+`dump-classify.sh` 同目錄。dump 常沒有結尾換行，`while read` 要加
+`|| [[ -n "$line" ]]`，不然最後一條 finding 會丟掉。缺陷層級判定表在
+`subset-ab18/defect-level-judgments-ui.md`。
+
+## 下一步（2026-09-04 第十三次更新）
+
+一、`--disallowedTools` 加 `ReportFindings`，9 個站點。先寫測試看 RED。
+
+二、ui-behavior-inspector 焦點第二條改措辭：明講 `components/ui/*` 包裝的
+primitive 在使用處的巢狀結構要對照底層庫（base-ui／radix）的要求；
+「新用到的」三個字拿掉。
+
+三、一、二做完同 18 個 PR 再跑一輪 `personas-ui-behavior`，看兩輪都 ✓ 的
+條目數。
+
+四、persona 撞 max turns 的重試（第十二次更新第二點）、缺陷層級判定改模型
+（第三點）、`#764` 迴歸案例（第四點）不動。
