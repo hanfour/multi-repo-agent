@@ -1848,3 +1848,165 @@ persona 的原始輸出，這一輪沒開，最終 JSON 看不出同檔沒講的
 不是再加 persona。
 
 三、`#764` 迴歸案例在第一點之後。
+
+## 同條件重跑：總數一樣，命中的是另一批（2026-09-03）
+
+第十一次更新第一點。`baseline-personas-year` 的 27 個 PR 條件不動再跑一次，
+label `baseline-personas-year-repeat`，開 `MRA_BACKTEST_PERSONA_DUMP_BASE`
+留每個 persona 的原始輸出。13:34 啟動，主程序 27 個 PR 跑到 15:45，之後
+補跑三個失敗的 PR，16:00 結束。
+
+### 失敗型態
+
+| PR | 第一次 | 補跑 |
+| --- | --- | --- |
+| repo A `#949` | 5 個 persona prompt 過長，走 `4e543e5` 的 `PERSONAS_ALL_FAILED` 路徑 → `REVIEW_INCOMPLETE` | 同樣，26 秒結束 |
+| repo C `#4675` | 5 個 persona 正常，synthesize 產出的 JSON 沒過驗證（exit 0、4,083 bytes）→ `REVIEW_INCOMPLETE` | 成功 |
+| repo B `#137` | api-contract-guardian 撞 max turns 20，synthesize 撞 max turns 8 → `REVIEW_FAILED` | 第二次 5 個 persona 正常，synthesize 拿到 `401 OAuth access token has been revoked`（本機同時有互動 session 在用同一組 token）；第三次成功 |
+
+三種都是 synthesize 層或 prompt 長度，persona 本身沒有問題。year 那輪
+`#4796`、`#23` 也是 synthesize 撞 max turns 後重跑成功。
+
+另一種失敗最終 JSON 看不出來：單一 persona 撞 max turns 20，review 照樣
+成功，只是少一個視角。從兩輪成功 review 的 `.err` 數：
+
+| | year | repeat |
+| --- | --- | --- |
+| 撞 max turns 的 persona 數（不含 `#949`） | 10 | 7 |
+| 受影響的 PR | 6（repo C 5、repo A 1） | 5（repo C 4、repo B 1） |
+| 同一個 PR 掉 3 個 persona | `#4614`、`#4724` | `#4724` |
+
+`#4724` 兩輪都只剩 2 個 persona 在跑（year 剩 refactoring-sage、test-architect；
+repeat 剩 api-contract-guardian、refactoring-sage），兩輪都漏。`#4614` year
+掉了 security-auditor、api-contract-guardian、performance-hawk 三個，repeat
+只掉 api-contract-guardian；repeat 抓到 `commission_rate` 沒驗證範圍的
+正是 security-auditor。這條在缺陷層級從漏變中，原因是上一輪那個 persona
+根本沒跑完。
+
+### 兩輪的彙總數字
+
+| | year | repeat |
+| --- | --- | --- |
+| 有效 PR | 26 | 26 |
+| expected finding | 31 | 31 |
+| 漏抓 | 15（0.48） | 16（0.52） |
+| 同檔完全沒講 | 9（0.29） | 9（0.29） |
+| comment 總數 | 189 | 178 |
+| 未對應率 | 0.92 | 0.92 |
+| 嚴重度吻合 | 8/16 | 4/15 |
+| 錨點漂移 | 6 | 7 |
+
+### 命中要分三個層級看
+
+前幾輪都用「漏抓率」（行號容差 15）與「同檔完全沒講」兩個數字。這輪把
+兩輪各 22 條同檔有 comment 的條目逐條對照 expected 的缺陷描述，判「comment
+講的是不是同一件事」。三個層級對同一組 PR，分母 30 條（`#949` 兩輪都
+無效，不算）：
+
+| 層級 | 判準 | year | repeat | 兩輪都中 | 翻面 |
+| --- | --- | --- | --- | --- | --- |
+| 檔案 | 該檔有任何 comment | 22 | 22 | 20 | 4 |
+| 行 | 同檔且行號差 ≤15 | 16 | 15 | | |
+| 缺陷 | comment 講的就是 expected 那個缺陷 | 11 | 9 | 6 | 6 |
+
+檔案層級翻面的 4 條（`#712`、`#35` 漏→中；`#233`、`#28` 中→漏）在缺陷層級
+全是 ✗：`#712` repeat 指到 expected 同一行，講的是缺測試；`#35` 講沒分頁；
+`#233` year 講重複結構；`#28` year 講 invalidate 前綴過寬。缺陷層級翻面的
+6 條（`#4590`、`#4614` 漏→中；`#184`、`#4668:63`、`#4675`、`#4739:211`
+中→漏）在檔案層級全是兩輪都 HIT。兩種翻面沒有一條重疊。
+
+按 repo 拆（缺陷層級中 / 檔案層級中 / n）：
+
+| repo | year | repeat | 檔案層級翻面 | 缺陷層級翻面 |
+| --- | --- | --- | --- | --- |
+| repo A | 1 / 4 / 8 | 0 / 5 / 8 | 1 | 1 |
+| repo B | 3 / 7 / 11 | 3 / 6 / 11 | 3 | 0 |
+| repo C | 7 / 11 / 12 | 6 / 11 / 12 | 0 | 5 |
+
+repo C 檔案層級 11/12 兩輪不動，缺陷層級 7 與 6 底下換了 5 條；repo B
+相反，檔案層級翻 3 條，缺陷層級 3 條（`#56` 路由缺權限、`#70` 按鈕缺權限、
+`#83` GET 該 POST）兩輪都在。repo A 檔案層級 4 與 5，缺陷層級 1 與 0：year
+`#184` 那則直接寫「stats 端點失敗整張表格會被判 isError 蓋掉」，repeat 同一行
+的 comment 把這個行為當成預期，只說沒測試。
+
+漏抓率兩輪 0.48 與 0.52，看起來穩；缺陷層級 11 與 9 條裡只有 6 條重疊。
+之後比較設定，檔案與行層級的數字只能當粗篩，要看缺陷層級。
+
+### dump 拆解：同檔沒講的全是 persona 沒提
+
+`dump-classify.sh` 對 repeat 的 30 條：HIT 22、MISS-dropped 5、MISS-unraised
+4。MISS-dropped 的定義是「至少一個 persona 的輸出出現該檔完整路徑」，逐條
+看內容：
+
+- `#95`：persona 只在 scope note 列了 diff 的檔名。
+- `#76`：refactoring-sage 與 security-auditor 提到 `user-menu.tsx:24` mock
+  user 寫死，expected 是 :46 `DropdownMenuLabel` 沒包 Group。
+- `#137`：security-auditor 逐字看了那個 `beforeLoad`（`external` →
+  `ExternalMonthlyRecognize.READ`），結論是「未發現可繞過權限守門的路徑」。
+  expected 是 Stage 2 頁面用了 Stage 1 的 subject，要知道兩個階段的權限
+  才看得出來。
+- `#233`、`#28`：提的是同檔別的事。
+
+五條在缺陷層級都是 persona 沒提。加上 MISS-unraised 的 4 條，9 條同檔沒講
+沒有一條是 persona 提了被 synthesize 排掉。缺陷層級中→漏的那幾條也一樣：
+`#184` repeat 五個 persona 都提到 `statsQuery`，沒有人把「統計失敗蓋掉
+已載入的表格」當缺陷講；`#4739:211` 五個 persona 都提到
+`calculate_total_gross_profit`，沒有人講團隊彙總的 actual 恆為 0。
+
+`#76` 是 synthesize 唯一整批排掉的案例：五個 persona 共 6 條原始 finding，
+synthesize 以「純 UI 版面、都是 TODO 與重構建議、沒有具體 bug」全部排掉，
+`APPROVED` 0 則（year 是 `CHANGES_REQUESTED` 5 則，全在別的檔）。排掉的
+6 條裡也沒有 expected 那條。
+
+22 條 HIT 的條目，提到該檔的 persona 數：refactoring-sage 17、test-architect
+16、api-contract-guardian 14、security-auditor 12、performance-hawk 11。
+缺陷層級 9 條中的條目，講到那個缺陷的 persona：
+
+| 條目 | 講到的 persona |
+| --- | --- |
+| `#4590` 除零 | security-auditor、test-architect |
+| `#4604` find_by.pluck | api-contract-guardian、performance-hawk、refactoring-sage、test-architect |
+| `#4614` commission_rate 沒驗證 | security-auditor |
+| `#4668:77`／`:91` sales 可為 nil | 四個（performance-hawk 沒提） |
+| `#4739:116` total_budget 塞進 total_revenue | api-contract-guardian、refactoring-sage、test-architect |
+| `#56`、`#70` 缺權限 | security-auditor（`#56` 另有 api-contract-guardian） |
+| `#83` GET 該 POST | api-contract-guardian、performance-hawk、security-auditor |
+
+security-auditor 出現在 6 條，其中 `#4614`、`#70` 只有它講。上一段的
+persona 失敗統計裡，security-auditor 兩輪掉了 2 與 3 次，
+api-contract-guardian 4 與 2 次。
+
+### 對「加 UI 行為 persona」的判斷
+
+第十一次更新第二點的條件是：如果現有 persona 有提、只是被 synthesize 排掉，
+該動 synthesize。這輪的 dump 說沒有這種情況，缺的東西在 persona 層。repo A
+的 8 條在缺陷層級 year 1、repeat 0；repo B 漏的 `#233`（Popover 在 modal
+Dialog 內沒設 modal，清單被 scroll lock 擋住）、`#76`、`#35`、`#95` 也都是
+UI 狀態行為。加一個看 UI 狀態與行為的 persona，回測用同一組 27 個 PR、按
+repo 拆、看缺陷層級：檔案層級 repo A 已經 5/8，看不出差別。
+
+### 工具
+
+兩支腳本放 `~/.cache/mra-review-benchmark/year-2026-09/`，讀 `candidates.json`
+與 `runs/<label>/`，不進 repo：
+
+- `per-item.sh <subset> <label...>`：每條 expected 在各 label 的檔案層級
+  HIT／MISS／SKIP，判法與 `backtest_file_missed` 相同。
+- `dump-classify.sh <subset> <label>`：MISS 對照 persona dump 拆
+  MISS-unraised／MISS-dropped，另列提到完整路徑與只提 basename 的 persona。
+
+缺陷層級的判定是人工逐條看，30 條兩輪 44 個 HIT 條目，判定表與理由在
+`subset-new27/defect-level-judgments.md`。
+
+## 下一步（2026-09-03 第十二次更新）
+
+一、設計 UI 狀態與行為的 persona，同 27 個 PR 回測，按 repo 拆、看缺陷
+層級。
+
+二、persona 撞 max turns 的失敗要處理：兩輪各掉 10 與 7 個，掉的 persona
+抓得到的缺陷就直接漏。選項是失敗時重試一次，或看 repo C 為什麼特別容易撞。
+
+三、缺陷層級判定改成可重複的：expected 的 note 與 comment body 丟給模型判
+是不是同一件事，用 API 額度。人工判 44 條可以，再跑幾輪就不行。
+
+四、`#764` 迴歸案例。
