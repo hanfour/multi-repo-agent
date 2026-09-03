@@ -91,7 +91,14 @@ fi
 # and assert the logged rc matches it.
 review_call_model() { return 42; }
 persona_err=$(mktemp)
-run_persona_review "proj" "/tmp" "d" "x.js" "security-auditor" "" "" "" "" "" claude >/dev/null 2>"$persona_err"
+if run_persona_review "proj" "/tmp" "d" "x.js" "security-auditor" "" "" "" "" "" claude >/dev/null 2>"$persona_err"; then
+  persona_rc=0
+else
+  persona_rc=$?
+fi
+if [[ "$persona_rc" -eq 0 ]]; then
+  echo "FAIL: 失敗的 persona 應回傳非零退出碼"; errors=$((errors+1))
+fi
 if ! grep -q "rc=42" "$persona_err"; then
   echo "FAIL: expected failed persona log to report the real rc (42), got: $(cat "$persona_err")"; errors=$((errors+1))
 fi
@@ -99,6 +106,53 @@ if grep -q "rc=0" "$persona_err"; then
   echo "FAIL: failed persona log incorrectly reports rc=0"; errors=$((errors+1))
 fi
 rm -f "$persona_err"
+
+# 所有 persona 都失敗時，呼叫端必須拿到非零退出碼，才能阻止空的 findings
+# 被送去 synthesize，避免沒有完成任何檢查卻產出 APPROVED。
+review_call_model() { return 1; }
+all_failed_out=$(mktemp)
+all_failed_err=$(mktemp)
+if run_persona_review "proj" "/tmp" "d" "x.js" \
+  "security-auditor performance-hawk" "" "" "" "" "" claude \
+  >"$all_failed_out" 2>"$all_failed_err"; then
+  all_failed_rc=0
+else
+  all_failed_rc=$?
+fi
+if [[ "$all_failed_rc" -eq 0 ]]; then
+  echo "FAIL: 所有 persona 失敗時應回傳非零退出碼"; errors=$((errors+1))
+fi
+if ! grep -q "PERSONAS_ALL_FAILED" "$all_failed_err"; then
+  echo "FAIL: 所有 persona 失敗時應記錄 PERSONAS_ALL_FAILED"; errors=$((errors+1))
+fi
+rm -f "$all_failed_out" "$all_failed_err"
+
+# 部分失敗仍要交出成功 persona 的輸出，且不能誤判成全部失敗。
+review_call_model() {
+  local prompt="$3"
+  if [[ "$prompt" == *"ROLE: Performance Hawk"* ]]; then
+    return 1
+  fi
+  printf '%s\n' "PARTIAL-PERSONA-FINDING"
+}
+partial_err=$(mktemp)
+if partial_out=$(run_persona_review "proj" "/tmp" "d" "x.js" \
+  "security-auditor performance-hawk" "" "" "" "" "" claude \
+  2>"$partial_err"); then
+  partial_rc=0
+else
+  partial_rc=$?
+fi
+if [[ "$partial_rc" -ne 0 ]]; then
+  echo "FAIL: 部分 persona 失敗時應回傳 0，實際 rc=$partial_rc"; errors=$((errors+1))
+fi
+if [[ "$partial_out" != *"PARTIAL-PERSONA-FINDING"* ]]; then
+  echo "FAIL: 部分失敗時應保留成功 persona 的輸出"; errors=$((errors+1))
+fi
+if grep -q "PERSONAS_ALL_FAILED" "$partial_err"; then
+  echo "FAIL: 部分失敗時不應記錄 PERSONAS_ALL_FAILED"; errors=$((errors+1))
+fi
+rm -f "$partial_err"
 
 # run_persona_review must give convention-auditor its own max_turns override
 # (MRA_REVIEW_CONVENTION_AUDITOR_MAX_TURNS), falling back to the shared

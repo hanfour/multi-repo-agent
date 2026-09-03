@@ -92,7 +92,9 @@ run_persona_review() {
     pids+=("$!")
   done
 
-  local i pid rc
+  # 失敗狀態要等所有子程序都 wait 完、輸出也清理完，才能交回呼叫端。
+  # 否則全部失敗時，空的 findings 會被誤當成可以 synthesize 的輸入。
+  local i pid rc failed_count=0 persona_count="${#pids[@]}"
   for i in "${!pids[@]}"; do
     pid="${pids[$i]}"
     # Capture the real exit code directly from `wait`, not from `!`
@@ -107,6 +109,7 @@ run_persona_review() {
       rc=$?
     fi
     if [[ "$rc" -ne 0 ]]; then
+      failed_count=$((failed_count + 1))
       log_warn >&2 "[personas] ${persona_names[$i]} failed (rc=$rc) — stderr: ${err_files[$i]}" "review"
     fi
   done
@@ -138,6 +141,12 @@ run_persona_review() {
       rm -f "$e"
     fi
   done
+
+  if [[ "$persona_count" -gt 0 && "$failed_count" -eq "$persona_count" ]]; then
+    log_warn >&2 "[personas] PERSONAS_ALL_FAILED: ${persona_count} 個 persona 全部失敗，沒有東西可以 synthesize" "review"
+    echo "$all_findings"
+    return 1
+  fi
 
   echo "$all_findings"
 }
