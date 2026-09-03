@@ -7,6 +7,9 @@ default_review_personas() {
   if [[ "${MRA_REVIEW_ENABLE_CONVENTION_AUDITOR:-0}" == "1" ]]; then
     base="$base convention-auditor"
   fi
+  if [[ "${MRA_REVIEW_ENABLE_UI_BEHAVIOR:-0}" == "1" ]]; then
+    base="$base ui-behavior-inspector"
+  fi
   echo "$base"
 }
 

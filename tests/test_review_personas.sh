@@ -37,6 +37,29 @@ if [[ "$(echo "$output_with_auditor" | wc -w | tr -d ' ')" != "6" ]]; then
   echo "FAIL: default set should have exactly 6 personas when convention-auditor is enabled, got: $output_with_auditor"; errors=$((errors+1))
 fi
 
+# ui-behavior-inspector follows the same opt-in pattern: absent by default,
+# appended when MRA_REVIEW_ENABLE_UI_BEHAVIOR=1, and its persona file must
+# exist so build_persona_prompt can load it.
+if [[ "$output" == *"ui-behavior-inspector"* ]]; then
+  echo "FAIL: default set should not include ui-behavior-inspector when MRA_REVIEW_ENABLE_UI_BEHAVIOR is unset"; errors=$((errors+1))
+fi
+output_with_ui=$(MRA_REVIEW_ENABLE_UI_BEHAVIOR=1 default_review_personas)
+if [[ "$output_with_ui" != *"ui-behavior-inspector"* ]]; then
+  echo "FAIL: default set should include ui-behavior-inspector when MRA_REVIEW_ENABLE_UI_BEHAVIOR=1"; errors=$((errors+1))
+fi
+if [[ "$(echo "$output_with_ui" | wc -w | tr -d ' ')" != "6" ]]; then
+  echo "FAIL: default set should have exactly 6 personas when ui-behavior-inspector is enabled, got: $output_with_ui"; errors=$((errors+1))
+fi
+output_with_both=$(MRA_REVIEW_ENABLE_CONVENTION_AUDITOR=1 MRA_REVIEW_ENABLE_UI_BEHAVIOR=1 default_review_personas)
+if [[ "$(echo "$output_with_both" | wc -w | tr -d ' ')" != "7" ]]; then
+  echo "FAIL: both opt-in personas enabled should give 7, got: $output_with_both"; errors=$((errors+1))
+fi
+prompt_ui=$(build_persona_prompt "ui-behavior-inspector" "diff --git a/x b/x" "x.tsx") || {
+  echo "FAIL: build_persona_prompt cannot load ui-behavior-inspector"; errors=$((errors+1)); prompt_ui=""; }
+if [[ "$prompt_ui" != *"ROLE: UI Behavior Inspector"* ]]; then
+  echo "FAIL: ui-behavior-inspector prompt missing ROLE"; errors=$((errors+1))
+fi
+
 prompt=$(build_persona_prompt "security-auditor" "diff --git a/x b/x" "x.js")
 if [[ "$prompt" != *"ROLE: Security Auditor"* ]]; then
   echo "FAIL: prompt missing ROLE"; errors=$((errors+1))
