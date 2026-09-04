@@ -33,7 +33,7 @@ call_model() {
         "${_ad[@]}" \
         --model "$model" \
         --max-turns "$max_turns" \
-        --disallowedTools "Write,Edit,NotebookEdit" \
+        --disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS" \
         --setting-sources "project" </dev/null
       ;;
     codex)

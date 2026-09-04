@@ -81,7 +81,7 @@ PROMPT
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
-    --disallowedTools "Write,Edit,NotebookEdit" \
+    --disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS" \
     --setting-sources "project"
 }
 
@@ -155,7 +155,7 @@ PROMPT
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
-    --disallowedTools "Write,Edit,NotebookEdit" \
+    --disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS" \
     --setting-sources "project"
 }
 
@@ -237,7 +237,7 @@ PROMPT
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns "${MRA_REVIEW_AGENT_MAX_TURNS:-20}" \
-    --disallowedTools "Write,Edit,NotebookEdit" \
+    --disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS" \
     --setting-sources "project"
 }
 
@@ -308,7 +308,7 @@ PROMPT
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 5 \
-    --disallowedTools "Write,Edit,NotebookEdit" \
+    --disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS" \
     --setting-sources "project"
 }
 
@@ -363,7 +363,7 @@ PROMPT
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns 3 \
-    --disallowedTools "Write,Edit,NotebookEdit" \
+    --disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS" \
     --setting-sources "project"
 }
 
@@ -453,6 +453,6 @@ Rules for line numbers:
     "${_ad_arr[@]}" \
     --model "$model" \
     --max-turns "$max_turns" \
-    --disallowedTools "Write,Edit,NotebookEdit" \
+    --disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS" \
     --setting-sources "project"
 }

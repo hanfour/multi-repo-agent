@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Review findings no longer disappear into claude's own `ReportFindings`
+  tool.** Every headless call in this project reads the model's final text, so
+  a reviewer that reported through that built-in tool instead of writing its
+  findings out left the caller holding a summary sentence — "共找到 5 個問題(2
+  個 CRITICAL…)" — and nothing to synthesize. On a 232-call backtest it hit 3
+  calls, one of them carrying 5 findings including 2 CRITICAL, and the loss was
+  invisible in the final review JSON. The tool is now denied alongside
+  `Write`/`Edit`/`NotebookEdit`, and that list lives in one place
+  (`MRA_CLAUDE_DISALLOWED_TOOLS`) rather than being spelled out at each of the
+  ten call sites, where a site that fell behind showed no symptom.
+
 ### Changed
 - **The scanner's port and host maps are a workspace's own configuration, not a
   built-in list of somebody's services.** `PORT_TO_SERVICE` and

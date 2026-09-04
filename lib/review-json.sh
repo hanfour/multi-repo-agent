@@ -216,6 +216,6 @@ ${broken}"
   _review_without_github_credentials claude_invoke review-repair -p "$prompt" \
     --model "${MRA_REVIEW_REPAIR_MODEL:-haiku}" \
     --max-turns 1 \
-    --disallowedTools "Write,Edit,NotebookEdit" \
+    --disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS" \
     --setting-sources "project" 2>/dev/null || true
 }

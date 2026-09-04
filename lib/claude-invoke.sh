@@ -20,6 +20,26 @@
 #   MRA_CLAUDE_BIN          (default claude) binary/mock to invoke (test + override seam)
 #   MRA_CLAUDE_TIMEOUT_SECONDS (default 900, 0 disables) per-ATTEMPT time bound
 
+# Built-in claude tools that every headless call in this project must refuse.
+#
+# Write/Edit/NotebookEdit: these calls analyse a checkout, they never modify it.
+#
+# ReportFindings: claude's own structured code-review reporter. A persona that
+# reaches for it puts its findings INSIDE the tool call, and every caller here
+# reads only the final assistant text — which then says "共找到 5 個問題(2 個
+# CRITICAL…)" and nothing else. The findings are simply gone by the time
+# synthesize runs. Measured on the 2026-09-04 backtest: 3 of 232 persona calls
+# lost their findings this way, one of them 5 findings including 2 CRITICAL
+# (docs/superpowers/notes/2026-persona-convention-coverage.md, 13th update).
+#
+# One list, because ten call sites each spelling it out is nine chances to
+# forget one — and a call site that forgets shows nothing in the final JSON.
+# Callers needing extra restrictions append to it (scripts/rule-agent.sh).
+# Consumed by the review / plan / audit call sites, which shellcheck cannot
+# see from here.
+# shellcheck disable=SC2034
+MRA_CLAUDE_DISALLOWED_TOOLS="Write,Edit,NotebookEdit,ReportFindings"
+
 # _mra_bounded_runner <out-array-name> <seconds> <command...>
 # Build a command prefix that kills <command> after <seconds>. Shared by the
 # claude and codex paths — both had the same bound and the same flaw.

@@ -102,7 +102,7 @@ while :; do
   out="$(printf '%s' "$prompt" | MRA_REVIEW_EMIT_JSON='' "${runner[@]}" -p \
     --model "${MRA_RULE_AGENT_MODEL:-sonnet}" \
     --max-turns "${MRA_RULE_AGENT_MAX_TURNS:-4}" \
-    --disallowedTools "Write,Edit,NotebookEdit,Read,Grep,Glob,Bash,WebFetch,WebSearch,Task" \
+    --disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS,Read,Grep,Glob,Bash,WebFetch,WebSearch,Task" \
     --setting-sources "project" 2>"$errf")"
   rc=$?
   err="$(cat "$errf")"

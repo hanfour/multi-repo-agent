@@ -529,7 +529,7 @@ _review_call_one_provider() {
       [[ -n "$system_prompt_file" && -f "$system_prompt_file" ]] && args+=(--append-system-prompt-file "$system_prompt_file")
       [[ -n "$model" ]] && args+=(--model "$model")
       args+=(--max-turns "$max_turns")
-      args+=(--disallowedTools "Write,Edit,NotebookEdit")
+      args+=(--disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS")
       local claude_rc=0
       if [[ "$stream" == "true" ]]; then
         _review_without_github_credentials claude_invoke --stream "$tag" "${args[@]}" <"$claude_prompt_file" || claude_rc=$?

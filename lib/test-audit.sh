@@ -109,7 +109,7 @@ run_test_audit() {
         "${_ad_arr[@]}" \
         --model "$model" \
         --max-turns 3 \
-        --disallowedTools "Write,Edit,NotebookEdit" \
+        --disallowedTools "$MRA_CLAUDE_DISALLOWED_TOOLS" \
         --setting-sources "project"
     ) > "$out" 2> "$err" &
     pids+=("$!")

@@ -95,7 +95,10 @@ out=$(MRA_CLAUDE_BIN="$MP_DIR/claude" call_model claude "PROMPT-A" sonnet "$MP_D
 [[ "$out" == "<claude-output>" ]] || { echo "FAIL: call_model claude output: $out"; errors=$((errors+1)); }
 rec=$(cat "$MP_REC")
 case "$rec" in *"-p"*) : ;; *) echo "FAIL: claude missing -p: $rec"; errors=$((errors+1)) ;; esac
-case "$rec" in *"--disallowedTools Write,Edit,NotebookEdit"*) : ;; *) echo "FAIL: claude missing disallowedTools: $rec"; errors=$((errors+1)) ;; esac
+# 比對整份共用清單，不是硬寫的前綴：寫成字面量時，清單多一個工具這條斷言
+# 照樣通過，於是「這個呼叫點跟上了嗎」變成沒人守。清單本身由
+# tests/test_disallowed_tools.sh 驗。
+case "$rec" in *"--disallowedTools $MRA_CLAUDE_DISALLOWED_TOOLS"*) : ;; *) echo "FAIL: claude missing disallowedTools: $rec"; errors=$((errors+1)) ;; esac
 case "$rec" in *"--model sonnet"*) : ;; *) echo "FAIL: claude missing --model: $rec"; errors=$((errors+1)) ;; esac
 # This one passes 6 explicitly — it asserts call_model FORWARDS the cap it was
 # given, not what the council chooses.
