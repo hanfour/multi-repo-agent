@@ -2195,14 +2195,29 @@ repo A 缺陷層級 1／0／3，repo B 3／3／4。三條新增的 ✓ 都是這
 
 ## 下一步（2026-09-04 第十三次更新）
 
-一、`--disallowedTools` 加 `ReportFindings`，9 個站點。先寫測試看 RED。
+一、`--disallowedTools` 加 `ReportFindings`。已做，commit `c3e2cb0`。清單原本
+在十個呼叫點各抄一份，這次要加就是十次機會漏掉一個，所以順手集中成
+`lib/claude-invoke.sh` 的 `MRA_CLAUDE_DISALLOWED_TOOLS`，需要更嚴的呼叫端接
+在後面。`tests/test_disallowed_tools.sh` 守三件事：清單涵蓋四個工具、沒有呼
+叫點自己硬寫清單、review 的 claude 呼叫 argv 真的帶上它。
 
-二、ui-behavior-inspector 焦點第二條改措辭：明講 `components/ui/*` 包裝的
-primitive 在使用處的巢狀結構要對照底層庫（base-ui／radix）的要求；
-「新用到的」三個字拿掉。
+工具名取自 dump 裡 persona 自稱用的名字，與 `Write`／`Edit` 同屬 claude 內
+建工具。`--disallowedTools` 對這個內建工具真的擋得住，沒有直接實測，下一輪
+回測 grep dump 有沒有再出現 `ReportFindings` 就知道。
 
-三、一、二做完同 18 個 PR 再跑一輪 `personas-ui-behavior`，看兩輪都 ✓ 的
-條目數。
+二、ui-behavior-inspector 焦點第二條與 METHOD 第三條改措辭。已做，commit
+`ee1e383`：點明 `components/ui/*` 就是底層庫的 re-export，`DropdownMenuLabel`
+這種名字仍帶著底層庫的巢狀契約；「新用到的」拿掉，改成 diff render 到的每個
+primitive 都要追。
+
+三、同 18 個 PR 再跑一輪 `personas-ui-behavior`，看兩輪都 ✓ 的條目數（要超
+過前兩輪的 6），以及 dump 裡還有沒有 `ReportFindings`。
 
 四、persona 撞 max turns 的重試（第十二次更新第二點）、缺陷層級判定改模型
 （第三點）、`#764` 迴歸案例（第四點）不動。
+
+順帶修掉一個迴歸（commit `b3838ed`）：`tests/test_rule_inject.sh` 與
+`tests/test_run_rule_backtest.sh` 把內建 persona 檔案數寫死，`0df9de1` 多一個
+persona 檔就讓兩支跟 persona 內容無關的測試變紅（總數 expected 6 got 7）。改
+成從 `agents/personas/` 數出來，被跳過的那一個仍然硬驗成 test-architect。加
+persona 的 commit 只跑該 persona 的測試不夠，要跑完整套件。
