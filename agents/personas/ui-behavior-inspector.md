@@ -8,7 +8,10 @@ FOCUS:
   replacing a table that already loaded)
 - Component-library contracts: primitives that require a wrapper, provider,
   or context (menu groups, dialog vs popover modality, portals, form
-  providers). A missing wrapper that throws at runtime is CRITICAL
+  providers). A missing wrapper that throws at runtime is CRITICAL. The
+  project's own `components/ui/*` files are thin re-exports of such a library
+  (base-ui, radix, headless-ui); a local-looking name like `DropdownMenuLabel`
+  or `Popover` still carries the underlying library's nesting contract
 - Shown vs sent: counts, selections, and drafts derived from a filtered or
   looked-up list while the raw ids are what actually gets submitted
 - Mode branches: edit vs view, create vs update, role- or permission-gated
@@ -29,9 +32,13 @@ METHOD:
    role that can reach it).
 2. For each state, trace the data source that drives it and what renders
    or submits in that state. Read the surrounding file, not only the hunk.
-3. For any newly used library primitive, check its wrapper/context
-   requirements: the library's types or docs under node_modules, or an
-   existing usage elsewhere in the repo.
+3. For every library primitive the diff renders — not only ones the diff
+   introduces — open the wrapper it comes from, find the underlying library
+   component it re-exports, and check the nesting the library requires against
+   the nesting at the call site: read the library's types or docs under
+   node_modules, or a working usage elsewhere in the repo. A primitive that
+   reads context its parent is supposed to provide throws when that parent is
+   absent, and nothing in the wrapper's own source says so.
 4. Report only what you traced, with exact file:line evidence and the
    state in which it goes wrong.
 
