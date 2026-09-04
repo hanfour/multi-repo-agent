@@ -11,7 +11,8 @@
 #   2. brief 原本完全沒有任何地方回報「幾個 persona 真的拿到規則」，而
 #      agents/personas/test-architect.md 沒有 FOCUS 錨點是這個專案已知、
 #      刻意不修的事實（修了會讓基準線 C 不可比）——這裡驗證訊息確實印出
-#      「5/6」，並且寫進執行條件記錄裡，不是只印在 stdout 上跑完就沒了。
+#      「注入 N-1/N 個 persona」，並且寫進執行條件記錄裡，不是只印在
+#      stdout 上跑完就沒了。
 #   3. brief 用 `ls ... 2>/dev/null | wc -l` 判斷 NO_RULES，會把「目錄不
 #      存在」跟「目錄存在但是空的」混在一起，而且丟掉 ls 本身的診斷——這裡
 #      用畸形輸入（--rules 指到一個檔案、指到只有非 .md 檔案的目錄）拆穿
@@ -24,6 +25,14 @@ source "$MRA_DIR/lib/rule-inject.sh"
 
 S="$MRA_DIR/scripts/run-rule-backtest.sh"
 FIX="$MRA_DIR/tests/fixtures/rule-inject"
+
+# 內建 persona 的數量與其中會被注入的數量，從目錄數出來而不是寫死；同上，
+# 寫死會讓每個新 persona 都弄紅一支不相干的測試。跳過的仍然硬驗成 1 個且
+# 名字是 test-architect（它用「KENT BECK 11 PRINCIPLES:」取代 FOCUS），
+# 所以「注入幾個」這件事沒有因為改成算出來就沒人守。
+PERSONA_TOTAL="$(find "$MRA_DIR/agents/personas" -maxdepth 1 -name '*.md' \
+  ! -name 'README.md' | wc -l | tr -d ' ')"
+PERSONA_INJECTED=$((PERSONA_TOTAL - 1))
 
 errors=0; pass=0
 ok()   { echo "PASS: $1"; pass=$((pass+1)); }
@@ -171,7 +180,7 @@ test_condition_record_captures_per_layer_rule_counts() {
     "$(jq -r '.layers[] | select(.layer == "nestjs") | .rules_injected' "$cond")"
   eq "vue 層只有 common 那 1 條" "1" \
     "$(jq -r '.layers[] | select(.layer == "vue") | .rules_injected' "$cond")"
-  eq "每層的 persona 總數仍是 6" "6" \
+  eq "每層的 persona 總數與內建 persona 檔數一致" "$PERSONA_TOTAL" \
     "$(jq -r '.layers[] | select(.layer == "rails") | .persona_total' "$cond")"
 }
 
@@ -368,15 +377,15 @@ test_prints_injection_ratio_with_skip_reason() {
   local out
   out="$(MRA_BACKTEST_SCRIPT="$STUB/backtest" MRA_RULE_PERSONA_DIR="$TMP" \
     bash "$S" --rules "$FIX/rules" --label ratio-test 2>&1)"
-  has "印出注入比例 5/6" "$out" "注入 5/6 個 persona"
+  has "印出注入比例" "$out" "注入 $PERSONA_INJECTED/$PERSONA_TOTAL 個 persona"
   has "點名 test-architect 因為沒有 FOCUS 被跳過" "$out" "test-architect 無 FOCUS 錨點故跳過"
 }
 
 test_condition_record_captures_persona_injection_counts() {
   local cond="$MRA_BENCHMARK_DIR/runs/ratio-test/rule-inject-conditions.json"
   [ -f "$cond" ] && ok "執行條件記錄產生了" || fail "沒有執行條件記錄：$cond"
-  eq "persona_total 記成 6" "6" "$(jq -r '.persona_total' "$cond")"
-  eq "persona_injected 記成 5" "5" "$(jq -r '.persona_injected' "$cond")"
+  eq "persona_total 是內建 persona 檔數" "$PERSONA_TOTAL" "$(jq -r '.persona_total' "$cond")"
+  eq "persona_injected 是總數扣掉沒有 FOCUS 的那一個" "$PERSONA_INJECTED" "$(jq -r '.persona_injected' "$cond")"
   eq "persona_skipped 記成 1" "1" "$(jq -r '.persona_skipped' "$cond")"
   eq "persona_skipped_names 記錄了 test-architect" \
     "test-architect" "$(jq -r '.persona_skipped_names[0]' "$cond")"

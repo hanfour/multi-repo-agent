@@ -11,8 +11,9 @@
 #      邊界（預算剛好卡在兩條規則之間、第一條就超預算仍要收、0／負數預算
 #      的容錯）都要測。
 #   2. rule_inject_persona 的注入錨點不能寫死找 `^SCOPE NOTE:`——
-#      agents/personas/ 裡六個 persona 只有兩個真的有 SCOPE NOTE
-#      （performance-hawk.md、api-contract-guardian.md），其餘三個
+#      agents/personas/ 裡只有一部分 persona 真的有 SCOPE NOTE
+#      （performance-hawk.md、api-contract-guardian.md、
+#      convention-auditor.md、ui-behavior-inspector.md），其餘
 #      （security-auditor.md、refactoring-sage.md、test-architect.md）
 #      沒有，若硬找 SCOPE NOTE 會讓沒有它的 persona 注入位置掉到檔尾、
 #      METHOD 和 OUTPUT FORMAT 之後。
@@ -52,6 +53,14 @@ trap 'rm -rf "$TMP"' EXIT
 FIX="$MRA_DIR/tests/fixtures/rule-inject"
 OUT="$TMP/out"
 mkdir -p "$OUT"
+
+# 內建 persona 的數量，從目錄數出來而不是寫死。寫死的話每加一個 persona
+# 就會有一支不相干的測試變紅（ui-behavior-inspector 就是這樣撞的），而那
+# 條斷言要驗的是「報表第二欄是總數」這個欄位語意，不是今天剛好有幾個檔。
+# 跳過的那一個仍然硬驗（見下面 test-architect 沒有 FOCUS 的那條），所以
+# 這個數字不是拿 production 的邏輯回頭驗 production。
+PERSONA_TOTAL="$(find "$MRA_DIR/agents/personas" -maxdepth 1 -name '*.md' \
+  ! -name 'README.md' | wc -l | tr -d ' ')"
 
 # write_rank_rule_named <dir> <filename> <id> <layer> <n_sources> — 產生一份
 # 格式合格、出處數可控的規則檔，給排序／上限測試用。內容本身不重要，重要
@@ -482,12 +491,13 @@ test_existing_unterminated_begin_marker_is_rejected() {
 # 直接對真實的 agents/personas/ 跑（不覆蓋第四個參數），驗證：
 #   1. 不依賴外部 MRA_DIR（brief 參考實作用了 ${MRA_DIR} 卻沒有定義它）——
 #      這裡先 unset，函式自己用 BASH_SOURCE 算出 repo 根目錄。
-#   2. 五個 persona 都被處理到（含完全沒有 FOCUS 的 test-architect.md）。
+#   2. 每個內建 persona 都被處理到（含完全沒有 FOCUS 的 test-architect.md）。
 test_inject_all_default_persona_dir_resolves_without_external_mra_dir() {
   unset MRA_DIR
   local n
   n="$(rule_inject_all "$FIX/rules" nestjs "$OUT/default-personas-out" 2>"$OUT/default.warn")"
-  eq "處理了 agents/personas 底下 6 個 persona（不含 README）" "6" "$n"
+  # PERSONA_TOTAL 在檔頭就算好了，不受這個函式的 unset MRA_DIR 影響。
+  eq "處理了 agents/personas 底下每個 persona（不含 README）" "$PERSONA_TOTAL" "$n"
   [ -f "$OUT/default-personas-out/security-auditor.md" ] \
     && ok "security-auditor.md 產出了" || fail "security-auditor.md 沒產出"
   [ -f "$OUT/default-personas-out/test-architect.md" ] \
@@ -643,7 +653,7 @@ test_inject_layers_report_has_four_columns() {
   local out="$OUT/layers-cols" report
   report="$(rule_inject_layers "$FIX/rules" "$out" "vue" "" "" 2>"$OUT/layers-cols.warn")"
   eq "第一欄是層名" "vue" "$(printf '%s' "$report" | cut -f1)"
-  eq "第二欄是 persona 總數" "6" "$(printf '%s' "$report" | cut -f2)"
+  eq "第二欄是 persona 總數" "$PERSONA_TOTAL" "$(printf '%s' "$report" | cut -f2)"
   eq "第三欄是沒有 FOCUS 而跳過的數量" "1" "$(printf '%s' "$report" | cut -f3)"
   # 這份 fixture 只有 common、nestjs、react 各一條，vue 層看得到的只有
   # common 那一條。這一欄要回答的正是「這一層實際有幾條規則進了 prompt」，
