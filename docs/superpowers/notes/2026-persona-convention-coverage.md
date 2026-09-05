@@ -2221,3 +2221,115 @@ primitive 都要追。
 persona 檔就讓兩支跟 persona 內容無關的測試變紅（總數 expected 6 got 7）。改
 成從 `agents/personas/` 數出來，被跳過的那一個仍然硬驗成 test-architect。加
 persona 的 commit 只跑該 persona 的測試不夠，要跑完整套件。
+
+## ReportFindings 修掉之後：缺陷層級 8，元件庫契約抓到一條（2026-09-06）
+
+第十三次更新第三點。條件與前一輪只差兩處：`ReportFindings` 進了禁用清單
+（`c3e2cb0`）、persona 焦點第二條與 METHOD 第三條的措辭（`ee1e383`）。同
+18 個 PR，label `personas-ui-behavior-v2`，其餘設定不動。
+
+### 一次跑完
+
+17 個有效 PR、1 個 incomplete（`#949` 四輪都 prompt 過長）、0 failed，00:30
+到 02:30 兩小時。沒有撞額度、沒有補跑。前一輪同一組 PR 分兩天、`#629` 補跑
+四次才拿到結果。
+
+### 四輪的彙總數字
+
+19 條 expected、17 個有效 PR，四輪相同。
+
+| | year | repeat | ui | ui-v2 |
+| --- | --- | --- | --- | --- |
+| 漏抓（行號容差 15） | 13（0.68） | 12（0.63） | 10（0.53） | 9（0.47） |
+| 同檔完全沒講 | 8（0.42） | 8（0.42） | 4（0.21） | 2（0.11） |
+| 錨點漂移 | 5 | 4 | 6 | 7 |
+| 未對應率 | 0.95 | 0.94 | 0.92 | 0.93 |
+| 嚴重度吻合 | 3/6 | 0/7 | 3/9 | 2/10 |
+| comment 總數 | 113 | 115 | 109 | 136 |
+
+### 三個層級、按 repo 拆
+
+| 層級 | year | repeat | ui | ui-v2 |
+| --- | --- | --- | --- | --- |
+| 檔案 | 11 | 11 | 15 | 17 |
+| 行 | 6 | 7 | 9 | 10 |
+| 缺陷 | 4 | 3 | 7 | 8 |
+
+檔案層級只剩 `#35` 那兩條沒中。按 repo 拆（缺陷層級中 / 檔案層級中 / n）：
+
+| repo | year | repeat | ui | ui-v2 |
+| --- | --- | --- | --- | --- |
+| repo A | 1 / 4 / 8 | 0 / 5 / 8 | 3 / 7 / 8 | 5 / 7 / 8 |
+| repo B | 3 / 7 / 11 | 3 / 6 / 11 | 4 / 8 / 11 | 3 / 10 / 11 |
+
+repo A 的 8 條，兩輪 baseline 是 1 與 0，兩輪 ui 是 3 與 5。
+
+### 翻面的三條
+
+| 條目 | expected | ui | ui-v2 | v2 講了什麼 |
+| --- | --- | --- | --- | --- |
+| `#25` | app-header `DropdownMenuLabel` 沒包 Group，Base UI `GroupLabel` 讀 context throw | ✗ | ✓ | `:45` CRITICAL。從 `DropdownMenuLabel` 追到 `components/ui/dropdown-menu.tsx:57-75` 的 `MenuPrimitive.GroupLabel`，查 Base UI 的 context 要求，再回頭確認 import 清單裡沒有 `DropdownMenuGroup` |
+| `#627` | `:463` 底部已選計數只算目錄找得到的，目錄外 id 送出卻漏算 | ✗ | ✓ | `:340` HIGH，錨在根因（draft 沒經 `buildInterestCatalog` 過濾），內文寫到 footer 那個計數只反映目錄內 id、`onApply` 送出整包含看不見 id 的 draft |
+| `#28` | `use-pre-campaign-update.ts:38` 成功後沒失效 `CAMPAIGN_LIST` | ✓ | ✗ | `:41` CRITICAL 講 `onSuccess` 略過 `handleOpenChange`、四個 store 殘留髒資料，是同一個檔案裡另一個缺陷 |
+
+`#25` 是措辭改動要抓的那一類，推理路徑完全照新 METHOD 走。`#627` 是前三輪
+都指到同類另一處的那條，這次指對了。
+
+### 元件庫契約三條裡只中一條
+
+`#25` 中，`#76`（同一個 `GroupLabel` 缺陷，換一個檔案）與 `#233`（Dialog 內
+`Popover` 沒設 modal）仍然漏。`#76` 的 ui dump 零次提到 `user-menu` 或
+`GroupLabel`，5 則 comment 有 4 則落在同一個 PR 新增的 `campaigns/index.tsx`。
+措辭改動讓 persona 願意追到底層庫查 context 契約，但只在那個 primitive 本身
+是 diff 主角時才會被追到；`#76` 的 `user-menu.tsx` 只是小改，注意力被新頁面
+吸走。
+
+### ReportFindings 沒有再出現
+
+108 次 persona 呼叫，dump 裡 0 次（前一輪 102 次裡 2 次，內容完全遺失）。
+`--disallowedTools` 對這個內建工具擋得住，第十三次更新第一點留的那個問號有
+答案了。
+
+看得見的差別在 dump 本身：`#184` 的 ui persona 從 542 bytes 的摘要變成 3313
+bytes 的三條完整 finding，`#23` 從 355 bytes 變 4706 bytes 六條。這兩個 PR
+的 comment 數也跟著從 4 與 6 變成 9 與 15。
+
+### finding 多了一半，進 comment 的比例降下來
+
+`persona-survival.sh` 對 ui-behavior-inspector：格式正確的 finding 42 條，進
+最終 comment 30 條。前一輪是 28 條進 26 條。finding 數增加 50%，進 comment
+的比例從 93% 降到 71%，synthesize 是在一個大得多的候選池裡挑。comment 總數
+136，比前三輪的 113／115／109 多出兩成。
+
+逐 PR 看，變多的集中在少數幾個：`#712` 6→15、`#23` 6→15、`#25` 5→9、
+`#184` 4→9；變少的有 `#233` 9→5、`#185` 10→7。
+
+### 對「要不要預設開」的判斷
+
+同一組 18 個 PR，兩輪 baseline 都 ✓ 的是 3 條（`#56`、`#70`、`#83`）；兩輪
+ui 都 ✓ 的是 6 條（那 3 條加 `#184`、`#185`、`#712`）。第十三次更新設的門檻
+是「兩輪都 ✓ 要超過 6」，那個 6 是 27 個 PR 的數字，用在這 18 個 PR 上對應
+的是 3。以同一組 PR 比，ui 的交集是 baseline 的兩倍。
+
+repo A 缺陷層級 1／0／3／5，這是 persona 陣容原本最看不到的那一塊（第十一次
+更新拆出來的結論）。repo B 3／3／4／3，四輪沒有方向。
+
+可以預設開了。開的形式仍建議依 project type：前端 repo 開、Rails API 不開。
+persona 對純後端 diff 已經會一行退出（`#424` 四輪都是），成本是多一個平行
+呼叫；但 repo C 的 12 條 expected 沒有一條是 UI 狀態行為，開了只是多花錢。
+
+沒有解決的：`#35` 那兩條（useQuery `data` 預設字面量、每次 render 新參照）
+四輪檔案層級都沒中，React 參照穩定性不在五個焦點裡也不在任何一個 persona 的
+範圍內；`#137` 的 guard subject 四輪都漏；`#76`、`#233` 見上。
+
+## 下一步（2026-09-06 第十四次更新）
+
+一、`MRA_REVIEW_ENABLE_UI_BEHAVIOR` 依 project type 預設開：前端 repo 開、
+Rails API 不開。要決定判斷依據放在哪一層（`detect-type` 已經有 repo 類型）。
+
+二、`#76`、`#233` 這類「primitive 不是 diff 主角」的漏，措辭再改一次的邊際
+效益存疑，先不動；`#35` 的 React 參照穩定性是另一個焦點，要加就是另一個
+persona 或加進 performance-hawk。
+
+三、persona 撞 max turns 的重試（第十二次更新第二點）、缺陷層級判定改模型
+（第三點）、`#764` 迴歸案例（第四點）不動。
