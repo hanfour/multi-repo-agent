@@ -2333,3 +2333,62 @@ persona 或加進 performance-hawk。
 
 三、persona 撞 max turns 的重試（第十二次更新第二點）、缺陷層級判定改模型
 （第三點）、`#764` 迴歸案例（第四點）不動。
+
+## 依變更檔開 ui-behavior-inspector，不是依 repo 類型（2026-09-07）
+
+第十四次更新第一點。原本設想「前端 repo 開、Rails API 不開」，實作前先確認
+`detect_project_type` 在三個 repo 上回什麼：repo B 是 `node-frontend`、repo C
+是 `rails-api`、repo A 是 `unknown`。repo A 是 pnpm monorepo，根目錄沒有 vite
+或 next config，tsconfig 也叫 `tsconfig.base.json`，`lib/detect-type.sh` 的分
+支全部落空。照 repo 類型判，缺陷層級貢獻 1/0/3/5 的那個 repo 會整個關掉。
+
+改成看這次 diff 的變更檔有沒有 `.tsx`、`.jsx`、`.vue`、`.svelte`。這個依據多
+涵蓋兩種情況：前端 repo 裡的純後端 PR 不必付一次平行呼叫的成本，Rails repo
+裡如果真的有 `.vue`，一樣會開。
+
+### 規則套在回測那 27 個 PR 上
+
+用 GitHub API 取三個 subset 共 27 個 PR 的變更檔清單（672 個檔案），把
+`changed_files_touch_ui()` 直接套上去：
+
+| repo | 開 | 不開 |
+|---|---|---|
+| A | 7 | 2（`#424`、`#949`） |
+| B | 8 | 1（`#95`） |
+| C | 0 | 9 |
+
+被關掉的 12 個裡，expected 缺陷分別是：`#95` 是 skill 檔 YAML front-matter 的
+`description` 沒加引號導致整份 skill 載不進來（改的四個檔全是 `.md`）、`#424`
+是列表篩選用了子層 id、`#949` 是素材包可投清單的 id 比對。沒有一條是 UI 狀態
+行為，所以這條規則沒有漏掉任何一條 expected。`#424` 正好是 persona 四輪都一行
+退出的那個 PR。
+
+### 旗標語意
+
+`MRA_REVIEW_ENABLE_UI_BEHAVIOR` 不設就看變更檔，設 `0` 強制關，設 `1` 強制開。
+原本 `${VAR:-0}` 只分得出「1」與「其他」，現在要分「沒設」「0」「1」三種，所
+以預設值改成空字串。
+
+### 兩個 commit
+
+`d820bfc` 讓 `default_review_personas()` 收一個選填的變更檔參數並依它判斷，
+`04df984` 讓 `lib/review.sh` 的 personas 路徑把已經算好的 `persona_changed` 傳
+進去。分開的原因是第一個 commit 不改變 `mra review` 的實際行為：函式拿不到變
+更檔時等同「沒有前端變更」。
+
+也因為這樣，呼叫端漏傳參數不會讓任何單元測試變紅，只會讓這個功能安靜地什麼都
+不做。`tests/test_review_ui_behavior_default.sh` 走完整的 `review_project` 蓋這
+條線，覆寫 `run_persona_review` 把收到的 persona 清單寫進旗標檔，驗三件事：前
+端變更時清單含 `ui-behavior-inspector`、純後端變更時不含、明確設 `0` 時前端變
+更也不含。完整套件 145 passed、0 failed。
+
+## 下一步（2026-09-07 第十五次更新）
+
+一、預設開之後還沒有實跑過一輪回測。下一輪跑 repo C 的 9 個 PR 確認 persona
+沒有被叫起來，以及前端 repo 的結果與 `personas-ui-behavior-v2` 那輪一致。
+
+二、`#76`、`#233` 這類「primitive 不是 diff 主角」的漏（第十四次更新第二點）
+不動；`#35` 的 React 參照穩定性同樣不動。
+
+三、persona 撞 max turns 的重試（第十二次更新第二點）、缺陷層級判定改模型
+（第三點）、`#764` 迴歸案例（第四點）不動。
