@@ -426,7 +426,7 @@ $MRA_REVIEW_PR_DISCUSSION"
     local persona_rc=0
     persona_findings="$(run_persona_review \
       "$project" "$project_dir" "$persona_diff" "$persona_changed" \
-      "$(default_review_personas)" "$consumers" "$persona_lang" "$model" \
+      "$(default_review_personas "$persona_changed")" "$consumers" "$persona_lang" "$model" \
       "$claude_add_dirs_str" "$pkb_context" "$review_provider")" || persona_rc=$?
 
     local review_json synth_exit
