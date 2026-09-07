@@ -2,12 +2,33 @@
 # Persona-based review — N named personas run in parallel, findings concatenated,
 # then handed off to run_synthesize from lib/review-debate.sh.
 
+# 前端元件檔的副檔名。ui-behavior-inspector 只在 diff 碰到這些檔案時才值得
+# 跑：它對純後端 diff 一行就退出，那一次平行呼叫是白花的。
+MRA_UI_FILE_EXTENSIONS="tsx|jsx|vue|svelte"
+
+# 這批變更檔裡有沒有前端元件檔。判斷依據刻意是變更檔而不是 repo 類型：
+# 前端 monorepo 的根目錄沒有 vite/next config、tsconfig 也叫 tsconfig.base.json，
+# detect_project_type 回 unknown，照 repo 類型判會漏掉整個 repo；反過來，
+# 前端 repo 裡的純後端 PR 也不必付這次呼叫的成本。
+changed_files_touch_ui() {
+  local changed_files="$1"
+  [[ -n "$changed_files" ]] || return 1
+  printf '%s\n' "$changed_files" | grep -qE "\.(${MRA_UI_FILE_EXTENSIONS})[[:space:]]*$"
+}
+
+# changed_files 可省略；省略時等同沒有前端變更。
 default_review_personas() {
+  local changed_files="${1:-}"
   local base="security-auditor api-contract-guardian performance-hawk refactoring-sage test-architect"
   if [[ "${MRA_REVIEW_ENABLE_CONVENTION_AUDITOR:-0}" == "1" ]]; then
     base="$base convention-auditor"
   fi
-  if [[ "${MRA_REVIEW_ENABLE_UI_BEHAVIOR:-0}" == "1" ]]; then
+  # 旗標沒設時看變更檔決定；明確設 0 或 1 都蓋過變更檔判斷。
+  local ui_flag="${MRA_REVIEW_ENABLE_UI_BEHAVIOR:-}"
+  if [[ -z "$ui_flag" ]]; then
+    if changed_files_touch_ui "$changed_files"; then ui_flag=1; else ui_flag=0; fi
+  fi
+  if [[ "$ui_flag" == "1" ]]; then
     base="$base ui-behavior-inspector"
   fi
   echo "$base"

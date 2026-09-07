@@ -54,6 +54,52 @@ output_with_both=$(MRA_REVIEW_ENABLE_CONVENTION_AUDITOR=1 MRA_REVIEW_ENABLE_UI_B
 if [[ "$(echo "$output_with_both" | wc -w | tr -d ' ')" != "7" ]]; then
   echo "FAIL: both opt-in personas enabled should give 7, got: $output_with_both"; errors=$((errors+1))
 fi
+# 旗標沒設時，ui-behavior-inspector 依變更檔決定：diff 碰到前端元件檔就加
+# 進來，純後端 diff 就不加。判斷依據是變更檔而不是 repo 類型，因為 repo A
+# 是 pnpm monorepo，detect_project_type 回 unknown，照 repo 類型判會整個漏掉。
+ui_changed='apps/frontend/src/features/measurement/components/list-page.tsx
+apps/backend/src/creative/creative.controller.ts'
+output_auto_ui=$(default_review_personas "$ui_changed")
+if [[ "$output_auto_ui" != *"ui-behavior-inspector"* ]]; then
+  echo "FAIL: 變更檔含 .tsx 時應自動加入 ui-behavior-inspector，got: $output_auto_ui"; errors=$((errors+1))
+fi
+
+backend_changed='app/controllers/api/v1/campaigns_controller.rb
+app/models/campaign.rb
+db/schema.rb
+docs/spec.md'
+output_auto_backend=$(default_review_personas "$backend_changed")
+if [[ "$output_auto_backend" == *"ui-behavior-inspector"* ]]; then
+  echo "FAIL: 純後端變更檔不應加入 ui-behavior-inspector，got: $output_auto_backend"; errors=$((errors+1))
+fi
+
+# .jsx／.vue／.svelte 與 .tsx 同等看待。
+for ui_ext in jsx vue svelte; do
+  out_ext=$(default_review_personas "src/components/widget.$ui_ext")
+  if [[ "$out_ext" != *"ui-behavior-inspector"* ]]; then
+    echo "FAIL: .$ui_ext 變更檔應自動加入 ui-behavior-inspector，got: $out_ext"; errors=$((errors+1))
+  fi
+done
+
+# 副檔名必須落在檔名結尾，quick-fix 的 snapshot 或中綴不算前端元件檔。
+output_not_ui=$(default_review_personas "src/__snapshots__/list-page.tsx.snap
+src/lib/vue-helpers.ts")
+if [[ "$output_not_ui" == *"ui-behavior-inspector"* ]]; then
+  echo "FAIL: .tsx.snap／vue-helpers.ts 不應觸發 ui-behavior-inspector，got: $output_not_ui"; errors=$((errors+1))
+fi
+
+# 明確設 0 是退出開關：即使變更檔全是前端檔也不加。
+output_forced_off=$(MRA_REVIEW_ENABLE_UI_BEHAVIOR=0 default_review_personas "src/pages/list-page.tsx")
+if [[ "$output_forced_off" == *"ui-behavior-inspector"* ]]; then
+  echo "FAIL: MRA_REVIEW_ENABLE_UI_BEHAVIOR=0 應蓋過變更檔判斷，got: $output_forced_off"; errors=$((errors+1))
+fi
+
+# 明確設 1 蓋過變更檔判斷：純後端 diff 也照樣加。
+output_forced_on=$(MRA_REVIEW_ENABLE_UI_BEHAVIOR=1 default_review_personas "app/models/campaign.rb")
+if [[ "$output_forced_on" != *"ui-behavior-inspector"* ]]; then
+  echo "FAIL: MRA_REVIEW_ENABLE_UI_BEHAVIOR=1 應蓋過變更檔判斷，got: $output_forced_on"; errors=$((errors+1))
+fi
+
 prompt_ui=$(build_persona_prompt "ui-behavior-inspector" "diff --git a/x b/x" "x.tsx") || {
   echo "FAIL: build_persona_prompt cannot load ui-behavior-inspector"; errors=$((errors+1)); prompt_ui=""; }
 if [[ "$prompt_ui" != *"ROLE: UI Behavior Inspector"* ]]; then
