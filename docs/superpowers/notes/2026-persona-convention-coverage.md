@@ -2348,20 +2348,26 @@ persona 或加進 performance-hawk。
 
 ### 規則套在回測那 27 個 PR 上
 
-用 GitHub API 取三個 subset 共 27 個 PR 的變更檔清單（672 個檔案），把
-`changed_files_touch_ui()` 直接套上去：
+取三個 subset 共 27 個 PR 的 base 與 head SHA，照 backtest adapter 的
+`--range base...head` 用 `review_diff_files()` 算出變更檔，再交給
+`default_review_personas()`。走的是 review 真正會走的那條路徑，沒有呼叫模型。
 
-| repo | 開 | 不開 |
+| repo | 開（6 個 persona） | 不開（5 個） |
 |---|---|---|
-| A | 7 | 2（`#424`、`#949`） |
+| A | 8 | 1（`#424`） |
 | B | 8 | 1（`#95`） |
 | C | 0 | 9 |
 
-被關掉的 12 個裡，expected 缺陷分別是：`#95` 是 skill 檔 YAML front-matter 的
-`description` 沒加引號導致整份 skill 載不進來（改的四個檔全是 `.md`）、`#424`
-是列表篩選用了子層 id、`#949` 是素材包可投清單的 id 比對。沒有一條是 UI 狀態
-行為，所以這條規則沒有漏掉任何一條 expected。`#424` 正好是 persona 四輪都一行
-退出的那個 PR。
+不開的 11 個裡，expected 缺陷是：`#95` 的 skill 檔 YAML front-matter
+`description` 沒加引號，導致整份 skill 載不進來（改的四個檔全是 `.md`）、
+`#424` 的列表篩選用了子層 id，其餘九個是 repo C 的後端缺陷。沒有一條是 UI 狀
+態行為。`#424` 正好是 persona 四輪都一行退出的那個 PR。
+
+第一次驗證是用 GitHub API 的 PR files 端點取檔案清單，`#949` 被算成不開。那
+是取錯了：該端點一頁預設 100 筆而我沒有翻頁，`#949` 的真實變更檔有 433 個，
+前 100 個裡剛好沒有前端檔。改用真實 diff 之後它是開的，expected 缺陷仍是後端
+的 id 比對，結論不變，只是多一次呼叫。433 個檔案也解釋了它為什麼四輪都 prompt
+過長。
 
 ### 旗標語意
 
@@ -2369,12 +2375,17 @@ persona 或加進 performance-hawk。
 原本 `${VAR:-0}` 只分得出「1」與「其他」，現在要分「沒設」「0」「1」三種，所
 以預設值改成空字串。
 
-### 兩個 commit
+### 三個 commit
 
 `d820bfc` 讓 `default_review_personas()` 收一個選填的變更檔參數並依它判斷，
 `04df984` 讓 `lib/review.sh` 的 personas 路徑把已經算好的 `persona_changed` 傳
 進去。分開的原因是第一個 commit 不改變 `mra review` 的實際行為：函式拿不到變
 更檔時等同「沒有前端變更」。
+
+`2b40cc5` 修一個自己種下的洞：變更檔來自 `git diff --name-only`，
+`core.quotePath` 會把非 ASCII 檔名跳脫成 `"src/\346\270\254...tsx"`，副檔名
+後面多一個結尾引號，`$` 錨點比對不到。中文檔名的前端 PR 會判成沒有前端變更，
+persona 安靜地不跑。做了一個中文檔名的 `.tsx` 實測，修前回 off、修後回 ON。
 
 也因為這樣，呼叫端漏傳參數不會讓任何單元測試變紅，只會讓這個功能安靜地什麼都
 不做。`tests/test_review_ui_behavior_default.sh` 走完整的 `review_project` 蓋這
@@ -2384,8 +2395,11 @@ persona 或加進 performance-hawk。
 
 ## 下一步（2026-09-07 第十五次更新）
 
-一、預設開之後還沒有實跑過一輪回測。下一輪跑 repo C 的 9 個 PR 確認 persona
-沒有被叫起來，以及前端 repo 的結果與 `personas-ui-behavior-v2` 那輪一致。
+一、開關本身用真實 diff 驗過了（27 個 PR，repo C 九個都是 5 個 persona）。還
+沒驗的是「開起來之後跑出來的東西跟 `personas-ui-behavior-v2` 那輪一致」，那要
+真的跑一輪 18 個 PR，前一輪花兩小時。這件事值不值得再燒一次額度存疑：這次改
+的是 persona 選誰，不是 persona 內容或呼叫參數，前端 PR 拿到的 persona 清單與
+v2 那輪逐字相同。
 
 二、`#76`、`#233` 這類「primitive 不是 diff 主角」的漏（第十四次更新第二點）
 不動；`#35` 的 React 參照穩定性同樣不動。
