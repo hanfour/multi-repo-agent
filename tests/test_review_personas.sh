@@ -88,6 +88,14 @@ if [[ "$output_not_ui" == *"ui-behavior-inspector"* ]]; then
   echo "FAIL: .tsx.snap／vue-helpers.ts 不應觸發 ui-behavior-inspector，got: $output_not_ui"; errors=$((errors+1))
 fi
 
+# 變更檔來自 git diff --name-only，非 ASCII 檔名會被 core.quotePath 跳脫成
+# "src/\346\270\254...tsx"，副檔名後面多一個結尾引號。漏掉這個情況的話，
+# 中文檔名的前端 PR 會安靜地不跑 persona。
+output_quoted=$(default_review_personas '"apps/frontend/src/\346\270\254\350\251\246\351\240\201.tsx"')
+if [[ "$output_quoted" != *"ui-behavior-inspector"* ]]; then
+  echo "FAIL: git 跳脫過的中文檔名 .tsx 應觸發 ui-behavior-inspector，got: $output_quoted"; errors=$((errors+1))
+fi
+
 # 明確設 0 是退出開關：即使變更檔全是前端檔也不加。
 output_forced_off=$(MRA_REVIEW_ENABLE_UI_BEHAVIOR=0 default_review_personas "src/pages/list-page.tsx")
 if [[ "$output_forced_off" == *"ui-behavior-inspector"* ]]; then

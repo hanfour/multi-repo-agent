@@ -10,10 +10,14 @@ MRA_UI_FILE_EXTENSIONS="tsx|jsx|vue|svelte"
 # 前端 monorepo 的根目錄沒有 vite/next config、tsconfig 也叫 tsconfig.base.json，
 # detect_project_type 回 unknown，照 repo 類型判會漏掉整個 repo；反過來，
 # 前端 repo 裡的純後端 PR 也不必付這次呼叫的成本。
+#
+# 副檔名後面允許一個結尾引號：來源是 git diff --name-only，非 ASCII 檔名會被
+# core.quotePath 跳脫成 "src/\346\270\254...tsx"。少了這個，中文檔名的前端
+# PR 會判成沒有前端變更，persona 安靜地不跑。
 changed_files_touch_ui() {
   local changed_files="$1"
   [[ -n "$changed_files" ]] || return 1
-  printf '%s\n' "$changed_files" | grep -qE "\.(${MRA_UI_FILE_EXTENSIONS})[[:space:]]*$"
+  printf '%s\n' "$changed_files" | grep -qE "\.(${MRA_UI_FILE_EXTENSIONS})\"?[[:space:]]*$"
 }
 
 # changed_files 可省略；省略時等同沒有前端變更。
