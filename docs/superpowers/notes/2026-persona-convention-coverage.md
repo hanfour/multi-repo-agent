@@ -2406,3 +2406,76 @@ v2 那輪逐字相同。
 
 三、persona 撞 max turns 的重試（第十二次更新第二點）、缺陷層級判定改模型
 （第三點）、`#764` 迴歸案例（第四點）不動。
+
+## 預設開之後實跑一輪：改動作用的兩個 PR 中性（2026-09-07）
+
+第十五次更新第一點。label `personas-ui-default`，同一組 18 個 PR，設定與
+`personas-ui-behavior-v2` 只差一處：不設 `MRA_REVIEW_ENABLE_UI_BEHAVIOR`，讓變
+更檔自己決定。其餘沿用（sonnet、claude、personas、
+`MRA_REVIEW_PERSONA_MAX_TURNS=20`、worktree 隔離、persona dump 全開）。
+
+### 開關逐一符合設計
+
+18 個 PR 的 `[personas] running N personas` 那行：16 個是 6、兩個是 5。是 5 的
+兩個是 `#424`（repo A 純後端 diff）與 `#95`（repo B 只改 `.md`），與先前零成本
+推算的結果逐一吻合。
+
+前端 PR 的 persona 清單與 v2 那輪逐字相同（比對 dump 目錄的檔名）：
+api-contract-guardian、performance-hawk、refactoring-sage、security-auditor、
+test-architect、ui-behavior-inspector。`#424` 少掉的就是 ui-behavior-inspector。
+
+### 檔案層級逐條對照
+
+| | v2 | ui-default |
+|---|---|---|
+| repo A 8 條 | 全 HIT | 全 HIT |
+| repo B 11 條 | 9 HIT | 7 HIT |
+
+repo B 翻面的三條是 `#137`、`#233`、`#83`，HIT→MISS。這三個 PR 兩輪拿到的
+persona 清單相同，所以差異的來源不是這次改動。`#35` 兩條四輪都 MISS。
+
+唯二 persona 清單不同的兩個 PR，兩輪結果一樣。`#424` 檔案 HIT、缺陷 MISS：兩
+輪講的都是索引、測試覆蓋、LIKE 跳脫、快取，沒有一條講母層與子層
+adFormatTypeId 的語意。`#95` 也是檔案 HIT、缺陷 MISS：兩輪講的都是 workflow 與
+驗證指令的落差，沒有一條講 front-matter 的冒號讓 YAML 解析失敗。少跑一個
+persona 沒有讓這兩個 PR 掉東西。
+
+### 彙總數字
+
+| | v2 | ui-default |
+|---|---|---|
+| 漏抓率 | 0.47 | 0.53 |
+| 同檔完全沒講 | 2 條 | 5 條 |
+| comment 總數 | 136 | 123 |
+| 錨點漂移 | 7 條 | 5 條 |
+
+第一次算出來的漏抓率是 0.58，那是用了預設的 `--tolerance 5`，v2 那輪是 15。
+`--recompute --tolerance 15` 重算才是上表的數字。比較兩輪之前要先對齊
+tolerance。
+
+`#949` 這一輪同樣是 REVIEW_INCOMPLETE，連續第五輪。它的輸出檔照 run-backtest
+的設計會被刪掉（留著會讓續跑跳過它），所以重算時它記成 failed 而不是
+incomplete。
+
+### 執行上的三個坑
+
+`MRA_BACKTEST_WORKSPACE` 預設是 `$HOME/workspace`，不設就是 PROJECT_NOT_FOUND。
+
+本機記憶體不足，背景任務被系統終止五次，每次推進一到四個 PR。結果逐 PR 落
+檔，續跑會跳過已完成的，所以中斷不損失進度，只是要多跑幾輪。
+
+incomplete 的輸出檔被刻意刪除，代表每次續跑都會重試 `#949`（433 個檔案、六個
+persona 平行）。作法是準備一個 `candidates.json` 排除它的暫時 bench 目錄，
+`runs` 用 symlink 指回原處，結果仍然落在同一個地方。
+
+## 下一步（2026-09-07 第十六次更新）
+
+一、缺陷層級這輪只判了 `#424` 與 `#95`，也就是改動實際作用的那兩個。其餘 17
+條要不要補判，取決於要不要把 ui-default 當成第五輪納進四輪對照表。這次改動不
+影響前端 PR 的設定，補判量到的是輪次變異而不是這次改動。
+
+二、`#137`、`#233`、`#83` 三條翻面。三個 PR 的設定沒變，是輪次變異的又一個樣
+本（baseline 兩輪也是缺陷層級 11 對 9、只有 6 條重疊）。
+
+三、`#76`、`#233` 的 primitive 不是 diff 主角、`#35` 的 React 參照穩定性、
+persona 撞 max turns 的重試、缺陷層級判定改模型、`#764` 迴歸案例，都不動。
