@@ -57,10 +57,21 @@ _pkb_source_fetch() {
 
 _pkb_source_record_meta() {
   local project_dir="$1" source_ref="$2" source_sha="$3" source_date="$4" fetched="$5"
+  local stale_docs="${6:-}"
   local meta_file="$project_dir/.mra/pkb/meta.json" tmp
   [[ -f "$meta_file" ]] || return 0
   tmp=$(mktemp "$meta_file.XXXXXX") || return 1
-  if jq --arg ref "$source_ref" --arg sha "$source_sha" --arg date "$source_date" \
+  if [[ -n "$stale_docs" ]]; then
+    if jq --arg ref "$source_ref" --arg sha "$source_sha" --arg date "$source_date" \
+        --argjson fetched "$fetched" --argjson stale "$stale_docs" \
+        '.sourceRef = $ref | .sourceSha = $sha | .sourceCommitDate = $date | .sourceFetched = $fetched | .sourceStaleDocs = $stale' \
+        "$meta_file" > "$tmp"; then
+      mv "$tmp" "$meta_file"
+    else
+      rm -f "$tmp"
+      return 1
+    fi
+  elif jq --arg ref "$source_ref" --arg sha "$source_sha" --arg date "$source_date" \
       --argjson fetched "$fetched" \
       '.sourceRef = $ref | .sourceSha = $sha | .sourceCommitDate = $date | .sourceFetched = $fetched' \
       "$meta_file" > "$tmp"; then
@@ -68,6 +79,15 @@ _pkb_source_record_meta() {
   else
     rm -f "$tmp"
     return 1
+  fi
+}
+
+_pkb_source_doc_checksum() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    cksum "$file" | awk '{ print $1 ":" $2 }'
+  else
+    printf 'missing\n'
   fi
 }
 
@@ -191,6 +211,23 @@ pkb_generate_from_source() (
   if [[ -d "$clone/.mra/pkb" ]]; then
     cp -R "$clone/.mra/pkb" "$worktree/.mra/pkb" || return 1
   fi
+
+  local core_docs=(sitemap.md architecture.md conventions.md api-surface.md)
+  local -a prior_core_checksums=()
+  local -A prior_module_checksums=()
+  local core_doc core_index=0 module_doc module_name
+  for core_doc in "${core_docs[@]}"; do
+    prior_core_checksums[$core_index]=$(_pkb_source_doc_checksum "$worktree/.mra/pkb/$core_doc")
+    core_index=$((core_index + 1))
+  done
+  if [[ -d "$worktree/.mra/pkb/modules" ]]; then
+    while IFS= read -r module_doc; do
+      [[ -f "$module_doc" ]] || continue
+      module_name=${module_doc#"$worktree/.mra/pkb/"}
+      prior_module_checksums["$module_name"]=$(_pkb_source_doc_checksum "$module_doc")
+    done < <(find "$worktree/.mra/pkb/modules" -type f -name '*.md' -print)
+  fi
+
   if ! pkb_generate "$project" "$worktree" "$model" "$output_language"; then
     log_error "PKB generation failed for origin/$source_ref" "analyze"
     return 1
@@ -199,7 +236,38 @@ pkb_generate_from_source() (
     log_error "PKB generation did not create a PKB for $project" "analyze"
     return 1
   fi
-  _pkb_source_record_meta "$worktree" "origin/$source_ref" "$source_sha" "$source_date" "$fetched" || {
+
+  local regenerated_core_count=0 stale_docs_json='[]' current_checksum
+  core_index=0
+  for core_doc in "${core_docs[@]}"; do
+    current_checksum=$(_pkb_source_doc_checksum "$worktree/.mra/pkb/$core_doc")
+    if [[ "$current_checksum" != "missing" && \
+        ( "${prior_core_checksums[$core_index]}" == "missing" || \
+          "$current_checksum" != "${prior_core_checksums[$core_index]}" ) ]]; then
+      regenerated_core_count=$((regenerated_core_count + 1))
+    elif [[ "$current_checksum" != "missing" && \
+        "$current_checksum" == "${prior_core_checksums[$core_index]}" ]]; then
+      stale_docs_json=$(jq -c --arg doc "$core_doc" '. + [$doc]' <<<"$stale_docs_json")
+    fi
+    core_index=$((core_index + 1))
+  done
+  if [[ "$regenerated_core_count" -eq 0 ]]; then
+    log_error "PKB generation from origin/$source_ref failed: nothing was regenerated" "analyze"
+    return 1
+  fi
+
+  if [[ -d "$worktree/.mra/pkb/modules" ]]; then
+    while IFS= read -r module_doc; do
+      [[ -f "$module_doc" ]] || continue
+      module_name=${module_doc#"$worktree/.mra/pkb/"}
+      if [[ -n "${prior_module_checksums[$module_name]+x}" && \
+          "$(_pkb_source_doc_checksum "$module_doc")" == "${prior_module_checksums[$module_name]}" ]]; then
+        stale_docs_json=$(jq -c --arg doc "$module_name" '. + [$doc]' <<<"$stale_docs_json")
+      fi
+    done < <(find "$worktree/.mra/pkb/modules" -type f -name '*.md' -print)
+  fi
+
+  _pkb_source_record_meta "$worktree" "origin/$source_ref" "$source_sha" "$source_date" "$fetched" "$stale_docs_json" || {
     log_error "could not record PKB source metadata for $project" "analyze"
     return 1
   }
@@ -209,7 +277,6 @@ pkb_generate_from_source() (
     return 1
   }
   cp -R "$worktree/.mra/pkb/." "$stage/" || return 1
-  local core_doc
   for core_doc in sitemap.md architecture.md conventions.md api-surface.md; do
     if [[ ! -f "$stage/$core_doc" ]]; then
       log_error "PKB generation did not produce $core_doc for $project" "analyze"
@@ -234,4 +301,7 @@ pkb_generate_from_source() (
   stage=""
   if [[ -n "$backup" ]]; then rm -rf "$backup"; fi
   backup=""
+  if [[ "$stale_docs_json" != '[]' ]]; then
+    log_warn "PKB built from origin/$source_ref with kept docs: $(jq -r 'join(", ")' <<<"$stale_docs_json")" "analyze"
+  fi
 )

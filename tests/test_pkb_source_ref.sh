@@ -18,8 +18,12 @@ cat > "$STUB_BIN/claude" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 project_dir=""
+prompt=""
 while [[ $# -gt 0 ]]; do
-  if [[ "$1" == "--add-dir" && $# -gt 1 ]]; then
+  if [[ "$1" == "-p" && $# -gt 1 ]]; then
+    prompt="$2"
+    shift 2
+  elif [[ "$1" == "--add-dir" && $# -gt 1 ]]; then
     project_dir="$2"
     shift 2
   else
@@ -37,7 +41,20 @@ elif [[ -f "$project_dir/MAIN_MARKER" ]]; then
 fi
 printf '%s\n' "$marker" >> "$MRA_TEST_AGENT_LOG"
 
-if [[ "${MRA_TEST_AGENT_FAIL:-0}" == "1" ]]; then
+doc=""
+case "$prompt" in
+  *"SITEMAP document"*) doc="sitemap.md" ;;
+  *"ARCHITECTURE document"*) doc="architecture.md" ;;
+  *"CONVENTIONS document"*) doc="conventions.md" ;;
+  *"API SURFACE document"*) doc="api-surface.md" ;;
+esac
+fail_doc=false
+if [[ -n "$doc" ]]; then
+  case ",${MRA_TEST_AGENT_FAIL_DOCS:-}," in
+    *",$doc,"*) fail_doc=true ;;
+  esac
+fi
+if [[ "${MRA_TEST_AGENT_FAIL:-0}" == "1" || "$fail_doc" == "true" ]]; then
   printf 'Error: synthetic agent failure\n'
   exit 0
 fi
@@ -48,6 +65,7 @@ This document describes the synthetic repository structure, stable components,
 data flow, and conventions observed by the test agent. The content is long
 enough to pass the knowledge base document validation rules.
 DOC
+printf 'Stub generation id: %s\n' "$$"
 STUB
 chmod +x "$STUB_BIN/claude"
 
@@ -392,17 +410,28 @@ capture_checkout after
 assert_checkout_unchanged disabled
 assert_worktree_clean
 
-# A valid prior document copied into the temporary worktree survives bad agent output.
+# A ref build with only failed core generation preserves the prior PKB.
 : > "$AGENT_LOG"
 old_sitemap=$(<"$CLONE/.mra/pkb/sitemap.md")
-if MRA_TEST_AGENT_FAIL=1 run_capture; then pass "failed-agent regeneration completes with preserved docs"; else fail "failed-agent regeneration failed: $LAST_OUTPUT"; fi
+before_pkb=$(pkb_fingerprint)
+if MRA_TEST_AGENT_FAIL=1 run_capture; then
+  fail "failed ref regeneration unexpectedly succeeded"
+else
+  if [[ "$LAST_OUTPUT" == *"nothing was regenerated"* && "$LAST_OUTPUT" == *"origin/development"* ]]; then
+    pass "failed ref regeneration reports that no core docs were regenerated"
+  else
+    fail "failed ref regeneration error was unclear: $LAST_OUTPUT"
+  fi
+fi
 new_sitemap=$(<"$CLONE/.mra/pkb/sitemap.md")
 [[ "$new_sitemap" == "$old_sitemap" ]] && pass "valid prior document survives generator failure" || fail "valid prior document was lost"
+[[ "$(pkb_fingerprint)" == "$before_pkb" ]] && pass "failed ref regeneration preserves every PKB file" || fail "failed ref regeneration changed the PKB"
 if [[ "$LAST_OUTPUT" == *"generation failed/cut off"* ]]; then
   pass "stubbed generator failure was exercised"
 else
   fail "stubbed generator did not report its failure"
 fi
+[[ ! -e "$CLONE/.mra/pkb.lock" ]] && pass "failed ref regeneration releases its lock" || fail "failed ref regeneration left a lock"
 assert_worktree_clean
 
 # Missing core docs abort installation and leave the prior PKB intact.
@@ -415,13 +444,99 @@ before_pkb=$(pkb_fingerprint)
 if MRA_TEST_AGENT_FAIL=1 run_capture; then
   fail "generation without core docs unexpectedly succeeded"
 else
-  if [[ "$LAST_OUTPUT" == *"did not produce sitemap.md"* ]]; then
-    pass "generation without core docs is rejected"
+  if [[ "$LAST_OUTPUT" == *"nothing was regenerated"* && "$LAST_OUTPUT" == *"origin/development"* ]]; then
+    pass "generation with no regenerated core docs is rejected with the ref"
   else
     fail "generation without core docs failed unclearly: $LAST_OUTPUT"
   fi
 fi
 [[ "$(pkb_fingerprint)" == "$before_pkb" ]] && pass "prior PKB survives missing core docs" || fail "missing core docs replaced the prior PKB"
+assert_worktree_clean
+
+# A ref build with no regenerated core docs leaves every prior PKB file untouched.
+setup_repo all_failed_prior
+if run_capture; then pass "baseline PKB for all-failed case is generated"; else fail "baseline PKB generation failed: $LAST_OUTPUT"; fi
+jq -e '.sourceStaleDocs == []' "$CLONE/.mra/pkb/meta.json" >/dev/null && \
+  pass "fully generated ref PKB records no stale docs" || fail "fully generated ref PKB omitted the empty stale-doc list"
+before_pkb=$(pkb_fingerprint)
+if MRA_TEST_AGENT_FAIL=1 run_capture; then
+  fail "ref generation with all four core generators failing unexpectedly succeeded"
+else
+  if [[ "$LAST_OUTPUT" == *"origin/development"* && "$LAST_OUTPUT" == *"nothing was regenerated"* ]]; then
+    pass "all-failed ref build names its ref and says nothing was regenerated"
+  else
+    fail "all-failed ref build error was unclear: $LAST_OUTPUT"
+  fi
+fi
+[[ "$(pkb_fingerprint)" == "$before_pkb" ]] && pass "all-failed ref build preserves every PKB file" || fail "all-failed ref build changed the PKB"
+[[ ! -e "$CLONE/.mra/pkb.lock" ]] && pass "all-failed ref build releases its lock" || fail "all-failed ref build left a lock"
+assert_worktree_clean
+
+# A partial ref build installs regenerated docs and reports the preserved ones.
+setup_repo partial_core_docs
+if run_capture; then pass "baseline PKB for partial case is generated"; else fail "partial case baseline failed: $LAST_OUTPUT"; fi
+jq -e '.sourceStaleDocs == []' "$CLONE/.mra/pkb/meta.json" >/dev/null && \
+  pass "successful ref build records an empty stale-doc list" || fail "successful ref build omitted the empty stale-doc list"
+if MRA_TEST_AGENT_FAIL_DOCS='sitemap.md,conventions.md' run_capture; then
+  pass "partial ref build installs regenerated core docs"
+else
+  fail "partial ref build failed: $LAST_OUTPUT"
+fi
+if jq -e '.sourceStaleDocs == ["sitemap.md", "conventions.md"]' "$CLONE/.mra/pkb/meta.json" >/dev/null; then
+  pass "partial ref metadata lists exactly the two kept core docs"
+else
+  fail "partial ref metadata has an incorrect stale-doc list"
+fi
+stale_report=$(pkb_stale_files "$CLONE")
+if [[ "$stale_report" == *"(kept from an earlier build: sitemap.md, conventions.md)"* ]]; then
+  pass "ref provenance report names both kept docs"
+else
+  fail "ref provenance report omitted kept docs: $stale_report"
+fi
+source_context=$(pkb_build_context "$CLONE" "" "minimal")
+if [[ "$source_context" == *"PKB SOURCE: built from origin/development@"* && \
+    "$source_context" == *"kept from an earlier build: sitemap.md, conventions.md"* ]]; then
+  pass "review banner names both kept docs"
+else
+  fail "review banner omitted kept docs: $source_context"
+fi
+assert_worktree_clean
+
+# Kept module summaries are reported without affecting the core-doc success gate.
+mkdir -p "$CLONE/.mra/pkb/modules"
+printf '# Module: retained\n\nA valid prior module summary remains available.\n' > "$CLONE/.mra/pkb/modules/retained.md"
+if run_capture; then
+  pass "all-core-success ref build installs with a kept module summary"
+else
+  fail "all-core-success ref build failed with a kept module summary: $LAST_OUTPUT"
+fi
+if jq -e '.sourceStaleDocs == ["modules/retained.md"]' "$CLONE/.mra/pkb/meta.json" >/dev/null; then
+  pass "module summary is reported without marking core docs stale"
+else
+  fail "module summary was not reported independently: $(jq -c '.sourceStaleDocs' "$CLONE/.mra/pkb/meta.json")"
+fi
+stale_report=$(pkb_stale_files "$CLONE")
+if [[ "$stale_report" == *"(kept from an earlier build: modules/retained.md)"* ]]; then
+  pass "ref provenance report names the kept module summary"
+else
+  fail "ref provenance report omitted the kept module summary: $stale_report"
+fi
+assert_worktree_clean
+
+# With no prior PKB, a fully failed ref generation creates no PKB directory.
+setup_repo no_prior_all_failed
+[[ ! -e "$CLONE/.mra/pkb" ]] && pass "no-prior fixture starts without a PKB" || fail "no-prior fixture unexpectedly has a PKB"
+if MRA_TEST_AGENT_FAIL=1 run_capture; then
+  fail "all-failed ref generation without a prior PKB unexpectedly succeeded"
+else
+  if [[ "$LAST_OUTPUT" == *"origin/development"* && "$LAST_OUTPUT" == *"nothing was regenerated"* ]]; then
+    pass "no-prior all-failed ref build reports no regenerated docs"
+  else
+    fail "no-prior all-failed ref build error was unclear: $LAST_OUTPUT"
+  fi
+fi
+[[ ! -e "$CLONE/.mra/pkb" ]] && pass "no-prior all-failed ref build creates no PKB" || fail "no-prior all-failed ref build created a PKB"
+[[ ! -e "$CLONE/.mra/pkb.lock" ]] && pass "no-prior all-failed ref build releases its lock" || fail "no-prior all-failed ref build left a lock"
 assert_worktree_clean
 
 # A PKB appearing after the old directory is backed up is kept, not nested into.

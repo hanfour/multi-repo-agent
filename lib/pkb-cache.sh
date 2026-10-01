@@ -282,14 +282,20 @@ pkb_stale_files() {
 
   # The clone may be checked out on another branch, so report ref provenance
   # instead of comparing that checkout with a ref-built snapshot.
-  local source_ref source_sha source_date
+  local source_ref source_sha source_date source_stale_docs
   source_ref=$(jq -r '.sourceRef // ""' "$meta_file" 2>/dev/null)
   if [[ -n "$source_ref" && "$source_ref" != checkout:* ]]; then
     source_sha=$(jq -r '.sourceSha // "unknown"' "$meta_file" 2>/dev/null)
     source_date=$(jq -r '.sourceCommitDate // "unknown"' "$meta_file" 2>/dev/null)
+    source_stale_docs=$(jq -r '(.sourceStaleDocs // []) | if type == "array" then map(select(type == "string")) | join(", ") else "" end' "$meta_file" 2>/dev/null)
     [[ -z "$source_sha" || "$source_sha" == "null" ]] && source_sha="unknown"
     [[ -z "$source_date" || "$source_date" == "null" ]] && source_date="unknown"
-    printf 'built from %s@%s on %s\n' "$source_ref" "${source_sha:0:7}" "$source_date"
+    if [[ -n "$source_stale_docs" ]]; then
+      printf 'built from %s@%s on %s (kept from an earlier build: %s)\n' \
+        "$source_ref" "${source_sha:0:7}" "$source_date" "$source_stale_docs"
+    else
+      printf 'built from %s@%s on %s\n' "$source_ref" "${source_sha:0:7}" "$source_date"
+    fi
     return 0
   fi
 
