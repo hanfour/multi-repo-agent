@@ -22,7 +22,7 @@ MRA_LIBS=(
   log-viewer diff-summary open-ide watch setup-project
   graph cost template ci snapshot
   dashboard federation notify lint review-diff
-  review-prompt review-context review-provider review-json review-strategy
+  review-prompt stack-versions review-context review-provider review-json review-strategy
   review-pr-discussion review-pr-threads review-adjudication review-premise review-refute review-post review review-protocol review-debate
   review-debate-agents personas review-personas plan-council model-provider
   corpus-targets corpus-fetch corpus-filter corpus-internal corpus-materialize
