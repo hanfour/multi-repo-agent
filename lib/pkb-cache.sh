@@ -279,6 +279,20 @@ pkb_stale_files() {
   local project_dir="$1" meta_file
   meta_file="$(pkb_dir "$project_dir")/meta.json"
   [[ -f "$meta_file" ]] || return 0
+
+  # The clone may be checked out on another branch, so report ref provenance
+  # instead of comparing that checkout with a ref-built snapshot.
+  local source_ref source_sha source_date
+  source_ref=$(jq -r '.sourceRef // ""' "$meta_file" 2>/dev/null)
+  if [[ -n "$source_ref" && "$source_ref" != checkout:* ]]; then
+    source_sha=$(jq -r '.sourceSha // "unknown"' "$meta_file" 2>/dev/null)
+    source_date=$(jq -r '.sourceCommitDate // "unknown"' "$meta_file" 2>/dev/null)
+    [[ -z "$source_sha" || "$source_sha" == "null" ]] && source_sha="unknown"
+    [[ -z "$source_date" || "$source_date" == "null" ]] && source_date="unknown"
+    printf 'built from %s@%s on %s\n' "$source_ref" "${source_sha:0:7}" "$source_date"
+    return 0
+  fi
+
   git -C "$project_dir" rev-parse HEAD >/dev/null 2>&1 || return 0
 
   local snap_commit snap_dirty

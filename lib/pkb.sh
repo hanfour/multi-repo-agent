@@ -117,6 +117,51 @@ pkb_generate() {
 # Incremental update — after review or development
 # Only updates modules affected by the diff
 # ---------------------------------------------------------------------------
+_pkb_lock_create() {
+  local lock="$1"
+  if ! mkdir "$lock" 2>/dev/null; then
+    return 1
+  fi
+  if ! printf '%s %s\n' "$BASHPID" "$(date +%s)" > "$lock/owner"; then
+    rmdir "$lock" 2>/dev/null || true
+    return 2
+  fi
+}
+
+_pkb_lock_acquire() {
+  local lock="$1" owner_pid="" owner_started="" now stale=false
+
+  if _pkb_lock_create "$lock"; then
+    return 0
+  fi
+
+  if [[ -r "$lock/owner" ]]; then
+    read -r owner_pid owner_started < "$lock/owner" || true
+  fi
+  if [[ "$owner_pid" =~ ^[0-9]+$ && "$owner_started" =~ ^[0-9]+$ ]]; then
+    now=$(date +%s)
+    if ! kill -0 "$owner_pid" 2>/dev/null || (( now - owner_started > 21600 )); then
+      stale=true
+    fi
+  fi
+
+  if [[ "$stale" == "true" ]] && rm -f "$lock/owner" && rmdir "$lock" 2>/dev/null; then
+    log_warn "removed stale PKB lock for pid $owner_pid" "pkb"
+    _pkb_lock_create "$lock"
+    return $?
+  fi
+  return 1
+}
+
+_pkb_lock_release() {
+  local lock="$1" owner_pid=""
+  [[ -r "$lock/owner" ]] || return 0
+  read -r owner_pid _ < "$lock/owner" || true
+  [[ "$owner_pid" == "$BASHPID" ]] || return 0
+  rm -f "$lock/owner"
+  rmdir "$lock" 2>/dev/null || true
+}
+
 pkb_incremental_update() {
   local project="$1"
   local project_dir="$2"
@@ -124,12 +169,24 @@ pkb_incremental_update() {
   local model="${4:-haiku}"
   local output_language="${5:-}"
 
-  local pkb
+  local pkb lock source_ref=""
   pkb="$(pkb_dir "$project_dir")"
+  lock="$project_dir/.mra/pkb.lock"
 
   if ! pkb_exists "$project_dir"; then
     log_warn "PKB not found for $project, run 'mra analyze $project' first" "pkb"
     return 1
+  fi
+
+  source_ref=$(jq -r '.sourceRef // ""' "$pkb/meta.json" 2>/dev/null || true)
+  if [[ -n "$source_ref" && "$source_ref" != checkout:* ]]; then
+    log_info "PKB was built from $source_ref; skipping incremental update" "pkb"
+    return 0
+  fi
+
+  if ! _pkb_lock_acquire "$lock"; then
+    log_info "PKB incremental update skipped because the analysis lock is held" "pkb"
+    return 0
   fi
 
   # Change gate: prefer the git blob-hash snapshot (precise: per-file, catches
@@ -141,12 +198,14 @@ pkb_incremental_update() {
     changed_areas=$(pkb_stale_files "$project_dir")
     if [[ -z "$changed_areas" ]]; then
       log_info "no source changes detected (snapshot), skipping PKB update" "pkb"
+      _pkb_lock_release "$lock"
       return 0
     fi
   else
     changed_areas=$(_pkb_check_mtimes "$project_dir")
     if [[ -z "$changed_areas" ]]; then
       log_info "no source changes detected (mtime), skipping PKB update" "pkb"
+      _pkb_lock_release "$lock"
       return 0
     fi
   fi
@@ -176,6 +235,7 @@ pkb_incremental_update() {
   done <<< "$changed_files"
 
   if [[ -z "${affected_modules// /}" ]]; then
+    _pkb_lock_release "$lock"
     return 0
   fi
 
@@ -224,6 +284,7 @@ pkb_incremental_update() {
 
   pkb_update_meta "$project_dir"
   log_success "PKB updated for modules:$affected_modules" "pkb"
+  _pkb_lock_release "$lock"
 }
 
 # ---------------------------------------------------------------------------
@@ -268,4 +329,3 @@ pkb_capture_decisions() {
     done <<< "$decisions"
   fi
 }
-

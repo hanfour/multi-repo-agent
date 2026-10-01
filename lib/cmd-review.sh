@@ -41,18 +41,21 @@ mra_cmd_review() {
 mra_cmd_analyze() {
   shift
   local workspace; workspace=$(resolve_workspace)
-  local project="" model="sonnet"
+  local project="" model="sonnet" source_ref="" source_ref_set=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --model)
         if [[ $# -lt 2 ]]; then log_error "--model requires a value" "analyze"; exit 1; fi
         model="$2"; shift 2 ;;
+      --ref)
+        if [[ $# -lt 2 ]]; then log_error "--ref requires a value" "analyze"; exit 1; fi
+        source_ref="$2"; source_ref_set=true; shift 2 ;;
       -*) log_error "unknown option: $1" "analyze"; exit 1 ;;
       *) project="$1"; shift ;;
     esac
   done
   if [[ -z "$project" ]]; then
-    log_error "usage: mra analyze <project> [--model <model>]" "analyze"; exit 1
+    log_error "usage: mra analyze <project> [--ref <ref>] [--model <model>]" "analyze"; exit 1
   fi
   local project_dir
   project_dir=$(resolve_project_dir "$workspace" "$project") || exit 1
@@ -60,7 +63,12 @@ mra_cmd_analyze() {
   output_language=$(config_get "outputLanguage" 2>/dev/null)
   [[ -z "$output_language" || "$output_language" == "null" ]] && output_language=""
   structural_analyze_hint "$project" "$project_dir"
-  pkb_generate "$project" "$project_dir" "$model" "$output_language"
+  if [[ "${MRA_PKB_FROM_REF:-1}" == "0" ]]; then
+    pkb_generate "$project" "$project_dir" "$model" "$output_language"
+  else
+    pkb_generate_from_source "$workspace" "$project" "$project_dir" \
+      "$model" "$output_language" "$source_ref_set" "$source_ref"
+  fi
 }
 
 mra_cmd_plan() {

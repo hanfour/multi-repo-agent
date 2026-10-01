@@ -27,7 +27,7 @@ MRA_LIBS=(
   review-debate-agents personas review-personas plan-council model-provider
   corpus-targets corpus-fetch corpus-filter corpus-internal corpus-materialize
   rule-schema taxonomy-classes rule-inject
-  test-audit pkb pkb-cache pkb-query pkb-prompts
+  test-audit pkb pkb-cache pkb-query pkb-prompts pkb-source
   eval eval-probe eval-ablation dev-agent dev
   prd prd-issues prd-scaffold
   cmd-workspace cmd-repo cmd-review cmd-prd cmd-launch
@@ -95,7 +95,7 @@ Commands:
   dev <project> "<task>" [--base R] [--max-rounds N] [--no-pr] [--auto-approve] [--resume] [--dry-run]
                                 Autonomous implement->review->fix->PR loop (headless)
   test-audit <project> [--model M]     Audit tests vs Kent Beck 11 principles
-  analyze <project> [--model M]        Generate/update project knowledge base (PKB)
+  analyze <project> [--ref R] [--model M]  Generate/update project knowledge base (PKB)
   eval-review <project> --pr <N> [--baseline <file>] [--strategy S]  Score AI review against a human baseline
   eval-probe [--out <file>]            Deterministic PKB probe (no LLM): fixed cases, SHA-stamped report
   eval-ablation <project> [--base R] [--pr N] [--model M]  Run 2x2 PKB/structural ablation arms

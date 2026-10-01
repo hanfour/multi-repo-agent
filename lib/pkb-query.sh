@@ -37,12 +37,15 @@ pkb_build_context() {
 
 "
 
-  # --- Staleness banner (issue #20): never silently serve a stale PKB ---
-  # Files changed since the snapshot are named explicitly so the agent reads
-  # them directly and keeps trusting the PKB for everything else.
+  # --- Staleness/source banner: make PKB provenance explicit ---
+  # Checkout snapshots name changed files; ref-built PKBs report their source.
   local stale_files
   stale_files=$(pkb_stale_files "$project_dir" 2>/dev/null || true)
-  if [[ -n "$stale_files" ]]; then
+  if [[ "$stale_files" == "built from "* ]]; then
+    context="${context}PKB SOURCE: ${stale_files}. The local checkout is not compared with this PKB.
+
+"
+  elif [[ -n "$stale_files" ]]; then
     local stale_count shown
     stale_count=$(printf '%s\n' "$stale_files" | wc -l | tr -d '[:space:]')
     shown=$(printf '%s\n' "$stale_files" | head -20)
