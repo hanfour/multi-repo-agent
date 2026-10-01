@@ -320,8 +320,8 @@ if ! jq -s --arg repo "$repo" --argjson classifier_failed "$classifier_failed_co
       classifier_failed: $classifier_failed,
       labels: counts($comments),
       precision: precision($comments),
-      by_severity: reduce ["CRITICAL", "HIGH", "MEDIUM", "LOW", "unknown"][] as $severity
-        ({}; .[$severity] = metrics([$comments[] | select(.severity == $severity)])),
+      by_severity: (reduce ["CRITICAL", "HIGH", "MEDIUM", "LOW", "unknown"][] as $severity
+        ({}; .[$severity] = metrics([$comments[] | select(.severity == $severity)]))),
       rejected_comments: [
         $comments[]
         | select(.label == "rejected" or .label == "disputed-scope")
