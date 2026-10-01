@@ -86,6 +86,15 @@ comment_count() { printf '%s' "$1" | jq '[.comments[]] | length'; }
 
 printf '2.5.7\n' > "$PROJECT/.ruby-version"
 
+# Sourcing exec-verify without the shared detector safely skips runtime claims.
+reset_logs; MODEL_CALLS=0; REPLY="$RUBY_CLAIM"
+out=$(MRA_REVIEW_EXEC_VERIFY=1 run "$ONE" 2>/dev/null)
+[[ "$(comment_count "$out")" == "1" && ! -s "$DOCKER_LOG" ]] \
+  && ok "missing shared version helpers keep findings and skip Docker" \
+  || fail "missing shared version helpers changed the finding or called Docker"
+
+source "$MRA_DIR/lib/stack-versions.sh"
+
 # Disabled and finding-free reviews do not call either dependency.
 reset_logs
 out=$(run "$ONE")
@@ -186,6 +195,23 @@ for hostile_version in '2.5.7; rm -rf /' 'latest --privileged'; do
     && ok "hostile .ruby-version is rejected: $hostile_version" \
     || fail "hostile .ruby-version reached Docker or changed the finding: $hostile_version"
 done
+printf '2.5.7\n' > "$PROJECT/.ruby-version"
+
+# Prefixed/suffixed Ruby versions still map to the plain image tag.
+printf 'ruby-2.5.7\n' > "$PROJECT/.ruby-version"
+reset_logs; MODEL_CALLS=0; REPLY="$RUBY_CLAIM"
+MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='RAISES NoMethodError' run "$ONE" >/dev/null 2>&1
+grep -q '<ruby:2.5.7-slim><ruby><->' "$DOCKER_LOG" \
+  && ok ".ruby-version ruby-2.5.7 selects ruby:2.5.7-slim" \
+  || fail ".ruby-version ruby-2.5.7 did not select ruby:2.5.7-slim"
+rm -f "$PROJECT/.ruby-version"
+printf 'GEM\n  specs:\n\nRUBY VERSION\n   ruby 2.5.8p206\n' > "$PROJECT/Gemfile.lock"
+reset_logs; MODEL_CALLS=0; REPLY="$RUBY_CLAIM"
+MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='RAISES NoMethodError' run "$ONE" >/dev/null 2>&1
+grep -q '<ruby:2.5.8-slim><ruby><->' "$DOCKER_LOG" \
+  && ok "Gemfile.lock ruby 2.5.8p206 selects ruby:2.5.8-slim" \
+  || fail "Gemfile.lock ruby 2.5.8p206 did not select ruby:2.5.8-slim"
+rm -f "$PROJECT/Gemfile.lock"
 printf '2.5.7\n' > "$PROJECT/.ruby-version"
 
 # Malformed extraction is a no-op after exactly one model call.

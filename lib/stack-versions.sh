@@ -231,6 +231,22 @@ _stack_versions_node() {
   fi
 }
 
+stack_versions_ruby() {
+  local value
+  value=$(_stack_versions_ruby "$1")
+  value=${value% (*}
+  if [[ -n "$value" ]]; then printf '%s\n' "$value"; fi
+  return 0
+}
+
+stack_versions_node() {
+  local value
+  value=$(_stack_versions_node "$1")
+  value=${value% (*}
+  if [[ -n "$value" ]]; then printf '%s\n' "$value"; fi
+  return 0
+}
+
 _stack_versions_pnpm_patterns() {
   local file="$1"
   awk '

@@ -30,62 +30,6 @@ $findings
 HDR
 }
 
-_review_exec_verify_version() {
-  local language="$1" project_dir="$2" value="" candidate=""
-
-  case "$language" in
-    ruby)
-      if [[ -f "$project_dir/.ruby-version" ]]; then
-        value=$(sed -n '1{s/^[[:space:]]*//; s/[[:space:]]*$//; p;}' "$project_dir/.ruby-version" 2>/dev/null) || value=""
-        value=${value#ruby-}
-        if [[ "$value" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
-          printf '%s' "$value"
-          return 0
-        fi
-      fi
-      if [[ -f "$project_dir/Gemfile.lock" ]]; then
-        candidate=$(awk '
-          $0 == "RUBY VERSION" {
-            if (getline > 0) {
-              sub(/^[[:space:]]*ruby[[:space:]]+/, "")
-              sub(/p[0-9]+$/, "")
-              gsub(/[[:space:]]/, "")
-              print
-            }
-            exit
-          }
-        ' "$project_dir/Gemfile.lock" 2>/dev/null) || candidate=""
-        candidate=${candidate#ruby-}
-        if [[ "$candidate" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
-          printf '%s' "$candidate"
-          return 0
-        fi
-      fi
-      ;;
-    node)
-      for value in "$project_dir/.nvmrc" "$project_dir/.node-version"; do
-        if [[ -f "$value" ]]; then
-          candidate=$(sed -n '1{s/^[[:space:]]*//; s/[[:space:]]*$//; p;}' "$value" 2>/dev/null) || candidate=""
-          candidate=$(printf '%s' "$candidate" | grep -Eo '[0-9]+' | head -n 1) || candidate=""
-          if [[ "$candidate" =~ ^[0-9]+$ ]]; then
-            printf '%s' "$candidate"
-            return 0
-          fi
-        fi
-      done
-      if [[ -f "$project_dir/package.json" ]]; then
-        candidate=$(jq -r '.engines.node // empty' "$project_dir/package.json" 2>/dev/null) || candidate=""
-        candidate=$(printf '%s' "$candidate" | grep -Eo '[0-9]+' | head -n 1) || candidate=""
-        if [[ "$candidate" =~ ^[0-9]+$ ]]; then
-          printf '%s' "$candidate"
-          return 0
-        fi
-      fi
-      ;;
-  esac
-  return 1
-}
-
 _review_exec_verify_docker_call() {
   local docker_bin="$1"
   shift
@@ -219,9 +163,26 @@ _review_exec_verify_findings() {
     language=$(printf '%s' "$claim" | jq -r '.language') || continue
     snippet=$(printf '%s' "$claim" | jq -r '.snippet') || continue
     expected=$(printf '%s' "$claim" | jq -r '.finding_holds_if') || continue
-    version=$(_review_exec_verify_version "$language" "$project_dir") || version=""
-    [[ -n "$version" ]] || continue
-    if [[ "$language" == "ruby" ]]; then image="ruby:$version-slim"; runtime=ruby; else image="node:$version-slim"; runtime=node; fi
+    version=""
+    if [[ "$language" == "ruby" ]]; then
+      if declare -F stack_versions_ruby >/dev/null 2>&1; then
+        version=$(stack_versions_ruby "$project_dir") || version=""
+      fi
+      # .ruby-version may say "ruby-2.5.7"; Gemfile.lock says "2.5.8p206".
+      version=${version#ruby-}
+      [[ "$version" =~ ^([0-9]+(\.[0-9]+){1,2})p[0-9]+$ ]] && version=${BASH_REMATCH[1]}
+      [[ "$version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || continue
+      image="ruby:$version-slim"
+      runtime=ruby
+    else
+      if declare -F stack_versions_node >/dev/null 2>&1; then
+        version=$(stack_versions_node "$project_dir") || version=""
+      fi
+      [[ "$version" =~ ([0-9]+) ]] || continue
+      version=${BASH_REMATCH[1]}
+      image="node:$version-slim"
+      runtime=node
+    fi
 
     if _review_exec_verify_docker_call "$docker_bin" image inspect "$image" >/dev/null 2>&1; then
       :

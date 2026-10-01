@@ -40,6 +40,7 @@ BUNDLED WITH
 LOCK
 out=$(stack_versions_detect "$RAILS")
 case "$out" in *"ruby 2.5.7 (.ruby-version)"*) pass "Ruby version comes from .ruby-version" ;; *) fail "Ruby .ruby-version was not detected" ;; esac
+[[ "$(stack_versions_ruby "$RAILS")" == "2.5.7" ]] && pass "Ruby helper returns the .ruby-version value" || fail "Ruby helper did not return the .ruby-version value"
 case "$out" in *"rails 4.2.11 (Gemfile.lock)"*"sidekiq 5.2.9 (Gemfile.lock)"*) pass "direct Gemfile.lock gems are resolved" ;; *) fail "direct gem versions were not detected" ;; esac
 gem_lines=$(printf '%s\n' "$out" | sed -n '/(Gemfile.lock)/p')
 [[ "$(printf '%s\n' "$gem_lines" | sed -n '1p')" == "- rails 4.2.11 (Gemfile.lock)" ]] && pass "rails is listed before other direct gems" || fail "rails was not listed first"
@@ -50,12 +51,14 @@ mkdir -p "$LOCK_RUBY"
 cp "$RAILS/Gemfile.lock" "$LOCK_RUBY/Gemfile.lock"
 out=$(stack_versions_detect "$LOCK_RUBY")
 case "$out" in *"ruby 2.5.8p206 (Gemfile.lock)"*) pass "Ruby version falls back to Gemfile.lock" ;; *) fail "Gemfile.lock Ruby version fallback failed" ;; esac
+[[ "$(stack_versions_ruby "$LOCK_RUBY")" == "2.5.8p206" ]] && pass "Ruby helper returns the lockfile value" || fail "Ruby helper did not return the lockfile value"
 
 GEMFILE_RUBY="$TMP/gemfile-ruby"
 mkdir -p "$GEMFILE_RUBY"
 printf "ruby '3.1.4'\n" > "$GEMFILE_RUBY/Gemfile"
 out=$(stack_versions_detect "$GEMFILE_RUBY")
 case "$out" in *"ruby 3.1.4 (Gemfile)"*) pass "Ruby version falls back to Gemfile" ;; *) fail "Gemfile Ruby version fallback failed" ;; esac
+[[ "$(stack_versions_ruby "$GEMFILE_RUBY")" == "3.1.4" ]] && pass "Ruby helper returns the Gemfile value" || fail "Ruby helper did not return the Gemfile value"
 
 # Fixtures below assert the cap at 40 to keep them small; the default is higher.
 export MRA_STACK_VERSIONS_GEM_CAP=40
@@ -111,6 +114,7 @@ importers:
 YAML
 out=$(stack_versions_detect "$MONO")
 case "$out" in *"node 20.19.5 (.nvmrc)"*) pass "Node version prefers .nvmrc" ;; *) fail "Node .nvmrc version was not detected" ;; esac
+[[ "$(stack_versions_node "$MONO")" == "20.19.5" ]] && pass "Node helper returns the .nvmrc value" || fail "Node helper did not return the .nvmrc value"
 case "$out" in *"vue 3.5.2 (pnpm-lock.yaml; declared ^3.5.0)"*) pass "pnpm root package uses its resolved lock version" ;; *) fail "pnpm root package resolution or declared range failed" ;; esac
 case "$out" in *"apps/web: react 19.1.1 (pnpm-lock.yaml; declared catalog: → ^19.1.0)"*) pass "pnpm workspace resolves the default catalog" ;; *) fail "pnpm default catalog resolution failed" ;; esac
 case "$out" in *"apps/web: typescript 5.8.3 (pnpm-lock.yaml; declared catalog:ui → ^5.8.3)"*) pass "pnpm workspace resolves a named catalog" ;; *) fail "pnpm named catalog resolution failed" ;; esac
@@ -128,6 +132,7 @@ cat > "$NPM/package-lock.json" <<'JSON'
 JSON
 out=$(stack_versions_detect "$NPM")
 case "$out" in *"node >=20 <21 (package.json engines)"*) pass "Node version falls back to package.json engines" ;; *) fail "package.json Node engines version was not detected" ;; esac
+[[ "$(stack_versions_node "$NPM")" == ">=20 <21" ]] && pass "Node helper preserves the package.json engine range" || fail "Node helper did not preserve the package.json engine range"
 case "$out" in *"vue 3.4.1 (package-lock.json; declared ^3.0.0)"*) pass "npm lock version is preferred over the declared range" ;; *) fail "npm lock version was not reported" ;; esac
 case "$out" in *"axios 1.7.2 (package-lock.json; declared ^1.6.0)"*) pass "npm lock resolves each direct curated package" ;; *) fail "npm package-lock direct package was not resolved" ;; esac
 case "$out" in *"packages/tools: express 4.21.1 (package-lock.json; declared ^4.0.0)"*) pass "package.json workspaces expand one directory level" ;; *) fail "package.json workspace package was not included" ;; esac
@@ -205,11 +210,13 @@ mkdir -p "$NODE_VERSION"
 printf '18.20.4\n' > "$NODE_VERSION/.node-version"
 out=$(stack_versions_detect "$NODE_VERSION")
 case "$out" in *"node 18.20.4 (.node-version)"*) pass "Node version reads .node-version" ;; *) fail ".node-version was not detected" ;; esac
+[[ "$(stack_versions_node "$NODE_VERSION")" == "18.20.4" ]] && pass "Node helper returns the .node-version value" || fail "Node helper did not return the .node-version value"
 
 EMPTY="$TMP/empty-repo"
 mkdir -p "$EMPTY"
 out=$(stack_versions_detect "$EMPTY")
 [[ -z "$out" ]] && pass "repository without version files returns empty output" || fail "empty repository produced version output"
+[[ -z "$(stack_versions_ruby "$EMPTY")" && -z "$(stack_versions_node "$EMPTY")" ]] && pass "runtime helpers return empty output without version files" || fail "runtime helpers produced output without version files"
 
 mkdir -p "$EMPTY/node_modules/hidden-package"
 printf '{"name":"empty-repo","workspaces":["*"]}\n' > "$EMPTY/package.json"
