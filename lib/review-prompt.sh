@@ -155,12 +155,21 @@ You are reviewing ${review_subject} for the project "${project}" (type: ${projec
 4. Apply the review criteria from your system prompt (code-reviewer.md).
 5. If consumer projects are loaded, read their code to verify API compatibility.
 
+## Before you report a finding
+
+- Trace behavior to code changed in this diff before calling a finding a regression or saying this PR introduced it.
+- Read the provided PR description and discussion before applying the scope gate below.
+- Read in-repository callers or producers before claiming a type, shape, or nil problem.
+- Do not assert a defect that depends on an unseen consumer or external service; at most state the assumption to verify.
+- Claim lint, typecheck, build, test, migration/import, or database failure only when the diff and visible configuration make it certain; never infer tool behavior from general knowledge alone.
+- Judge component/library APIs using the repository's actual dependency version and wrapper code, including the versions section.
+
 ## Scope and Severity Gate
 
-Before reporting an issue, infer the PR scope from the task/PR description, linked issue, commit messages, changed files, and existing PR discussion. Treat explicit "out of scope" comments as scope constraints unless the implementation creates a reachable security, data integrity, crash, or regression risk.
+Before reporting an issue, infer the PR scope from the task/PR description, linked issue, commit messages, changed files, and existing PR discussion. Treat a change described there as intended as in scope; treat explicit "out of scope" comments as scope constraints unless the implementation creates a reachable security, data integrity, crash, or regression risk.
 
 A CRITICAL/HIGH/MEDIUM finding must satisfy all of these:
-- The issue is introduced or exposed by this diff.
+- The issue is introduced or exposed by this diff. If behavior is unchanged from the base, omit it or report it only as pre-existing at lower severity when the output format allows; never describe it as a regression.
 - A user, API client, or system job can reach it today.
 - The impact is concrete: security/authz, data loss/corruption/privacy leak, production crash, critical regression, or material breakage of this PR's scoped feature.
 - The finding is actionable by a code change in this PR.
