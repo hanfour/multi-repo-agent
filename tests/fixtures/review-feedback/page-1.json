@@ -1,0 +1,57 @@
+[
+  {
+    "id": 101,
+    "in_reply_to_id": null,
+    "pull_request_url": "https://api.github.com/repos/acme/legacy-api/pulls/41",
+    "html_url": "https://github.com/acme/legacy-api/pull/41#discussion_r101",
+    "path": "src/worker.js",
+    "line": 14,
+    "body": "[CRITICAL] This branch can dereference a missing value.",
+    "created_at": "2026-09-03T10:00:00Z",
+    "user": {"login": "review-bot", "type": "User"}
+  },
+  {
+    "id": 102,
+    "in_reply_to_id": null,
+    "pull_request_url": "https://api.github.com/repos/acme/legacy-api/pulls/42",
+    "html_url": "https://github.com/acme/legacy-api/pull/42#discussion_r102",
+    "path": "src/cache.js",
+    "line": 29,
+    "body": "[HIGH] The cache key can collide across tenants.",
+    "created_at": "2026-09-04T10:00:00Z",
+    "user": {"login": "review-bot", "type": "User"}
+  },
+  {
+    "id": 103,
+    "in_reply_to_id": null,
+    "pull_request_url": "https://api.github.com/repos/acme/legacy-api/pulls/43",
+    "html_url": "https://github.com/acme/legacy-api/pull/43#discussion_r103",
+    "path": "src/queue.js",
+    "line": 8,
+    "body": "[MEDIUM] The retry counter is not reset after a successful run.",
+    "created_at": "2026-09-05T10:00:00Z",
+    "user": {"login": "review-bot", "type": "User"}
+  },
+  {
+    "id": 104,
+    "in_reply_to_id": null,
+    "pull_request_url": "https://api.github.com/repos/acme/legacy-api/pulls/44",
+    "html_url": "https://github.com/acme/legacy-api/pull/44#discussion_r104",
+    "path": "src/logger.js",
+    "line": 50,
+    "body": "[LOW] This fallback may hide a useful diagnostic.",
+    "created_at": "2026-09-06T10:00:00Z",
+    "user": {"login": "review-bot", "type": "User"}
+  },
+  {
+    "id": 105,
+    "in_reply_to_id": null,
+    "pull_request_url": "https://api.github.com/repos/acme/legacy-api/pulls/45",
+    "html_url": "https://github.com/acme/legacy-api/pull/45#discussion_r105",
+    "path": "src/feature.js",
+    "line": 61,
+    "body": "[LOW] This branch skips a validation check.",
+    "created_at": "2026-09-07T10:00:00Z",
+    "user": {"login": "review-bot", "type": "User"}
+  }
+]

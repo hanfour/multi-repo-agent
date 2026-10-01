@@ -1,0 +1,98 @@
+[
+  {
+    "id": 201,
+    "in_reply_to_id": 101,
+    "body": "Confirmed, fixed in commit abc123.",
+    "created_at": "2026-09-03T11:00:00Z",
+    "user": {"login": "engineer-a", "type": "User"}
+  },
+  {
+    "id": 202,
+    "in_reply_to_id": 102,
+    "body": "This path is guarded, so the reported collision cannot happen.",
+    "created_at": "2026-09-04T11:00:00Z",
+    "user": {"login": "engineer-b", "type": "User"}
+  },
+  {
+    "id": 203,
+    "in_reply_to_id": 103,
+    "body": "Correct, fixed in the follow-up.",
+    "created_at": "2026-09-05T11:00:00Z",
+    "user": {"login": "engineer-a", "type": "User"}
+  },
+  {
+    "id": 204,
+    "in_reply_to_id": 104,
+    "body": "Bot follow-up that must not count as an engineer reply.",
+    "created_at": "2026-09-06T11:00:00Z",
+    "user": {"login": "review-bot", "type": "User"}
+  },
+  {
+    "id": 205,
+    "in_reply_to_id": 108,
+    "body": "Automated app reply that must be ignored.",
+    "created_at": "2026-09-10T11:01:00Z",
+    "user": {"login": "automation-app[bot]", "type": "Bot"}
+  },
+  {
+    "id": 209,
+    "in_reply_to_id": 105,
+    "body": "This behavior is intentional for this component.",
+    "created_at": "2026-09-07T11:00:00Z",
+    "user": {"login": "engineer-b", "type": "User"}
+  },
+  {
+    "id": 106,
+    "in_reply_to_id": null,
+    "pull_request_url": "https://api.github.com/repos/acme/legacy-api/pulls/46",
+    "html_url": "https://github.com/acme/legacy-api/pull/46#discussion_r106",
+    "path": "src/state.js",
+    "line": 17,
+    "body": "The stored state may be stale after reconnect.",
+    "created_at": "2026-09-08T10:00:00Z",
+    "user": {"login": "review-bot", "type": "User"}
+  },
+  {
+    "id": 206,
+    "in_reply_to_id": 106,
+    "body": "Thanks for flagging this; we will discuss it.",
+    "created_at": "2026-09-08T11:00:00Z",
+    "user": {"login": "engineer-b", "type": "User"}
+  },
+  {
+    "id": 107,
+    "in_reply_to_id": null,
+    "pull_request_url": "https://api.github.com/repos/acme/legacy-api/pulls/47",
+    "html_url": "https://github.com/acme/legacy-api/pull/47#discussion_r107",
+    "path": "src/parser.js",
+    "original_line": 72,
+    "body": "The parser accepts an empty token here.",
+    "created_at": "2026-09-09T10:00:00Z",
+    "user": {"login": "review-bot", "type": "User"}
+  },
+  {
+    "id": 207,
+    "in_reply_to_id": 107,
+    "body": "Confirmed, this input is rejected now.",
+    "created_at": "2026-09-09T11:00:00Z",
+    "user": {"login": "engineer-a", "type": "User"}
+  },
+  {
+    "id": 108,
+    "in_reply_to_id": null,
+    "pull_request_url": "https://api.github.com/repos/acme/legacy-api/pulls/48",
+    "html_url": "https://github.com/acme/legacy-api/pull/48#discussion_r108",
+    "path": "src/unused.js",
+    "line": 3,
+    "body": "[LOW] This branch appears unreachable.",
+    "created_at": "2026-09-10T10:00:00Z",
+    "user": {"login": "review-bot", "type": "User"}
+  },
+  {
+    "id": 299,
+    "in_reply_to_id": null,
+    "body": "Top-level human comment is not a bot finding.",
+    "created_at": "2026-09-10T12:00:00Z",
+    "user": {"login": "engineer-a", "type": "User"}
+  }
+]

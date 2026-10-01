@@ -1,0 +1,8 @@
+[
+  {"id": 107, "label": "accepted", "reason": "The engineer confirmed the issue is now fixed."},
+  {"id": 106, "label": "other", "reason": "The reply does not confirm or reject the finding."},
+  {"id": 105, "label": "disputed-scope", "reason": "The engineer says the behavior is intentional."},
+  {"id": 102, "label": "rejected", "reason": "The engineer says the guarded path cannot collide."},
+  {"id": 103, "label": "accepted", "reason": "The engineer confirmed a follow-up fix."},
+  {"id": 101, "label": "accepted", "reason": "The engineer confirmed and fixed the issue."}
+]

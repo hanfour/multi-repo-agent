@@ -1,0 +1,20 @@
+[
+  {
+    "id": 901,
+    "in_reply_to_id": null,
+    "pull_request_url": "https://api.github.com/repos/acme/legacy-api/pulls/90",
+    "html_url": "https://github.com/acme/legacy-api/pull/90#discussion_r901",
+    "path": "src/quiet.js",
+    "line": 11,
+    "body": "[MEDIUM] This condition may skip the update.",
+    "created_at": "2026-09-11T10:00:00Z",
+    "user": {"login": "review-bot", "type": "User"}
+  },
+  {
+    "id": 902,
+    "in_reply_to_id": 901,
+    "body": "Automated response.",
+    "created_at": "2026-09-11T11:00:00Z",
+    "user": {"login": "automation-app[bot]", "type": "Bot"}
+  }
+]
