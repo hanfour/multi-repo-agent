@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # PKB prompt builders: generate/update sitemap, architecture, conventions, API surface, modules, identity, tunnels.
 
+_PKB_DOCUMENT_OUTPUT_INSTRUCTION="Return the complete document as your final reply, starting with its first heading. Do not create, write or edit any files, and do not describe what you are doing — the reply itself is saved as the document."
+
 # ---------------------------------------------------------------------------
 # Internal: Agent calls for PKB generation
 # ---------------------------------------------------------------------------
@@ -12,6 +14,7 @@ _pkb_generate_sitemap() {
 You are a project analyzer. Generate a SITEMAP document for the project "$project" (type: $project_type).
 
 ## Your Task
+${_PKB_DOCUMENT_OUTPUT_INSTRUCTION}
 1. List the directory tree (important dirs only, skip node_modules, .git, dist, build, coverage).
 2. For each significant directory, write a 1-line purpose description.
 3. For each key file (entry points, configs, main modules), write a 1-line description.
@@ -39,7 +42,7 @@ ${lang_directive}
 
 Be concise. Each description should be under 20 words.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project" --disallowedTools "${MRA_CLAUDE_DISALLOWED_TOOLS:-Write,Edit,NotebookEdit,ReportFindings}"
 }
 
 _pkb_generate_architecture() {
@@ -50,6 +53,7 @@ _pkb_generate_architecture() {
 You are a software architect. Generate an ARCHITECTURE document for "$project" (type: $project_type).
 
 ## Your Task
+${_PKB_DOCUMENT_OUTPUT_INSTRUCTION}
 1. Identify the tech stack (framework, language, major libraries).
 2. Map the architecture pattern (MVC, DDD, feature-based, layered, etc.).
 3. Document the data flow (how requests/events flow through the system).
@@ -79,7 +83,7 @@ ${lang_directive}
 
 Focus on patterns that a new reviewer would need to understand to give accurate feedback.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project" --disallowedTools "${MRA_CLAUDE_DISALLOWED_TOOLS:-Write,Edit,NotebookEdit,ReportFindings}"
 }
 
 _pkb_generate_conventions() {
@@ -90,6 +94,7 @@ _pkb_generate_conventions() {
 You are a code quality analyst. Generate a CONVENTIONS document for "$project" (type: $project_type).
 
 ## Your Task
+${_PKB_DOCUMENT_OUTPUT_INSTRUCTION}
 1. Read config files: .eslintrc*, tsconfig*, prettier*, .editorconfig, CLAUDE.md, AGENTS.md, .claude/rules/. Distilling these project-convention docs into the output is the PRIMARY purpose — always read and summarise them.
 2. Read a sample of source files to identify actual coding patterns.
 3. Document: naming conventions, import style, error handling patterns, testing approach.
@@ -130,7 +135,7 @@ ${lang_directive}
 Only document patterns actually used in the codebase. Don't assume or prescribe.
 Every line must start with [CONVENTION], [PATTERN], or [DECISION] tag.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project" --disallowedTools "${MRA_CLAUDE_DISALLOWED_TOOLS:-Write,Edit,NotebookEdit,ReportFindings}"
 }
 
 _pkb_generate_api_surface() {
@@ -141,6 +146,7 @@ _pkb_generate_api_surface() {
 You are an API analyst. Generate an API SURFACE document for "$project" (type: $project_type).
 
 ## Your Task
+${_PKB_DOCUMENT_OUTPUT_INSTRUCTION}
 1. Find all external API endpoints (REST routes, GraphQL schemas, gRPC services).
 2. Find all public exports (packages, shared types, hooks, utilities).
 3. Find event contracts (emitted events, message queues, WebSocket messages).
@@ -173,7 +179,7 @@ ${lang_directive}
 
 If a category has no entries, omit it entirely. Be precise with paths and signatures.
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project" --disallowedTools "${MRA_CLAUDE_DISALLOWED_TOOLS:-Write,Edit,NotebookEdit,ReportFindings}"
 }
 
 _pkb_generate_modules() {
@@ -278,6 +284,7 @@ _pkb_generate_one_module() {
 Analyze the module "$mod_name" in project "$project" and produce a concise summary.
 
 ## Your Task
+${_PKB_DOCUMENT_OUTPUT_INSTRUCTION}
 1. Read all files in this module directory.
 2. Identify: purpose, key components/functions, external dependencies, exports.
 3. Note important business logic or domain rules.
@@ -305,7 +312,7 @@ ${lang_directive}
 
 Keep it concise — this will be used as context for code review and development agents.
 PROMPT
-)" --add-dir "$mod_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
+)" --add-dir "$mod_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project" --disallowedTools "${MRA_CLAUDE_DISALLOWED_TOOLS:-Write,Edit,NotebookEdit,ReportFindings}"
 }
 
 # ---------------------------------------------------------------------------
@@ -329,6 +336,7 @@ ${existing_summary}
 ${relevant_changes}
 
 ## Your Task
+${_PKB_DOCUMENT_OUTPUT_INSTRUCTION}
 1. Read the changed files to understand what was modified.
 2. Update the summary to reflect the current state.
 3. Keep the same markdown format as the existing summary.
@@ -340,7 +348,7 @@ ${lang_directive}
 
 Output the COMPLETE updated summary (not a diff).
 PROMPT
-)" --add-dir "$module_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project"
+)" --add-dir "$module_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project" --disallowedTools "${MRA_CLAUDE_DISALLOWED_TOOLS:-Write,Edit,NotebookEdit,ReportFindings}"
 }
 
 # ---------------------------------------------------------------------------
@@ -539,6 +547,7 @@ ${current_sitemap}
 ${changed_files}
 
 ## Your Task
+${_PKB_DOCUMENT_OUTPUT_INSTRUCTION}
 1. Add any new files/directories to the appropriate section.
 2. Update descriptions if file purposes changed.
 3. Keep the same markdown format.
@@ -548,7 +557,7 @@ ${lang_directive}
 
 Output the COMPLETE updated sitemap (not a diff).
 PROMPT
-)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project" 2>/dev/null)
+)" --add-dir "$project_dir" --model "$model" --max-turns "${MRA_PKB_AGENT_MAX_TURNS:-25}" --setting-sources "project" --disallowedTools "${MRA_CLAUDE_DISALLOWED_TOOLS:-Write,Edit,NotebookEdit,ReportFindings}" 2>/dev/null)
 
   if [[ -n "$updated" ]]; then
     echo "$updated" > "$sitemap_file"
