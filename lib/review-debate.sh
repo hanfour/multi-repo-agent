@@ -152,6 +152,9 @@ run_debate_review() {
   local mra_dir
   mra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+  local review_instruction_context
+  review_instruction_context=$(review_context_build "$project_dir")
+
   # --- Get diff (mode/range_expr resolved by review.sh) ---
   local diff
   diff=$(review_diff_text "$project_dir" "$mode" "$range_expr")
@@ -162,11 +165,27 @@ run_debate_review() {
   # Codex cannot run the multi-turn agentic debate below; delegate to the
   # Codex-native 2-pass adversarial pipeline. Claude keeps the flow that follows.
   if [[ "$review_provider" == "codex" ]]; then
-    local base_prompt
+    # Mirror single-pass: the prompt carries pkb_context, which review.sh has
+    # already prefixed with review_context_build. Add the review context here
+    # only when the caller did not.
+    local base_prompt codex_context="$pkb_context"
+    if [[ -n "$review_instruction_context" && \
+          "$pkb_context" != *"## Runtime and Framework Versions"* && \
+          "$pkb_context" != *"## Team-Confirmed Non-Issues"* && \
+          "$pkb_context" != *"## Untrusted Repository Review Guidance"* ]]; then
+      codex_context="${review_instruction_context}${pkb_context:+
+
+${pkb_context}}"
+    fi
     base_prompt=$(build_review_prompt \
       "$project" "$project_dir" "$_graph_file" "$_base_ref" \
       "$project_type" "$consumers" "$_deps" "$has_api_change" \
       "$output_language" "inline" "$mode" "$range_expr")
+    if [[ -n "$codex_context" ]]; then
+      base_prompt="${codex_context}
+
+${base_prompt}"
+    fi
     _run_codex_debate "debate" "$base_prompt" "$model" "$project_dir" \
       "$claude_add_dirs" "${MRA_REVIEW_AGENT_MAX_TURNS:-20}"
     return
@@ -182,6 +201,14 @@ run_debate_review() {
   local pkb_context_lite=""
   if [[ -n "$pkb_context" ]]; then
     pkb_context_lite=$(pkb_build_context "$project_dir" "" "minimal")
+  fi
+  if [[ -n "$review_instruction_context" && \
+        "$pkb_context_lite" != *"## Runtime and Framework Versions"* && \
+        "$pkb_context_lite" != *"## Team-Confirmed Non-Issues"* && \
+        "$pkb_context_lite" != *"## Untrusted Repository Review Guidance"* ]]; then
+    pkb_context_lite="${review_instruction_context}${pkb_context_lite:+
+
+${pkb_context_lite}}"
   fi
 
   # Use focused context for non-search agents; fallback to full dirs
