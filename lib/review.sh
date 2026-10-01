@@ -597,16 +597,12 @@ ${prompt}"
 }
 
 # Background PKB update after review — only runs if PKB exists
-# Also captures decisions from review findings into conventions.md
 _review_pkb_auto_update() {
-  local project="$1" project_dir="$2" changed_files="$3" output_language="$4" review_json="${5:-}" provider="${6:-claude}"
+  local project="$1" project_dir="$2" changed_files="$3" output_language="$4" provider="${6:-claude}"
   [[ "$provider" == "claude" ]] || return 0
   unset GH_TOKEN GITHUB_TOKEN
   if pkb_exists "$project_dir"; then
     pkb_incremental_update "$project" "$project_dir" "$changed_files" "haiku" "$output_language" 2>/dev/null
-    # Capture decisions from review findings (mempalace-inspired conversation hook)
-    if [[ -n "$review_json" ]] && echo "$review_json" | jq . &>/dev/null 2>&1; then
-      pkb_capture_decisions "$project_dir" "$review_json" 2>/dev/null
-    fi
+    # Bot findings include false positives; feeding them back as conventions makes them self-reinforcing.
   fi
 }

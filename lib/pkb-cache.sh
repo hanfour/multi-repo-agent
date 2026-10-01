@@ -42,13 +42,95 @@ pkb_exists() {
 # string (a cut-off generator emits "Error: Reached max turns ...") and not
 # trivially short. Without this guard a failed/cut-off generator silently
 # pollutes the PKB, and the review agents then consume the garbage as context.
+# These phrases catch common model preambles before a doc's first heading.
+_PKB_META_CHATTER_PATTERNS=(
+  "permission" "I don't have" "I do not have" "I can't" "I cannot"
+  "I'll present" "I will present" "Here is" "Here's" "instead of saving"
+  "as requested" "Let me" "I've " "I have created" "Below is"
+  "無法寫入" "沒有權限" "以下是" "我將" "我會" "直接呈現"
+)
+
 _pkb_valid_doc() {
-  local content="$1"
-  [[ -z "${content//[[:space:]]/}" ]] && return 1            # empty / whitespace-only
+  local content="$1" reason_var="${2:-}" pattern preface
+  if [[ -n "$reason_var" ]]; then printf -v "$reason_var" '%s' ""; fi
+  if [[ -z "${content//[[:space:]]/}" ]]; then
+    [[ -n "$reason_var" ]] && printf -v "$reason_var" '%s' "empty document"
+    return 1
+  fi
   case "$content" in
-    "Error:"*|"API Error"*|"Execution error"*) return 1 ;;   # agent error output
+    "Error:"*|"API Error"*|"Execution error"*)
+      [[ -n "$reason_var" ]] && printf -v "$reason_var" '%s' "agent error output"
+      return 1 ;;   # agent error output
   esac
-  [[ "${#content}" -lt 80 ]] && return 1                     # too short to be a real doc
+  if [[ "${#content}" -lt 80 ]]; then
+    [[ -n "$reason_var" ]] && printf -v "$reason_var" '%s' "document too short"
+    return 1
+  fi
+
+  preface=$(printf '%s\n' "$content" | awk '
+    function is_front_matter_delimiter(line) {
+      return line ~ /^---[[:space:]]*$/
+    }
+    function strip_html_comments(line, output, start_pos, end_pos) {
+      output = ""
+      while (length(line) > 0) {
+        if (in_comment) {
+          end_pos = index(line, "-->")
+          if (!end_pos) return output
+          line = substr(line, end_pos + 3)
+          in_comment = 0
+        } else {
+          start_pos = index(line, "<!--")
+          if (!start_pos) {
+            output = output line
+            return output
+          }
+          output = output substr(line, 1, start_pos - 1)
+          line = substr(line, start_pos + 4)
+          in_comment = 1
+        }
+      }
+      return output
+    }
+    { raw[NR] = $0 }
+    END {
+      if (NR > 0 && is_front_matter_delimiter(raw[1])) {
+        for (i = 2; i <= NR; i++) {
+          if (is_front_matter_delimiter(raw[i])) {
+            front_matter_end = i
+            break
+          }
+        }
+      }
+      for (i = 1; i <= NR; i++) {
+        if (front_matter_end && i <= front_matter_end) continue
+        line = strip_html_comments(raw[i])
+        if (line ~ /^#{1,6} /) {
+          has_heading = 1
+          break
+        }
+        preface[++preface_count] = line
+      }
+      if (has_heading) {
+        for (i = 1; i <= preface_count; i++) print preface[i]
+      } else {
+        nonempty_count = 0
+        for (i = 1; i <= preface_count; i++) {
+          if (preface[i] ~ /[^[:space:]]/) {
+            nonempty_count++
+            if (nonempty_count > 5) continue
+          }
+          print preface[i]
+        }
+      }
+    }
+  ')
+  for pattern in "${_PKB_META_CHATTER_PATTERNS[@]}"; do
+    if printf '%s\n' "$preface" | grep -Eiq -- "$pattern"; then
+      [[ -n "$reason_var" ]] && printf -v "$reason_var" '%s' "model meta-commentary before first heading"
+      return 1
+    fi
+  done
   return 0
 }
 
