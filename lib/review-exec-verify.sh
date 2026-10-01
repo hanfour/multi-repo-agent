@@ -1,0 +1,272 @@
+#!/usr/bin/env bash
+# Runtime checks may remove findings, never add them. Contract: a failure
+# anywhere in this stage returns the input JSON unchanged.
+
+_review_exec_verify_prompt() {
+  local findings="$1"
+  cat <<HDR
+## Runtime behaviour verification
+
+For each finding below, decide whether its correctness DEPENDS on a language
+or standard-library behaviour that can be checked by a short, self-contained
+snippet. Use only Ruby or Node.js standard-library behaviour. The snippet must
+not use repository code, gems, npm packages, databases, networks, or files.
+
+Return a claim only when the finding is about that runtime behaviour. Do NOT
+return findings whose truth depends on application code, data, framework
+behaviour such as Rails or Vue, or anything else outside the runtime itself.
+For each claim, return the zero-based finding index, language, snippet, and
+the exact single line the snippet prints if the finding's claim is TRUE. The
+snippet must catch exceptions and print exactly RAISES <ExceptionClass> with
+no exception message instead of crashing. It must print exactly one line.
+
+Reply with a strict JSON array only, with objects in this form:
+[{"index":0,"language":"ruby","snippet":"...","finding_holds_if":"..."}]
+Return [] when no finding is checkable.
+
+### Findings
+
+$findings
+HDR
+}
+
+_review_exec_verify_version() {
+  local language="$1" project_dir="$2" value="" candidate=""
+
+  case "$language" in
+    ruby)
+      if [[ -f "$project_dir/.ruby-version" ]]; then
+        value=$(sed -n '1{s/^[[:space:]]*//; s/[[:space:]]*$//; p;}' "$project_dir/.ruby-version" 2>/dev/null) || value=""
+        value=${value#ruby-}
+        if [[ "$value" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+          printf '%s' "$value"
+          return 0
+        fi
+      fi
+      if [[ -f "$project_dir/Gemfile.lock" ]]; then
+        candidate=$(awk '
+          $0 == "RUBY VERSION" {
+            if (getline > 0) {
+              sub(/^[[:space:]]*ruby[[:space:]]+/, "")
+              sub(/p[0-9]+$/, "")
+              gsub(/[[:space:]]/, "")
+              print
+            }
+            exit
+          }
+        ' "$project_dir/Gemfile.lock" 2>/dev/null) || candidate=""
+        candidate=${candidate#ruby-}
+        if [[ "$candidate" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+          printf '%s' "$candidate"
+          return 0
+        fi
+      fi
+      ;;
+    node)
+      for value in "$project_dir/.nvmrc" "$project_dir/.node-version"; do
+        if [[ -f "$value" ]]; then
+          candidate=$(sed -n '1{s/^[[:space:]]*//; s/[[:space:]]*$//; p;}' "$value" 2>/dev/null) || candidate=""
+          candidate=$(printf '%s' "$candidate" | grep -Eo '[0-9]+' | head -n 1) || candidate=""
+          if [[ "$candidate" =~ ^[0-9]+$ ]]; then
+            printf '%s' "$candidate"
+            return 0
+          fi
+        fi
+      done
+      if [[ -f "$project_dir/package.json" ]]; then
+        candidate=$(jq -r '.engines.node // empty' "$project_dir/package.json" 2>/dev/null) || candidate=""
+        candidate=$(printf '%s' "$candidate" | grep -Eo '[0-9]+' | head -n 1) || candidate=""
+        if [[ "$candidate" =~ ^[0-9]+$ ]]; then
+          printf '%s' "$candidate"
+          return 0
+        fi
+      fi
+      ;;
+  esac
+  return 1
+}
+
+_review_exec_verify_docker_call() {
+  local docker_bin="$1"
+  shift
+  local input_file="" timeout_bin="" docker_pid watchdog_pid timeout_file rc
+  if [[ "${1:-}" == "--stdin-file" ]]; then
+    input_file="$2"
+    shift 2
+  fi
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_bin=$(command -v timeout)
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_bin=$(command -v gtimeout)
+  fi
+
+  if [[ -n "$timeout_bin" ]]; then
+    if [[ -n "$input_file" ]]; then
+      "$timeout_bin" -k 2 20 "$docker_bin" "$@" < "$input_file"
+    else
+      "$timeout_bin" -k 2 20 "$docker_bin" "$@" </dev/null
+    fi
+    return $?
+  fi
+
+  timeout_file=$(mktemp "${TMPDIR:-/tmp}/mra-review-exec-verify.timeout.XXXXXX") || return 125
+  rm -f "$timeout_file" || return 125
+  if [[ -n "$input_file" ]]; then
+    "$docker_bin" "$@" < "$input_file" &
+  else
+    "$docker_bin" "$@" </dev/null &
+  fi
+  docker_pid=$!
+  (
+    sleep 20 &
+    local timer_pid=$!
+    local grace_pid=""
+    trap 'kill "$timer_pid" 2>/dev/null || true; if [[ -n "$grace_pid" ]]; then kill "$grace_pid" 2>/dev/null || true; fi; exit 0' TERM INT
+    wait "$timer_pid"
+    : > "$timeout_file"
+    kill -TERM "$docker_pid" 2>/dev/null || true
+    sleep 2 &
+    grace_pid=$!
+    wait "$grace_pid" 2>/dev/null || true
+    kill -KILL "$docker_pid" 2>/dev/null || true
+  ) &
+  watchdog_pid=$!
+  if wait "$docker_pid"; then rc=0; else rc=$?; fi
+  if [[ -f "$timeout_file" ]]; then rc=124; fi
+  kill -TERM "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+  rm -f "$timeout_file" || true
+  return "$rc"
+}
+
+_review_exec_verify_docker_run() {
+  local docker_bin="$1" image="$2" runtime="$3" snippet="$4" output_file="$5" container_name="$6"
+  local input_file rc
+
+  input_file=$(mktemp "${TMPDIR:-/tmp}/mra-review-exec-verify.input.XXXXXX") || return 125
+  printf '%s' "$snippet" > "$input_file" || { rm -f "$input_file" || true; return 125; }
+  if _review_exec_verify_docker_call "$docker_bin" --stdin-file "$input_file" run --rm \
+    --name "$container_name" --init -i --network none --read-only \
+    --tmpfs /tmp:rw,size=16m --memory 256m --cpus 1 --pids-limit 64 \
+    --user 65534:65534 --cap-drop ALL --security-opt no-new-privileges \
+    "$image" "$runtime" - >"$output_file" 2>/dev/null; then
+    rm -f "$input_file" || true
+    return 0
+  else
+    rc=$?
+  fi
+  rm -f "$input_file" || true
+
+  if [[ "$rc" -eq 124 || "$rc" -eq 137 || "$rc" -eq 143 ]]; then
+    _review_exec_verify_docker_call "$docker_bin" kill "$container_name" >/dev/null 2>&1 || true
+    _review_exec_verify_docker_call "$docker_bin" rm -f "$container_name" >/dev/null 2>&1 || true
+  fi
+  return "$rc"
+}
+
+_review_exec_verify_normalize_line() {
+  local value="$1"
+  value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//') || value=""
+  if [[ "$value" == "RAISES "* ]]; then value=${value%%:*}; fi
+  printf '%s' "$value"
+}
+
+# _review_exec_verify_findings <review-json> <project-dir> <provider> <model> <add-dirs> <turns> <system-prompt-file>
+_review_exec_verify_findings() {
+  local review_json="$1" project_dir="$2" provider="${3:-claude}" model="${4:-}"
+  local add_dirs="${5:-}" turns="${6:-6}" sys="${7:-}"
+
+  [[ "${MRA_REVIEW_EXEC_VERIFY:-0}" == "1" ]] || { printf '%s' "$review_json"; return 0; }
+  printf '%s' "$review_json" | jq -e . >/dev/null 2>&1 || { printf '%s' "$review_json"; return 0; }
+
+  local n findings prompt raw claims docker_bin
+  n=$(printf '%s' "$review_json" | jq -r 'if (.comments | type) == "array" then (.comments | length) else 0 end' 2>/dev/null) || n=0
+  [[ "$n" -gt 0 ]] || { printf '%s' "$review_json"; return 0; }
+
+  findings=$(printf '%s' "$review_json" | jq -c '[.comments | to_entries[] | {index: .key, finding: .value}]' 2>/dev/null) || {
+    printf '%s' "$review_json"; return 0;
+  }
+  prompt=$(_review_exec_verify_prompt "$findings") || { printf '%s' "$review_json"; return 0; }
+  raw=$(review_call_model exec-verify "$provider" "$prompt" "$model" "$project_dir" "$add_dirs" "$turns" "$sys" 2>/dev/null) || raw=""
+
+  claims=$(printf '%s' "$raw" | sed -n '/\[/,$p' \
+    | sed '/^[[:space:]]*```[[:alpha:]]*[[:space:]]*$/d' \
+    | jq -cs '
+    if length == 1 and (.[0] | type) == "array" then .[0] else error("expected one JSON array") end
+  ' 2>/dev/null) || claims=""
+  [[ -n "$claims" ]] || { printf '%s' "$review_json"; return 0; }
+  claims=$(printf '%s' "$claims" | jq -c --argjson count "$n" '
+    if type == "array"
+      and all(.[];
+        type == "object"
+        and (keys == ["finding_holds_if", "index", "language", "snippet"])
+        and (.index | type == "number" and floor == . and . >= 0 and . < $count)
+        and (.language == "ruby" or .language == "node")
+        and (.snippet | type == "string" and length > 0)
+        and (.finding_holds_if | type == "string" and length > 0 and (index("\n") == null))
+      )
+      and ([.[].index] | length == (unique | length))
+    then . else error("invalid claim array") end
+  ' 2>/dev/null) || claims=""
+  [[ -n "$claims" ]] || { printf '%s' "$review_json"; return 0; }
+
+  docker_bin=$(command -v docker 2>/dev/null) || { printf '%s' "$review_json"; return 0; }
+
+  local -a dropped_indices=() dropped_logs=()
+  local claim index language snippet expected normalized_expected version image runtime output_file observed normalized_observed rc container_name
+  while IFS= read -r claim; do
+    index=$(printf '%s' "$claim" | jq -r '.index') || continue
+    language=$(printf '%s' "$claim" | jq -r '.language') || continue
+    snippet=$(printf '%s' "$claim" | jq -r '.snippet') || continue
+    expected=$(printf '%s' "$claim" | jq -r '.finding_holds_if') || continue
+    version=$(_review_exec_verify_version "$language" "$project_dir") || version=""
+    [[ -n "$version" ]] || continue
+    if [[ "$language" == "ruby" ]]; then image="ruby:$version-slim"; runtime=ruby; else image="node:$version-slim"; runtime=node; fi
+
+    if _review_exec_verify_docker_call "$docker_bin" image inspect "$image" >/dev/null 2>&1; then
+      :
+    else
+      rc=$?
+      if [[ "$rc" -eq 124 || "$rc" -eq 137 || "$rc" -eq 143 ]]; then continue; fi
+      printf 'exec verification skipped finding index=%s: image unavailable; run docker pull %s\n' "$index" "$image" >&2
+      continue
+    fi
+
+    output_file=$(mktemp "${TMPDIR:-/tmp}/mra-review-exec-verify.XXXXXX") || continue
+    container_name="mra-exec-verify-$$-${RANDOM}-${RANDOM}"
+    if _review_exec_verify_docker_run "$docker_bin" "$image" "$runtime" "$snippet" "$output_file" "$container_name"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    if [[ "$rc" -eq 0 ]]; then
+      observed=$(tail -n 1 "$output_file" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//') || observed=""
+      normalized_expected=$(_review_exec_verify_normalize_line "$expected") || normalized_expected=""
+      normalized_observed=$(_review_exec_verify_normalize_line "$observed") || normalized_observed=""
+      if [[ -n "$observed" && "$normalized_observed" != "$normalized_expected" ]]; then
+        dropped_indices+=("$index")
+        dropped_logs+=("index=$index $language:$version expected=$(printf '%q' "$expected") observed=$(printf '%q' "$observed")")
+      fi
+    fi
+    rm -f "$output_file" || true
+  done < <(printf '%s\n' "$claims" | jq -c '.[]')
+
+  if [[ ${#dropped_indices[@]} -eq 0 ]]; then
+    printf '%s' "$review_json"
+    return 0
+  fi
+
+  local drop_json filtered
+  drop_json=$(printf '%s\n' "${dropped_indices[@]}" | jq -Rsc 'split("\n") | map(select(length > 0) | tonumber)') || {
+    printf '%s' "$review_json"; return 0;
+  }
+  filtered=$(printf '%s' "$review_json" | jq -c --argjson drop "$drop_json" '
+    .comments = [ .comments | to_entries[] | select(.key as $i | ($drop | index($i)) | not) | .value ]
+  ' 2>/dev/null) || { printf '%s' "$review_json"; return 0; }
+
+  local dropped_log
+  for dropped_log in "${dropped_logs[@]}"; do
+    printf 'exec verification dropped finding %s\n' "$dropped_log" >&2
+  done
+  printf '%s' "$filtered"
+}

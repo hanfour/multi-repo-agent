@@ -571,6 +571,8 @@ ${prompt}"
     # strategy has its own refutation and must not pay twice.
     review_json=$(_review_refute_findings "$review_json" "$project_dir" "$review_provider" \
       "$model" "$claude_add_dirs_str" "$strategy_turns" "$system_prompt_file")
+    review_json=$(_review_exec_verify_findings "$review_json" "$project_dir" "$review_provider" \
+      "$model" "$claude_add_dirs_str" "$strategy_turns" "$system_prompt_file")
     _review_emit_verdict "$review_json" "$project_dir"
     # The inline schema only permits APPROVED/CHANGES_REQUESTED, so a COMMENT
     # status can ONLY be the neutral REVIEW_INCOMPLETE verdict — log it.
