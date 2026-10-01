@@ -2,7 +2,8 @@
 # PKB source selection and isolated generation from a repository ref.
 
 _pkb_source_ref_from_config() {
-  local workspace="$1" project="$2" repos_file="$workspace/.collab/repos.json"
+  local workspace="$1" project="$2"
+  local repos_file="$workspace/.collab/repos.json"
   [[ -f "$repos_file" ]] || return 0
   jq -r --arg project "$project" '
     [.repos[]? | select(.name == $project) | .pkbRef | select(type == "string")][0] // ""
