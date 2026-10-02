@@ -79,7 +79,7 @@ review_call_model() {
 ONE='{"status":"CHANGES_REQUESTED","summary":"s","comments":[{"path":"a.rb","line":1,"severity":"HIGH","body":"nil.to_i raises NoMethodError"}]}'
 TWO='{"status":"CHANGES_REQUESTED","summary":"s","comments":[{"path":"a.rb","line":1,"severity":"HIGH","body":"nil.to_i raises NoMethodError"},{"path":"b.rb","line":2,"severity":"MEDIUM","body":"other issue stays"}]}'
 NONE='{"status":"APPROVED","summary":"none","comments":[]}'
-RUBY_CLAIM='[{"index":0,"language":"ruby","snippet":"begin; puts nil.to_i; rescue => e; puts \"RAISES #{e.class}\"; end","finding_holds_if":"RAISES NoMethodError"}]'
+RUBY_CLAIM='[{"index":0,"language":"ruby","expression":"nil.to_i","claimed_outcome":"RAISES NoMethodError"}]'
 run() { _review_exec_verify_findings "$1" "$PROJECT" claude model "" 4 ""; }
 reset_logs() { : > "$DOCKER_LOG"; : > "$MODEL_LOG"; : > "$TIMEOUT_LOG"; : > "$DOCKER_STDIN"; }
 comment_count() { printf '%s' "$1" | jq '[.comments[]] | length'; }
@@ -92,6 +92,18 @@ out=$(MRA_REVIEW_EXEC_VERIFY=1 run "$ONE" 2>/dev/null)
 [[ "$(comment_count "$out")" == "1" && ! -s "$DOCKER_LOG" ]] \
   && ok "missing shared version helpers keep findings and skip Docker" \
   || fail "missing shared version helpers changed the finding or called Docker"
+grep -qF 'evaluate whether the finding is right and do NOT write the behaviour you' "$PROMPT_FILE" \
+  && grep -qF 'expect; the program will be run to find out.' "$PROMPT_FILE" \
+  && grep -qF 'finding says Integer("12") raises' "$PROMPT_FILE" \
+  && grep -qF 'ArgumentError, use {' "$PROMPT_FILE" \
+  && grep -qF '"claimed_outcome":"RAISES ArgumentError"' "$PROMPT_FILE" \
+  && grep -qF 'even though that expression actually returns 12.' "$PROMPT_FILE" \
+  && ok "prompt tells extraction to copy the claimed outcome, including a wrong finding" \
+  || fail "prompt is missing the claimed-outcome instruction or wrong-finding example"
+grep -qF '"claimed_outcome":"..."' "$PROMPT_FILE" \
+  && ! grep -qF 'finding_holds_if' "$PROMPT_FILE" \
+  && ok "prompt schema uses only claimed_outcome" \
+  || fail "prompt schema still uses the legacy outcome field"
 
 source "$MRA_DIR/lib/stack-versions.sh"
 
@@ -109,18 +121,17 @@ out=$(MRA_REVIEW_EXEC_VERIFY=1 run "$NONE")
 
 # A false runtime claim is removed, while the other finding and verdict remain.
 reset_logs; MODEL_CALLS=0; REPLY="$RUBY_CLAIM"
-out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT=0 run "$TWO" 2>"$TMP/drop.err")
+out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='RETURNS 0' run "$TWO" 2>"$TMP/drop.err")
 [[ "$(comment_count "$out")" == "1" && "$(jq -r '.comments[0].path' <<<"$out")" == "b.rb" ]] \
   && ok "a refuted runtime claim is dropped and other findings stay" \
   || fail "runtime refutation removed the wrong findings: $out"
 [[ "$(jq -r '.status' <<<"$out")" == "CHANGES_REQUESTED" && "$(jq -r '.summary' <<<"$out")" == "s" ]] \
   && ok "dropping a finding preserves refutation status and summary" \
   || fail "runtime verification rewrote status or summary"
-grep -qF 'index=0 ruby:2.5.7 expected=RAISES\ NoMethodError observed=0' "$TMP/drop.err" \
-  && ok "a dropped finding is logged with index, version, expectation, and observation" \
-  || fail "drop log lacks claim details: $(cat "$TMP/drop.err")"
+grep -qF 'index=0 image=ruby:2.5.7-slim claimed=RAISES\ NoMethodError observed=RETURNS\ 0 exit=0 outcome=dropped' "$TMP/drop.err" && ok "a dropped finding is logged with image, claim, and observation" || fail "drop log lacks claim details: $(cat "$TMP/drop.err")"
+[[ "$(grep -c '^exec verification index=' "$TMP/drop.err")" == "1" ]] && ok "each executed claim has exactly one audit log line" || fail "claim audit log count is wrong: $(cat "$TMP/drop.err")"
 
-# Verify the full command contract and that the snippet arrives on stdin.
+# Verify the full command contract and exact generated Ruby program on stdin.
 grep -Eq 'CALL<run><--rm><--name><mra-exec-verify-[0-9]+-[0-9]+-[0-9]+><--init><-i><--network><none><--read-only><--tmpfs></tmp:rw,size=16m><--memory><256m><--cpus><1><--pids-limit><64><--user><65534:65534><--cap-drop><ALL><--security-opt><no-new-privileges><ruby:2.5.7-slim><ruby><->' "$DOCKER_LOG" \
   && ok "Docker receives every required runtime sandbox flag" \
   || fail "Docker argv omitted a required sandbox flag: $(cat "$DOCKER_LOG")"
@@ -129,27 +140,61 @@ if grep -Eq '<(-v|--volume|--mount|-e|--env|--env-file|--privileged|--network=ho
 else
   ok "Docker argv contains no forbidden mount, environment, privilege, or network flags"
 fi
-grep -qF 'nil.to_i' "$DOCKER_STDIN" && ok "the extracted snippet is sent on stdin" \
-  || fail "Docker did not receive the snippet on stdin"
+printf 'begin\n\n__mra_v = (nil.to_i)\nputs "RETURNS #{__mra_v.inspect}"\nrescue Exception => __mra_e\nputs "RAISES #{__mra_e.class}"\nend\n' > "$TMP/expected-program"
+cmp -s "$DOCKER_STDIN" "$TMP/expected-program" && ok "Docker stdin exactly matches the fixed Ruby template" || fail "Docker stdin differs from the fixed Ruby template"
 
 # Matching output confirms the runtime claim and keeps the finding. Extraction
 # tolerates leading prose and a surrounding JSON fence.
 reset_logs; MODEL_CALLS=0
-REPLY=$'Here is the result:\n```json\n[{"index":0,"language":"ruby","snippet":"begin; puts nil.to_i; rescue => e; puts \\\"RAISES #{e.class}\\\"; end","finding_holds_if":"RAISES NoMethodError"}]\n```'
-out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='RAISES NoMethodError' run "$ONE" 2>/dev/null)
+REPLY=$'Here is the result:\n```json\n[{"index":0,"language":"ruby","expression":"nil.to_i","claimed_outcome":"RAISES NoMethodError"}]\n```'
+out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='RAISES NoMethodError' run "$ONE" 2>"$TMP/confirmed.err")
 [[ "$(comment_count "$out")" == "1" ]] && ok "a confirmed runtime claim is kept" \
   || fail "a confirmed claim was removed"
 
+grep -qF 'index=0 image=ruby:2.5.7-slim claimed=RAISES\ NoMethodError observed=RAISES\ NoMethodError exit=0 outcome=kept' "$TMP/confirmed.err" && ok "a confirmed claim is logged as kept" || fail "confirmed claim audit log is missing"
+
 # Both sides are trimmed and exception-message suffixes are ignored.
 reset_logs; MODEL_CALLS=0
-REPLY='[{"index":0,"language":"ruby","snippet":"puts 0","finding_holds_if":"  RAISES NoMethodError: expected message  "}]'
+REPLY='[{"index":0,"language":"ruby","expression":"nil.to_i","claimed_outcome":"  RAISES NoMethodError: expected message  "}]'
 out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='  RAISES NoMethodError: observed message  ' run "$ONE" 2>/dev/null)
 [[ "$(comment_count "$out")" == "1" ]] && ok "trimmed exception lines with different messages compare equal" \
   || fail "exception normalization removed a confirmed finding"
 
-# When all findings are removed, the verifier keeps the original verdict like refutation does.
+# Setup statements are inserted before the expression.
+reset_logs; MODEL_CALLS=0
+REPLY='[{"index":0,"language":"ruby","setup":"setup_value = nil","expression":"setup_value.to_i","claimed_outcome":"RETURNS 0"}]'
+out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='RETURNS 0' run "$ONE" 2>/dev/null)
+if [[ "$(comment_count "$out")" == "1" && "$(sed -n '2p' "$DOCKER_STDIN")" == "setup_value = nil" && "$(sed -n '3p' "$DOCKER_STDIN")" == "__mra_v = (setup_value.to_i)" ]]; then ok "setup is inserted before the expression"; else fail "setup or expression was misplaced in the generated Ruby program"; fi
+
+# Matching RETURNS output confirms the claim and keeps the finding.
+reset_logs; MODEL_CALLS=0
+REPLY='[{"index":0,"language":"ruby","expression":"nil.to_i","claimed_outcome":"RETURNS 0"}]'
+out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='RETURNS 0' run "$ONE" 2>/dev/null)
+[[ "$(comment_count "$out")" == "1" ]] && ok "matching RETURNS 0 output keeps the finding" || fail "matching RETURNS output removed the finding"
+
+# Older model replies using finding_holds_if remain parseable as a fallback.
+reset_logs; MODEL_CALLS=0
+REPLY='[{"index":0,"language":"ruby","expression":"nil.to_i","finding_holds_if":"RAISES NoMethodError"}]'
+out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='RETURNS 0' run "$ONE" 2>"$TMP/legacy.err")
+[[ "$(comment_count "$out")" == "0" ]] \
+  && grep -qF 'claimed=RAISES\ NoMethodError' "$TMP/legacy.err" \
+  && ok "legacy finding_holds_if replies use the claimed-outcome fallback" \
+  || fail "legacy outcome field was not accepted as a fallback"
+
+# Successful output without a recognized prefix keeps the finding.
 reset_logs; MODEL_CALLS=0; REPLY="$RUBY_CLAIM"
 out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT=0 run "$ONE" 2>/dev/null)
+[[ "$(comment_count "$out")" == "1" ]] && ok "unrecognized successful output keeps the finding" || fail "unrecognized output removed the finding"
+
+# Legacy free-form snippets are accepted only to be skipped.
+reset_logs; MODEL_CALLS=0
+REPLY='[{"index":0,"language":"ruby","snippet":"puts 0","claimed_outcome":"RETURNS 0"}]'
+out=$(MRA_REVIEW_EXEC_VERIFY=1 run "$ONE" 2>/dev/null)
+[[ "$(comment_count "$out")" == "1" && ! -s "$DOCKER_LOG" ]] && ok "snippet-only legacy claims are skipped without running Docker" || fail "a snippet-only legacy claim was executed or removed"
+
+# When all findings are removed, the verifier keeps the original verdict like refutation does.
+reset_logs; MODEL_CALLS=0; REPLY="$RUBY_CLAIM"
+out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='RETURNS 0' run "$ONE" 2>/dev/null)
 [[ "$(comment_count "$out")" == "0" && "$(jq -r '.status' <<<"$out")" == "CHANGES_REQUESTED" ]] \
   && ok "removing every finding leaves status unchanged like refutation" \
   || fail "empty result status differs from the refutation contract: $out"
@@ -268,12 +313,13 @@ grep -Eq 'CALL<rm><-f><mra-exec-verify-[0-9]+-[0-9]+-[0-9]+>' "$DOCKER_LOG" \
   || fail "fallback timeout did not issue docker rm: $(cat "$DOCKER_LOG")"
 
 # Runtime tags come from the project's local version markers.
-reset_logs; MODEL_CALLS=0; REPLY='[{"index":0,"language":"node","snippet":"console.log(process.version)","finding_holds_if":"v20.19.5"}]'
+reset_logs; MODEL_CALLS=0; REPLY="[{\"index\":0,\"language\":\"node\",\"expression\":\"process.version\",\"claimed_outcome\":\"RETURNS 'v20.19.5'\"}]"
 printf 'v20.19.5\n' > "$PROJECT/.nvmrc"
-out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT='v20.19.5' run "$ONE" 2>/dev/null)
+out=$(MRA_REVIEW_EXEC_VERIFY=1 DOCKER_OUTPUT="RETURNS 'v20.19.5'" run "$ONE" 2>/dev/null)
 grep -q '<node:20-slim><node><->' "$DOCKER_LOG" \
   && ok ".nvmrc v20.19.5 selects node:20-slim" \
   || fail "Node version tag was not detected: $(cat "$DOCKER_LOG")"
+grep -qF 'const __mra_v = (process.version);' "$DOCKER_STDIN" && ok "Node expressions are wrapped in parentheses" || fail "Node template did not wrap its expression"
 
 echo "---"; echo "Passed: $pass"; echo "Failed: $errors"
 exit $((errors > 0 ? 1 : 0))

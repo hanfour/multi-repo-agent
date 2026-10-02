@@ -9,19 +9,35 @@ _review_exec_verify_prompt() {
 
 For each finding below, decide whether its correctness DEPENDS on a language
 or standard-library behaviour that can be checked by a short, self-contained
-snippet. Use only Ruby or Node.js standard-library behaviour. The snippet must
+program. Use only Ruby or Node.js standard-library behaviour. The program must
 not use repository code, gems, npm packages, databases, networks, or files.
 
 Return a claim only when the finding is about that runtime behaviour. Do NOT
 return findings whose truth depends on application code, data, framework
 behaviour such as Rails or Vue, or anything else outside the runtime itself.
-For each claim, return the zero-based finding index, language, snippet, and
-the exact single line the snippet prints if the finding's claim is TRUE. The
-snippet must catch exceptions and print exactly RAISES <ExceptionClass> with
-no exception message instead of crashing. It must print exactly one line.
+For each claim, return the zero-based finding index, language, optional setup,
+expression, and claimed_outcome. setup contains statements that run before the
+expression and must not print. expression must be a single expression, with no
+statements or trailing semicolons. claimed_outcome is what the FINDING says
+will happen, copied from the finding's own claim: use RAISES <ExceptionClass>
+if the finding says the expression raises, crashes, or throws, or RETURNS
+<inspect form> if it says the expression returns a specific value. Do NOT
+evaluate whether the finding is right and do NOT write the behaviour you
+expect; the program will be run to find out. Only include a claim if the
+finding's assertion maps to exactly one of those two forms; otherwise leave it
+out. For example, {"index":0,"language":"ruby","setup":"",
+"expression":"nil.to_i","claimed_outcome":"RETURNS 0"} represents a finding
+that says the expression returns 0. {"index":1,"language":"node",
+"setup":"const value = null","expression":"value.toString()",
+"claimed_outcome":"RAISES TypeError"} represents a finding that says the
+expression throws TypeError. If a finding says Integer("12") raises
+ArgumentError, use {"index":2,"language":"ruby","setup":"",
+"expression":"Integer(\"12\")","claimed_outcome":"RAISES ArgumentError"},
+even though that expression actually returns 12.
 
 Reply with a strict JSON array only, with objects in this form:
-[{"index":0,"language":"ruby","snippet":"...","finding_holds_if":"..."}]
+[{"index":0,"language":"ruby","setup":"...","expression":"...","claimed_outcome":"..."}]
+setup may be omitted or empty.
 Return [] when no finding is checkable.
 
 ### Findings
@@ -84,11 +100,11 @@ _review_exec_verify_docker_call() {
 }
 
 _review_exec_verify_docker_run() {
-  local docker_bin="$1" image="$2" runtime="$3" snippet="$4" output_file="$5" container_name="$6"
+  local docker_bin="$1" image="$2" runtime="$3" program="$4" output_file="$5" container_name="$6"
   local input_file rc
 
   input_file=$(mktemp "${TMPDIR:-/tmp}/mra-review-exec-verify.input.XXXXXX") || return 125
-  printf '%s' "$snippet" > "$input_file" || { rm -f "$input_file" || true; return 125; }
+  printf '%s\n' "$program" > "$input_file" || { rm -f "$input_file" || true; return 125; }
   if _review_exec_verify_docker_call "$docker_bin" --stdin-file "$input_file" run --rm \
     --name "$container_name" --init -i --network none --read-only \
     --tmpfs /tmp:rw,size=16m --memory 256m --cpus 1 --pids-limit 64 \
@@ -113,6 +129,15 @@ _review_exec_verify_normalize_line() {
   value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//') || value=""
   if [[ "$value" == "RAISES "* ]]; then value=${value%%:*}; fi
   printf '%s' "$value"
+}
+
+_review_exec_verify_program() {
+  local language="$1" setup="$2" expression="$3"
+  if [[ "$language" == "ruby" ]]; then
+    printf 'begin\n%s\n__mra_v = (%s)\nputs "RETURNS #{__mra_v.inspect}"\nrescue Exception => __mra_e\nputs "RAISES #{__mra_e.class}"\nend\n' "$setup" "$expression"
+  else
+    printf 'try {\n%s\nconst __mra_v = (%s);\nconsole.log("RETURNS " + require("util").inspect(__mra_v));\n} catch (__mra_e) {\nconsole.log("RAISES " + ((__mra_e && __mra_e.constructor && __mra_e.constructor.name) || typeof __mra_e));\n}\n' "$setup" "$expression"
+  fi
 }
 
 # _review_exec_verify_findings <review-json> <project-dir> <provider> <model> <add-dirs> <turns> <system-prompt-file>
@@ -143,11 +168,23 @@ _review_exec_verify_findings() {
     if type == "array"
       and all(.[];
         type == "object"
-        and (keys == ["finding_holds_if", "index", "language", "snippet"])
         and (.index | type == "number" and floor == . and . >= 0 and . < $count)
         and (.language == "ruby" or .language == "node")
-        and (.snippet | type == "string" and length > 0)
-        and (.finding_holds_if | type == "string" and length > 0 and (index("\n") == null))
+        and (
+          (((has("claimed_outcome")) and (.claimed_outcome | type == "string" and length > 0 and (index("\n") == null)))
+            and (has("finding_holds_if") | not))
+          or
+          (((has("claimed_outcome") | not) and (.finding_holds_if | type == "string" and length > 0 and (index("\n") == null))))
+        )
+        and (
+          ((has("snippet") and (has("expression") | not))
+            and ((keys - ["claimed_outcome", "finding_holds_if"]) == ["index", "language", "snippet"]))
+          or
+          (has("expression")
+            and ((keys - ["setup", "claimed_outcome", "finding_holds_if"]) == ["expression", "index", "language"])
+            and (.expression | type == "string" and length > 0)
+            and ((has("setup") | not) or (.setup | type == "string")))
+        )
       )
       and ([.[].index] | length == (unique | length))
     then . else error("invalid claim array") end
@@ -156,13 +193,17 @@ _review_exec_verify_findings() {
 
   docker_bin=$(command -v docker 2>/dev/null) || { printf '%s' "$review_json"; return 0; }
 
-  local -a dropped_indices=() dropped_logs=()
-  local claim index language snippet expected normalized_expected version image runtime output_file observed normalized_observed rc container_name
+  local -a dropped_indices=()
+  local claim index language setup expression claimed normalized_claimed version image runtime output_file program observed normalized_observed rc container_name outcome
   while IFS= read -r claim; do
     index=$(printf '%s' "$claim" | jq -r '.index') || continue
     language=$(printf '%s' "$claim" | jq -r '.language') || continue
-    snippet=$(printf '%s' "$claim" | jq -r '.snippet') || continue
-    expected=$(printf '%s' "$claim" | jq -r '.finding_holds_if') || continue
+    if printf '%s' "$claim" | jq -e 'has("snippet") and (has("expression") | not)' >/dev/null 2>&1; then
+      continue
+    fi
+    setup=$(printf '%s' "$claim" | jq -r '.setup // ""') || continue
+    expression=$(printf '%s' "$claim" | jq -r '.expression') || continue
+    claimed=$(printf '%s' "$claim" | jq -r '.claimed_outcome // .finding_holds_if') || continue
     version=""
     if [[ "$language" == "ruby" ]]; then
       if declare -F stack_versions_ruby >/dev/null 2>&1; then
@@ -195,20 +236,24 @@ _review_exec_verify_findings() {
 
     output_file=$(mktemp "${TMPDIR:-/tmp}/mra-review-exec-verify.XXXXXX") || continue
     container_name="mra-exec-verify-$$-${RANDOM}-${RANDOM}"
-    if _review_exec_verify_docker_run "$docker_bin" "$image" "$runtime" "$snippet" "$output_file" "$container_name"; then
+    program=$(_review_exec_verify_program "$language" "$setup" "$expression") || { rm -f "$output_file" || true; continue; }
+    observed=""
+    outcome=kept
+    if _review_exec_verify_docker_run "$docker_bin" "$image" "$runtime" "$program" "$output_file" "$container_name"; then
       rc=0
     else
       rc=$?
     fi
     if [[ "$rc" -eq 0 ]]; then
       observed=$(tail -n 1 "$output_file" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//') || observed=""
-      normalized_expected=$(_review_exec_verify_normalize_line "$expected") || normalized_expected=""
+      normalized_claimed=$(_review_exec_verify_normalize_line "$claimed") || normalized_claimed=""
       normalized_observed=$(_review_exec_verify_normalize_line "$observed") || normalized_observed=""
-      if [[ -n "$observed" && "$normalized_observed" != "$normalized_expected" ]]; then
+      if [[ "$normalized_observed" != "$normalized_claimed" && ( "$normalized_observed" == "RAISES "* || "$normalized_observed" == "RETURNS "* ) && ( "$normalized_claimed" == "RAISES "* || "$normalized_claimed" == "RETURNS "* ) ]]; then
         dropped_indices+=("$index")
-        dropped_logs+=("index=$index $language:$version expected=$(printf '%q' "$expected") observed=$(printf '%q' "$observed")")
+        outcome=dropped
       fi
     fi
+    printf 'exec verification index=%s image=%s claimed=%q observed=%q exit=%s outcome=%s\n' "$index" "$image" "$claimed" "$observed" "$rc" "$outcome" >&2
     rm -f "$output_file" || true
   done < <(printf '%s\n' "$claims" | jq -c '.[]')
 
@@ -225,9 +270,5 @@ _review_exec_verify_findings() {
     .comments = [ .comments | to_entries[] | select(.key as $i | ($drop | index($i)) | not) | .value ]
   ' 2>/dev/null) || { printf '%s' "$review_json"; return 0; }
 
-  local dropped_log
-  for dropped_log in "${dropped_logs[@]}"; do
-    printf 'exec verification dropped finding %s\n' "$dropped_log" >&2
-  done
   printf '%s' "$filtered"
 }
