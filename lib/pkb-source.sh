@@ -18,8 +18,33 @@ _pkb_source_origin_head() {
   esac
 }
 
+_pkb_source_https_url() {
+  local url="$1" path owner repo
+  case "$url" in
+    git@github.com:*) path="${url#git@github.com:}" ;;
+    ssh://git@github.com/*) path="${url#ssh://git@github.com/}" ;;
+    https://github.com/*) printf '%s\n' "$url"; return 0 ;;
+    *) return 0 ;;
+  esac
+
+  case "$path" in
+    */*) ;;
+    *) return 0 ;;
+  esac
+  owner="${path%%/*}"
+  repo="${path#*/}"
+  [[ -n "$owner" && -n "$repo" && "$repo" != */* && "$path" != *\?* && "$path" != *\#* ]] || return 0
+  repo="${repo%.git}"
+  [[ -n "$repo" ]] || return 0
+  printf 'https://github.com/%s/%s.git\n' "$owner" "$repo"
+}
+
 _pkb_source_fetch() {
   local clone="$1" ref="$2" timeout_bin="" fetch_pid watchdog_pid rc git_ssh_command
+  local token="${MRA_GIT_FETCH_TOKEN:-}" origin_url="" https_url="" auth_header=""
+  local attempts=1 attempt fetch_mode fetch_url
+  local -a fetch_args
+  export -n MRA_GIT_FETCH_TOKEN
   git_ssh_command="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes"
   if command -v gtimeout >/dev/null 2>&1; then
     timeout_bin=$(command -v gtimeout)
@@ -27,44 +52,89 @@ _pkb_source_fetch() {
     timeout_bin=$(command -v timeout)
   fi
 
-  if [[ -n "$timeout_bin" ]]; then
-    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$git_ssh_command" \
-      "$timeout_bin" -k 1 59 git -C "$clone" fetch --quiet origin -- \
-      "+refs/heads/$ref:refs/remotes/origin/$ref"
-    return $?
+  source_fetch_via=none
+  if [[ -n "$token" ]]; then
+    origin_url=$(git -C "$clone" remote get-url origin 2>/dev/null || true)
+    https_url=$(_pkb_source_https_url "$origin_url")
+    if [[ -n "$https_url" ]]; then
+      attempts=2
+      auth_header="Authorization: Basic $(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+    fi
   fi
 
-  GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$git_ssh_command" \
-    git -C "$clone" fetch --quiet origin -- \
-    "+refs/heads/$ref:refs/remotes/origin/$ref" &
-  fetch_pid=$!
-  (
-    local sleep_pid=""
-    trap '[[ -n "$sleep_pid" ]] && kill "$sleep_pid" 2>/dev/null || true; exit 0' TERM INT
-    sleep 59 & sleep_pid=$!
-    wait "$sleep_pid" || exit 0
-    pkill -TERM -P "$fetch_pid" 2>/dev/null || true
-    pkill -KILL -P "$fetch_pid" 2>/dev/null || true
-    kill -TERM "$fetch_pid" 2>/dev/null || exit 0
-    kill -KILL "$fetch_pid" 2>/dev/null || true
-  ) &
-  watchdog_pid=$!
-  if wait "$fetch_pid"; then rc=0; else rc=$?; fi
-  kill -TERM "$watchdog_pid" 2>/dev/null || true
-  wait "$watchdog_pid" 2>/dev/null || true
+  for ((attempt = 0; attempt < attempts; attempt++)); do
+    if [[ -n "$https_url" && "$attempt" -eq 0 ]]; then
+      fetch_url="$https_url"
+      fetch_mode=https-token
+    else
+      fetch_url=origin
+      fetch_mode=origin
+    fi
+    fetch_args=(-C "$clone" fetch --quiet "$fetch_url" -- "+refs/heads/$ref:refs/remotes/origin/$ref")
+
+    if [[ -n "$timeout_bin" ]]; then
+      if [[ "$fetch_mode" == https-token ]]; then
+        if GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$git_ssh_command" \
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="$auth_header" \
+            "$timeout_bin" -k 1 59 git "${fetch_args[@]}"; then
+          source_fetch_via=https-token
+          return 0
+        else
+          rc=$?
+        fi
+      elif GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$git_ssh_command" \
+          "$timeout_bin" -k 1 59 git "${fetch_args[@]}"; then
+        source_fetch_via=origin
+        return 0
+      else
+        rc=$?
+      fi
+      continue
+    fi
+
+    if [[ "$fetch_mode" == https-token ]]; then
+      GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$git_ssh_command" \
+        GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+        GIT_CONFIG_VALUE_0="$auth_header" \
+        git "${fetch_args[@]}" &
+    else
+      GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$git_ssh_command" \
+        git "${fetch_args[@]}" &
+    fi
+    fetch_pid=$!
+    (
+      local sleep_pid=""
+      trap '[[ -n "$sleep_pid" ]] && kill "$sleep_pid" 2>/dev/null || true; exit 0' TERM INT
+      sleep 59 & sleep_pid=$!
+      wait "$sleep_pid" || exit 0
+      pkill -TERM -P "$fetch_pid" 2>/dev/null || true
+      pkill -KILL -P "$fetch_pid" 2>/dev/null || true
+      kill -TERM "$fetch_pid" 2>/dev/null || exit 0
+      kill -KILL "$fetch_pid" 2>/dev/null || true
+    ) &
+    watchdog_pid=$!
+    if wait "$fetch_pid"; then rc=0; else rc=$?; fi
+    kill -TERM "$watchdog_pid" 2>/dev/null || true
+    wait "$watchdog_pid" 2>/dev/null || true
+    if [[ "$rc" -eq 0 ]]; then
+      source_fetch_via="$fetch_mode"
+      return 0
+    fi
+  done
   return "$rc"
 }
 
 _pkb_source_record_meta() {
   local project_dir="$1" source_ref="$2" source_sha="$3" source_date="$4" fetched="$5"
-  local stale_docs="${6:-}"
+  local source_fetch_via="$6" stale_docs="${7:-}"
   local meta_file="$project_dir/.mra/pkb/meta.json" tmp
   [[ -f "$meta_file" ]] || return 0
   tmp=$(mktemp "$meta_file.XXXXXX") || return 1
   if [[ -n "$stale_docs" ]]; then
     if jq --arg ref "$source_ref" --arg sha "$source_sha" --arg date "$source_date" \
-        --argjson fetched "$fetched" --argjson stale "$stale_docs" \
-        '.sourceRef = $ref | .sourceSha = $sha | .sourceCommitDate = $date | .sourceFetched = $fetched | .sourceStaleDocs = $stale' \
+        --argjson fetched "$fetched" --arg via "$source_fetch_via" --argjson stale "$stale_docs" \
+        '.sourceRef = $ref | .sourceSha = $sha | .sourceCommitDate = $date | .sourceFetched = $fetched | .sourceFetchVia = $via | .sourceStaleDocs = $stale' \
         "$meta_file" > "$tmp"; then
       mv "$tmp" "$meta_file"
     else
@@ -72,8 +142,8 @@ _pkb_source_record_meta() {
       return 1
     fi
   elif jq --arg ref "$source_ref" --arg sha "$source_sha" --arg date "$source_date" \
-      --argjson fetched "$fetched" \
-      '.sourceRef = $ref | .sourceSha = $sha | .sourceCommitDate = $date | .sourceFetched = $fetched' \
+      --argjson fetched "$fetched" --arg via "$source_fetch_via" \
+      '.sourceRef = $ref | .sourceSha = $sha | .sourceCommitDate = $date | .sourceFetched = $fetched | .sourceFetchVia = $via' \
       "$meta_file" > "$tmp"; then
     mv "$tmp" "$meta_file"
   else
@@ -128,9 +198,10 @@ _pkb_source_cleanup() {
 
 # Args: workspace project clone model output_language explicit_ref_set explicit_ref
 pkb_generate_from_source() (
+  export -n MRA_GIT_FETCH_TOKEN
   local workspace="$1" project="$2" clone="$3" model="$4" output_language="$5"
   local explicit_ref_set="$6" explicit_ref="$7"
-  local source_ref="" source_sha="" source_date="" fetched=false ref_commit=""
+  local source_ref="" source_sha="" source_date="" fetched=false source_fetch_via=none ref_commit=""
   local branch="" short_sha="" lock="$clone/.mra/pkb.lock" temp_root="" worktree="" stage="" backup=""
 
   if [[ "$explicit_ref_set" == "true" ]]; then
@@ -190,7 +261,7 @@ pkb_generate_from_source() (
     if ! pkb_generate "$project" "$clone" "$model" "$output_language"; then
       return 1
     fi
-    _pkb_source_record_meta "$clone" "$source_ref" "$source_sha" "$source_date" false || {
+    _pkb_source_record_meta "$clone" "$source_ref" "$source_sha" "$source_date" false "$source_fetch_via" || {
       log_error "could not record PKB source metadata for $project" "analyze"
       return 1
     }
@@ -267,7 +338,7 @@ pkb_generate_from_source() (
     done < <(find "$worktree/.mra/pkb/modules" -type f -name '*.md' -print)
   fi
 
-  _pkb_source_record_meta "$worktree" "origin/$source_ref" "$source_sha" "$source_date" "$fetched" "$stale_docs_json" || {
+  _pkb_source_record_meta "$worktree" "origin/$source_ref" "$source_sha" "$source_date" "$fetched" "$source_fetch_via" "$stale_docs_json" || {
     log_error "could not record PKB source metadata for $project" "analyze"
     return 1
   }

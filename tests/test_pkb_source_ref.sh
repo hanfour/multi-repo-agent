@@ -10,9 +10,13 @@ TEST_HOME="$TEST_TMP/home"
 STUB_BIN="$TEST_TMP/bin"
 MRA_CONFIG_FILE="$TEST_TMP/config.json"
 AGENT_LOG="$TEST_TMP/agent-seen.log"
+GIT_FETCH_LOG="$TEST_TMP/git-fetch.log"
+REAL_GIT=$(command -v git)
 mkdir -p "$TEST_HOME" "$STUB_BIN"
 export HOME="$TEST_HOME"
+export MRA_TEST_REAL_GIT="$REAL_GIT" MRA_TEST_GIT_FETCH_LOG="$GIT_FETCH_LOG"
 printf '{"outputLanguage": null}\n' > "$MRA_CONFIG_FILE"
+source "$MRA_DIR/lib/pkb-source.sh"
 
 cat > "$STUB_BIN/claude" <<'STUB'
 #!/usr/bin/env bash
@@ -73,6 +77,27 @@ errors=0
 passes=0
 pass() { echo "PASS: $1"; passes=$((passes + 1)); }
 fail() { echo "FAIL: $1"; errors=$((errors + 1)); }
+
+assert_https_url() {
+  local label="$1" input="$2" expected="$3" actual
+  actual=$(_pkb_source_https_url "$input")
+  if [[ "$actual" == "$expected" ]]; then
+    pass "$label"
+  else
+    fail "$label: expected '$expected', got '$actual'"
+  fi
+}
+
+assert_https_url "SCP-style GitHub URL is normalized" \
+  'git@github.com:acme/legacy-api' 'https://github.com/acme/legacy-api.git'
+assert_https_url "SCP-style GitHub URL keeps the .git suffix" \
+  'git@github.com:acme/legacy-api.git' 'https://github.com/acme/legacy-api.git'
+assert_https_url "SSH GitHub URL is normalized" \
+  'ssh://git@github.com/acme/legacy-api' 'https://github.com/acme/legacy-api.git'
+assert_https_url "HTTPS GitHub URL passes through" \
+  'https://github.com/acme/legacy-api' 'https://github.com/acme/legacy-api'
+assert_https_url "non-GitHub host is rejected" 'git@gitlab.com:acme/legacy-api.git' ''
+assert_https_url "local path is rejected" '/tmp/legacy-api.git' ''
 
 setup_repo() {
   local label="$1" clone_mode="${2:-}" case_dir="$TEST_TMP/$1"
@@ -201,6 +226,120 @@ assert_source_meta() {
     fail "metadata has incorrect provenance for $expected_ref"
   fi
 }
+
+assert_source_fetch_via() {
+  local expected="$1"
+  if jq -e --arg via "$expected" '.sourceFetchVia == $via' \
+      "$CLONE/.mra/pkb/meta.json" >/dev/null; then
+    pass "metadata records source fetch via $expected"
+  else
+    fail "metadata has incorrect sourceFetchVia; expected $expected"
+  fi
+}
+
+cat > "$STUB_BIN/git" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+is_fetch=false
+for arg in "$@"; do
+  if [[ "$arg" == fetch ]]; then is_fetch=true; fi
+done
+if [[ "$is_fetch" == true ]]; then
+  {
+    printf 'FETCH\n'
+    printf 'ARG=%q\n' "$@"
+    printf 'CONFIG_COUNT=%s\n' "${GIT_CONFIG_COUNT:-}"
+    printf 'CONFIG_KEY_0=%s\n' "${GIT_CONFIG_KEY_0:-}"
+    printf 'CONFIG_VALUE_0=%s\n' "${GIT_CONFIG_VALUE_0:-}"
+    printf 'TOKEN_ENV_SET=%s\n' "${MRA_GIT_FETCH_TOKEN+x}"
+    printf 'END\n'
+  } >> "$MRA_TEST_GIT_FETCH_LOG"
+  if [[ "${MRA_TEST_GIT_FAIL_FETCH:-0}" == 1 ]]; then exit 1; fi
+fi
+exec "$MRA_TEST_REAL_GIT" "$@"
+STUB
+chmod +x "$STUB_BIN/git"
+
+# Exercise authenticated fetch against a local bare origin through Git's URL rewrite.
+setup_repo token_fetch
+token='mra-test-token-value'
+token_sha=$(git --git-dir="$ORIGIN" rev-parse refs/heads/development)
+token_date=$(git --git-dir="$ORIGIN" show -s --format=%cI refs/heads/development)
+git -C "$CLONE" remote set-url origin 'git@github.com:acme/legacy-api.git'
+git -C "$CLONE" config url."$ORIGIN".insteadOf 'https://github.com/acme/legacy-api.git'
+: > "$GIT_FETCH_LOG"
+if MRA_GIT_FETCH_TOKEN="$token" run_capture; then
+  pass "token-authenticated ref analyze succeeds"
+else
+  fail "token-authenticated ref analyze failed: $LAST_OUTPUT"
+fi
+assert_source_fetch_via https-token
+assert_source_meta origin/development "$token_sha" "$token_date" true
+if grep -Fqx 'ARG=https://github.com/acme/legacy-api.git' "$GIT_FETCH_LOG" && \
+    grep -Fqx 'ARG=+refs/heads/development:refs/remotes/origin/development' "$GIT_FETCH_LOG"; then
+  pass "token fetch uses the HTTPS URL and explicit refspec"
+else
+  fail "token fetch did not record the expected URL and refspec: $(<"$GIT_FETCH_LOG")"
+fi
+if grep -Fqx 'CONFIG_COUNT=1' "$GIT_FETCH_LOG" && \
+    grep -Fqx 'CONFIG_KEY_0=http.https://github.com/.extraheader' "$GIT_FETCH_LOG"; then
+  pass "token fetch scopes the GitHub extraheader config to the fetch"
+else
+  fail "token fetch did not record the expected extraheader config"
+fi
+encoded_header=$(sed -n 's/^CONFIG_VALUE_0=//p' "$GIT_FETCH_LOG" | head -1)
+encoded_header="${encoded_header#Authorization: Basic }"
+if decoded_header=$(printf '%s' "$encoded_header" | base64 -d 2>/dev/null); then
+  :
+else
+  decoded_header=$(printf '%s' "$encoded_header" | base64 -D 2>/dev/null || true)
+fi
+[[ "$decoded_header" == "x-access-token:$token" ]] \
+  && pass "extraheader decodes to the token authorization value" \
+  || fail "extraheader did not decode to the expected authorization value"
+if ! grep -F "$token" "$GIT_FETCH_LOG" >/dev/null && \
+    grep -Fqx 'TOKEN_ENV_SET=' "$GIT_FETCH_LOG"; then
+  pass "token is absent from fetch argv and child token environment"
+else
+  fail "token leaked into recorded fetch arguments or child environment"
+fi
+if jq -e --arg token "$token" '[.. | strings | select(contains($token))] | length == 0' \
+    "$CLONE/.mra/pkb/meta.json" >/dev/null && [[ "$LAST_OUTPUT" != *"$token"* ]]; then
+  pass "token is absent from metadata and command output"
+else
+  fail "token leaked into metadata or command output"
+fi
+[[ "$(git -C "$CLONE" remote get-url origin)" == 'git@github.com:acme/legacy-api.git' ]] \
+  && pass "token fetch leaves origin configuration unchanged" \
+  || fail "token fetch changed origin configuration"
+
+# Without a token, the existing origin-name fetch path is used.
+git -C "$CLONE" remote set-url origin "$ORIGIN"
+: > "$GIT_FETCH_LOG"
+if run_capture; then pass "token-unset origin ref analyze succeeds"; else fail "token-unset analyze failed: $LAST_OUTPUT"; fi
+assert_source_fetch_via origin
+if grep -Fqx 'ARG=origin' "$GIT_FETCH_LOG" && grep -Fqx 'CONFIG_COUNT=' "$GIT_FETCH_LOG"; then
+  pass "token-unset fetch uses origin without token config"
+else
+  fail "token-unset fetch did not use the existing origin path: $(<"$GIT_FETCH_LOG")"
+fi
+
+# Failed HTTPS and origin attempts both use the cached remote ref, without networking.
+git -C "$CLONE" remote set-url origin 'git@github.com:acme/legacy-api.git'
+: > "$GIT_FETCH_LOG"
+if MRA_TEST_GIT_FAIL_FETCH=1 MRA_GIT_FETCH_TOKEN="$token" run_capture; then
+  pass "failed token and origin fetches use the cached ref"
+else
+  fail "failed-fetch fallback analyze failed: $LAST_OUTPUT"
+fi
+assert_source_fetch_via none
+fetch_count=$(grep -c '^FETCH$' "$GIT_FETCH_LOG" || true)
+if [[ "$fetch_count" -eq 2 ]] && grep -Fqx 'ARG=https://github.com/acme/legacy-api.git' "$GIT_FETCH_LOG" && \
+    grep -Fqx 'ARG=origin' "$GIT_FETCH_LOG"; then
+  pass "failed token fetch is followed by one origin fetch"
+else
+  fail "expected HTTPS then origin fetch attempts, found $fetch_count: $(<"$GIT_FETCH_LOG")"
+fi
 
 setup_repo primary
 git -C "$CLONE" stash push -u -m 'test baseline stash' >/dev/null
